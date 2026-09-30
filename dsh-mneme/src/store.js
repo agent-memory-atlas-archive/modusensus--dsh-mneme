@@ -2475,7 +2475,7 @@ export function createStore(path) {
     const rows = db.prepare(
       `SELECT from_entity, to_entity FROM entity_relations
        WHERE from_entity IN (${placeholders}) OR to_entity IN (${placeholders})`
-    ).all(...ids);
+    ).all(...ids, ...ids);
     for (const r of rows) {
       addNeighbor(out, r.from_entity, r.to_entity, ids);
       addNeighbor(out, r.to_entity, r.from_entity, ids);

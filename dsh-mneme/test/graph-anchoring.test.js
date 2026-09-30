@@ -130,3 +130,56 @@ test("the anchoring pure module is self-checked", () => {
   // 模块自带 _selfCheck 已在模块加载时断言；这里再锚定导出契约，防重构断链。
   assert.ok(typeof HOP_QUOTA[1] === "number" && HOP_QUOTA[1] > HOP_QUOTA[2]);
 });
+
+// ---- #24 复审回归（review findings 逐条落锁）--------------------------------
+
+// 关档逐字节复用 #219 单跳轴：graphSeedCap 只在锚定开启后生效。种子裁剪若漏进
+// 关档路径，cap=1 时第二个命中实体整支挂联记忆都会消失——这条专门钉死它。
+test("anchoring off: graphSeedCap does not cap the legacy single-hop axis", async () => {
+  const { store, service } = makeService({ entityRecallEnabled: true, graphSeedCap: 1 });
+  const memA = putMemory(store, service, { title: "迁移记录", content: "主库切换完成" });
+  const memB = putMemory(store, service, { title: "池化记录", content: "连接池调优" });
+  linkAttr(store, service, { entityName: "Alpha", memory: memA, key: "k", value: "v" });
+  linkAttr(store, service, { entityName: "Beta", memory: memB, key: "k", value: "v" });
+
+  const rows = await service.searchMemories("Alpha Beta", { mode: "auto" });
+  const ids = rows.map((r) => r.id);
+  assert.ok(ids.includes(memA.id), "first seed-linked memory present");
+  assert.ok(ids.includes(memB.id), "second seed-linked memory must survive when anchoring is off");
+});
+
+// 级联要真走出 >1 跳：邻接若只带种子那一层，2-hop 实体挂联的记忆根本不进池。
+// 本地图上 2-hop 记忆只经 AnchorC 可达（两条关系行的 memory_id 都留空，堵死
+// 「1-hop 关系行旁路」），所以这条能红着抓回归。
+test("cascade reaches 2 hops (lazy per-node adjacency, deeper hop weighted lower)", async () => {
+  const { store, service } = makeService({
+    entityRecallEnabled: true, graphAnchoringEnabled: true, graphCascadeDepth: 2
+  });
+  const seedMem = putMemory(store, service, { title: "根服务", content: "入口记录" });
+  const hop2Mem = putMemory(store, service, { title: "远环", content: "间接可达" });
+  const a = linkAttr(store, service, { entityName: "AnchorA", memory: seedMem, key: "k", value: "v" });
+  const c = linkAttr(store, service, { entityName: "AnchorC", memory: hop2Mem, key: "k", value: "v" });
+  const b = store.createEntity({ name: "AnchorB", type: "technology" });
+  store.saveRelation({ from_entity: a.id, to_entity: b.id, relation_type: "x" });
+  store.saveRelation({ from_entity: b.id, to_entity: c.id, relation_type: "x" });
+
+  const rows = await service.searchMemories("AnchorA", { mode: "hybrid" });
+  const ids = rows.map((r) => r.id);
+  assert.ok(ids.includes(seedMem.id), "seed memory present");
+  assert.ok(ids.includes(hop2Mem.id), "2-hop linked memory reached via cascade");
+  const h2 = rows.find((r) => r.id === hop2Mem.id);
+  assert.ok(Math.abs(h2.score - 0.3 * HOP_QUOTA[2]) < 1e-9, `2-hop keeps hop-quota weighting, got ${h2.score}`);
+  store.close();
+});
+
+// 邻接查询两个 IN 组都要绑定：关系方向写成 X→种子 时，种子同样应看到 X 是它的
+// 邻居（只绑第一组时这类行整批消失，级联方向性丢失）。
+test("getEntityNeighbors sees both directions of a relation", () => {
+  const store = createStore(":memory:");
+  const a = store.createEntity({ name: "Seed", type: "technology" });
+  const b = store.createEntity({ name: "Other", type: "technology" });
+  store.saveRelation({ from_entity: b.id, to_entity: a.id, relation_type: "x" });
+  const nb = store.getEntityNeighbors([a.id]);
+  assert.deepEqual(nb.get(a.id), [b.id], "seed must see the reverse-direction neighbor");
+  store.close();
+});

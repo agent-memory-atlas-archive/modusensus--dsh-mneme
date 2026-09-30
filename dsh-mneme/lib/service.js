@@ -468,12 +468,27 @@ export function createService({ store, mirror, config, onWrite, logger, document
     try {
       const entities = store.findEntitiesMentionedIn(q);
       if (!entities.length) return [];
+      // 关闭锚定级联=逐字节复用 #219 单跳轴：种子裁剪/重排/截断全是 #24 新增的
+      // 行为，默认关时一条都不许漏进旧路径（graphSeedCap 也只在开启后生效——
+      // 无论 cap 调多小，关档时命中实体仍全量挂联）。
+      if (config?.graphAnchoringEnabled !== true) {
+        const linked = store.getLinkedMemoryIds(entities.map((e) => e.id));
+        if (!linked.size) return [];
+        const hits = [];
+        for (const [id, tier] of linked) {
+          const row = store.getById(id);
+          if (!row || row.archived || row.forgotten) continue;
+          hits.push({ ...row, score: tier === "attr" ? 1.0 : 0.9, source: "entity" });
+          if (hits.length >= limit * 2) break;
+        }
+        return hits;
+      }
       // 锚定种子（精确名布尔通路——命名实体逻辑上是离散匹配，不参与 min-max）。
       const exact = normalizePath(entities.map((e) => e.id), { path: "exact" });
       const seeds = anchorSeeds({ paths: [exact], cap: config?.graphSeedCap ?? 12 });
       if (!seeds.length) return [];
       // 0-hop 直达：挂联记忆按 tier 定分（attr 1.0 / relation 0.9）——与 #219
-      // 单跳轴逐字节一致。MAX 语义：同一条记忆被多实体挂联时保留最高分。
+      // 单跳轴同分。MAX 语义：同一条记忆被多实体挂联时保留最高分。
       const scored = new Map();
       const push = (memId, score) => {
         if (scored.has(memId) && scored.get(memId) >= score) return;
@@ -485,28 +500,32 @@ export function createService({ store, mirror, config, onWrite, logger, document
       for (const [memId, tier] of seedLinked) {
         push(memId, tier === "attr" ? 1.0 : 0.9);
       }
-      // 级联：默认关（graphAnchoringEnabled 未开）时直接收尾，行为与 #219 逐字节一致；
-      // 开启后才沿 entity_relations 走 BFS，邻居挂联的记忆以 hop 配额权重补位——
+      // 级联：沿 entity_relations 走 BFS，邻居挂联的记忆以 hop 配额权重补位——
       // 不覆盖种子直达分（MAX 语义保证），只填「种子里没有但邻居可达」的槽。
-      if (config?.graphAnchoringEnabled === true) {
-        const seedIds = seeds.map((s) => s.id);
-        const adjacency = store.getEntityNeighbors(seedIds);
-        const depths = cascadeDepths({
-          seeds,
-          adjacencyOf: (id) => adjacency.get(id) ?? [],
-          maxDepth: config?.graphCascadeDepth ?? 2
-        });
-        let neighborsSeen = 0;
-        const neighborCap = (config?.graphSeedCap ?? 12) * HOP_QUOTA[1]; // 1-hop 配额即为邻居总量上界
-        for (const [nid, hop] of depths) {
-          if (hop < 1) continue;
-          if (neighborsSeen >= Math.max(1, Math.floor(neighborCap))) break;
-          neighborsSeen++;
-          const neighborLinked = store.getLinkedMemoryIds([nid]);
-          for (const [memId, tier] of neighborLinked) {
-            const tierW = tier === "attr" ? 1.0 : 0.9;
-            push(memId, HOP_QUOTA[Math.min(hop, 3)] * tierW);
-          }
+      const seedIds = seeds.map((s) => s.id);
+      const adjacency = store.getEntityNeighbors(seedIds);
+      const depths = cascadeDepths({
+        seeds,
+        // 逐节点懒取邻居：初次查询只带种子那一层的邻接，BFS 走到 1-hop 节点时
+        // 必须按需再拉一层，否则 >1 跳永远拿到空邻居、graphCascadeDepth≥2 形同
+        // 虚设。节点数随图度数增长，热路径上以 graphCascadeDepth≤3 为天然上界，
+        // 真遇到大图再考虑查询配额。
+        adjacencyOf: (id) => {
+          if (!adjacency.has(id)) adjacency.set(id, store.getEntityNeighbors([id]).get(id) ?? []);
+          return adjacency.get(id);
+        },
+        maxDepth: config?.graphCascadeDepth ?? 2
+      });
+      let neighborsSeen = 0;
+      const neighborCap = (config?.graphSeedCap ?? 12) * HOP_QUOTA[1]; // 1-hop 配额即为邻居总量上界
+      for (const [nid, hop] of depths) {
+        if (hop < 1) continue;
+        if (neighborsSeen >= Math.max(1, Math.floor(neighborCap))) break;
+        neighborsSeen++;
+        const neighborLinked = store.getLinkedMemoryIds([nid]);
+        for (const [memId, tier] of neighborLinked) {
+          const tierW = tier === "attr" ? 1.0 : 0.9;
+          push(memId, HOP_QUOTA[Math.min(hop, 3)] * tierW);
         }
       }
       const hits = [...scored.entries()]

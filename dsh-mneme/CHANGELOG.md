@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+## 🆕 新增
+
+- **图谱锚定层 Activation Anchoring（issue #24 块1）**：在 `entityRecallEnabled` 的「查询命中实体 → 挂联记忆进融合池」之上再加一层级联——命中实体作锚定种子（`graphSeedCap` 封顶，默认 12），沿 `entity_relations` 按 `graphCascadeDepth`（默认 2）向邻居扩散，邻居挂联的记忆以跳数配额权重（1:2:3-hop = 0.5/0.3/0.2）补位进池，恒低于种子直达分（attr 1.0 / relation 0.9）。级联 BFS 逐层懒取邻居（>1 跳真正可达），邻接查询双向绑定（方向写反的关系行不丢）。默认关=检索行为与 #219 单跳轴逐字节一致（关档连种子裁剪都不生效）。新增三键 `graphAnchoringEnabled`/`graphSeedCap`/`graphCascadeDepth` 注册进 feature_flags 白名单，面板可启停；lightMode 强制关。
+
 ## [0.8.11] - 2026-09-30
 
 ## 🐛 修复
