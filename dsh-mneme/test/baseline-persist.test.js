@@ -181,6 +181,59 @@ test("issue#89: legacy dream_runs gains the baseline columns on open (idempotent
   }
 });
 
+test("issue#89: an unusable seed is treated as no baseline at all", () => {
+  const store = createStore(":memory:");
+  const service = createService({ store, mirror: null, config: {} });
+  seedMemories(service, 12);
+  const opts = { onRun: async () => ({ ok: false }), thresholdCount: 10, thresholdChars: 5000, delayMs: 0, logger: { warn: () => {} } };
+  // 库里的持久化值可能是老库的 NULL、或手工改坏的库：半个基线（只有条数）若被当成
+  // 「12 条 0 字符」，阈值会按 0 字符起算——比不认还糟。非法种子一律退回零基线。
+  for (const bad of [{ count: 12 }, { chars: 2000 }, { count: -1, chars: 2000 }, { count: 1.5, chars: 10 }, "nope"]) {
+    const sched = createDreamScheduler({ ...opts, baselineSeed: bad });
+    assert.equal(sched.maybeSchedule(service), true, `unusable seed ${JSON.stringify(bad)} falls back to the zero baseline`);
+    sched.dispose();
+  }
+  store.close();
+});
+
+test("issue#89: a failing baseline read never breaks the run nor fakes a baseline", async () => {
+  const store = createStore(":memory:");
+  const service = createService({ store, mirror: null, config: {} });
+  const a = service.saveWithDedupe({ type: "project", title: "旧1", content: "第一段内容" });
+  // finish 阶段读库失败（关库 / IO 故障）：必须不反噬巩固本身（审计行照写），也不
+  // 写一个猜出来的基线（落 NULL → 下次重启退回零基线，而不是拿假基线抬高阈值）。
+  // 故障点在「总览出文本之后」才武装：runDream 前面还要读两次库（候选集与总览输入），
+  // 过早抛错会把整轮打成 failed，验的就不是收尾取证这条路了。
+  const realAll = service.all.bind(service);
+  let armed = false;
+  let calls = 0;
+  service.all = () => {
+    if (armed) throw new Error("store closed");
+    return realAll();
+  };
+  const ctx = {
+    llm: {
+      stream: async function* () {
+        if (calls++ === 0) {
+          yield { type: "text-delta", text: JSON.stringify([{ action: "keep", ids: [a.memory.id] }]) };
+        } else {
+          armed = true;
+          yield { type: "text-delta", text: "记忆库总览摘要文本" };
+        }
+        yield { type: "finish", reason: { kind: "ok" } };
+      }
+    },
+    logger: { warn: () => {} }
+  };
+  const dream = createDreamScheduler({ thresholdCount: 1, thresholdChars: 0, delayMs: 0, logger: { warn: () => {} } });
+  const ok = await dream.runDream(ctx, service, { dreamProvider: "deepseek", dreamModel: "deepseek-chat" });
+  assert.equal(ok.ok, true, "the run still completes when the baseline read fails");
+  assert.equal(ok.baseline, undefined, "no made-up baseline is reported");
+  assert.ok(store.listDreamRuns({ limit: 1 })[0], "the audit row is still written");
+  assert.equal(store.listDreamRuns({ limit: 1 })[0].store_count, undefined, "the audit row carries no baseline");
+  store.close();
+});
+
 // --- CodeRabbit 在 #291 上的同类要求：index.js 的 seed 是单行无分支接线，仓库没有
 // 插件级挂载 harness（apply 需要完整宿主 ctx），改为源码级锁——删掉该注入行即红。
 // import 用 URL 相对本文件解析，不依赖测试进程 CWD。
