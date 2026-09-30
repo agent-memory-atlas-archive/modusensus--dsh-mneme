@@ -6,6 +6,7 @@ name: CI
 # 2. 新增 src/↔lib/ 一致性守门（scripts/check-sync.js，v0.7.9 引入的发布前校验前置到 CI）。
 # 3. Codecov 只在 ubuntu+node24 一个分片跑一次（覆盖率无需每个组合都传）。
 # 4. node_modules 缓存（cache-dependency-path 指向子目录的 lockfile）。
+# 5. 宿主版本兼容腿 test-host-legacy：peer 声明的 0.1.x 两段各真跑一遍（见该作业注释）。
 # ⚠️ 需要 package.json 配合一处小改（跨平台通配符）：
 #    dsh-mneme/package.json 的 "test": "node --test test/*.test.js" 在 Windows 的 cmd 下
 #    不展开 glob。建议改为 "test": "node --test test/"（目录模式，全平台等价），
@@ -63,3 +64,87 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: dsh-mneme/coverage/lcov.info
           fail_ci_if_error: false
+
+  # ── 宿主版本兼容腿：0.1.x 老内核 ───────────────────────────────────────────
+  # peerDependencies 声明覆盖三段（0.1.0-rc.6+ / 0.1.5-rc.0+ / 0.2.0-rc.0+），而
+  # test 腿只用 lockfile 里那一版（当前 0.2 线）——「声明支持却从没验证」正是 #344
+  # 的由来。这条腿把 0.1.x 的两段也真跑一遍。
+  #
+  # 为什么另开作业、而不是给 test 加一个 matrix 维度：test 的四个作业名
+  # （test (os, node)）是分支保护的 required status checks，加维度会让名字变成
+  # test (os, node, host)、原名消失 → 所有 PR 立刻被卡住无法合并。另开作业完全不
+  # 碰那四个必需检查；若要让这条腿也阻断合并，去 Settings → Branches 把
+  # test-host-legacy (*) 加进 required 即可。
+  #
+  # 为什么只跑 ubuntu + node 24 单分片：这条腿问的是「宿主 API 面是否还兼容」，
+  # 与 OS / Node 无关（那些由 test 腿的四个分片覆盖），单分片足够且最省。
+  test-host-legacy:
+    strategy:
+      fail-fast: false
+      matrix:
+        # 两个值分别落在 peer 范围的两段上：
+        #   0.1.0-rc.8 —— #344 之前本仓库实际开发/测试的那一版（0.1.0 段）
+        #   0.1.7-rc.2 —— 0.1 线最新（老桌面端 2.0.14 内置的 0.1.7-rc.1 属同一段）
+        host: ["0.1.0-rc.8", "0.1.7-rc.2"]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dsh-mneme
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: dsh-mneme/package-lock.json
+
+      # 换掉那四个宿主 devDeps 再重新解析。必须删掉 lockfile：带着 0.2 的锁降级
+      # 会被 peer 链拦死（dsh-tools 的 peer 要求同版本的 dsh-agent，而锁里是 0.2.x）。
+      # 因此这条腿的树是「全新解析」的——它只回答宿主 API 面是否兼容，不回答依赖
+      # 版本一致性（那由 test 腿的 npm ci 负责）。解析与安装分两步：解析失败
+      # （网络/元数据）与下载失败能区分开，且安装结果严格等于解析出的锁。
+      - name: Pin host packages to ${{ matrix.host }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const names = [
+              "@deepseek-ai/dsh-host-webserver",
+              "@deepseek-ai/dsh-llm",
+              "@deepseek-ai/dsh-system-prompt",
+              "@deepseek-ai/dsh-tools"
+            ];
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            for (const name of names) pkg.devDependencies[name] = process.argv[1];
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          ' "${{ matrix.host }}"
+          rm -f package-lock.json
+          npm install --package-lock-only
+          npm ci
+
+      # 断言目标版本真的装上了。解析漂移要在这里响亮地失败，而不是让后面的用例
+      # 给出一个「其实测的是别的版本」的假绿。
+      - name: Assert the legacy host actually landed
+        run: |
+          node -e '
+            const fs = require("fs");
+            const want = process.argv[1];
+            const names = ["dsh-host-webserver", "dsh-llm", "dsh-system-prompt", "dsh-tools"];
+            let bad = 0;
+            for (const name of names) {
+              const path = "node_modules/@deepseek-ai/" + name + "/package.json";
+              const got = JSON.parse(fs.readFileSync(path, "utf8")).version;
+              if (got !== want) { console.error("✖ " + name + " 装成了 " + got + "，期望 " + want); bad = 1; }
+            }
+            if (bad) process.exit(1);
+            console.log("✓ 四个宿主包都是 " + want);
+          ' "${{ matrix.host }}"
+
+      # 全新解析会把运行时闭包也换成当前最新，而 runtime-manifest.json 是从 lockfile
+      # 生成的 → 不重建的话「清单与 lockfile 一致」那条用例必红，且与本腿要问的问题
+      # 无关。清单一致性由 test 腿的 npm ci 负责。
+      - name: Rebuild runtime manifest for the synthetic tree
+        run: node scripts/build-runtime-manifest.mjs
+
+      - name: Run full tests
+        run: npm test
