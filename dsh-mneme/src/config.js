@@ -463,6 +463,14 @@ export const Config = z.object({
   // 检索融合池（与 BM25 同级的确认/回填信号）。默认关=检索行为与 #219 前
   // 逐字节一致；走 feature_flags 面板可启停，lightMode 强制关闭。
   entityRecallEnabled: z.boolean().default(false),
+  // 关联提示防幻觉（issue #24 块3）：图召回的候选（查询命中实体的挂联记忆）
+  // 进注入时默认只参与排序、不改变注入块构成（graphInjectHint=false 保守档）；
+  // 开启后注入文本里以固定句式「[检索线索] …」标出，引导语说明这是链路信息
+  // 非事实断言，防 LLM 单次消费把桥接召回当有依据的事实回头扩散。
+  graphInjectHint: z.boolean().default(false),
+  // 图召回候选在注入块里的独立预算（条数上限）。与 pin/document 预算同构：
+  // 不占 maxInjectedItems 名额、只约束「桥接线索」这类低信任信息的常驻占比。
+  graphInjectBudget: z.natural().min(0).max(5).default(1),
 
   // --- sleep mode: idle-triggered deep maintenance (v0.4.0) ---------------
   // Opt-in, off by default. Unlike autoDream (threshold-triggered, lightweight)
@@ -712,6 +720,8 @@ const LIGHT_MODE_OFF = [
   "bm25SearchEnabled",
   // 轻量模式不开图召回轴（#219，依赖实体抽取产出；抽取本身已被关掉）。
   "entityRecallEnabled",
+  // 轻量模式不开关联提示标注（#24 块3，常驻注入文本多一段提示成本）。
+  "graphInjectHint",
   // 轻量模式不开叙述条（额外 LLM 调用；#164 对齐，opt-in）。
   "dreamNarrativeEnabled",
   // 轻量模式不开 document 指针行（#230，opt-in：注册/注入/检索增强全随闸）。

@@ -274,9 +274,15 @@ export function createInjector(ctx, service, settings, config) {
     // 日志抢同一份预算后被降级」正是本议题要修的结构缺陷。单条仍有硬顶
     // （PINNED_CONTENT_MAX），超出照旧带截断提示，不静默。
     const pinnedCount = Math.max(0, Math.min(candidates.length, pinnedStats?.shown ?? 0));
+    // #24 块3：图召回线索行（graphHint）——渲染前数出数量，若 >0 在块头插入
+    // 一段固定引导语（链路信息非事实断言，防幻觉扩散）。线索行自身按
+    // graphHintLine 渲染（线索/ 前缀区别于普通记忆行）。
+    const graphCount = candidates.filter((m) => m.graphHint === true).length;
+    let graphSeen = 0;
     for (let i = 0; i < candidates.length; i++) {
       const m = candidates[i];
       const pinned = i < pinnedCount;
+      if (m.graphHint === true) graphSeen++;
       // Epistemic trust (v0.4.5): when enabled, measured observations are
       // flagged so the agent can weigh them above guesses/opinions.
       const verified = config.trustEpistemicWeighting === true && m.epistemic_status === "observation"
@@ -284,7 +290,13 @@ export function createInjector(ctx, service, settings, config) {
         : "";
       const title = STR.entryTitle[language](m.title, m.importance);
       const content = injectMemory(m, pinned ? PINNED_CONTENT_MAX : maxContent);
-      const full = STR.entryLine[language](m.type, verified, title, content);
+      const full = m.graphHint === true
+        ? STR.graphHintLine[language](m.type, title, content)
+        : STR.entryLine[language](m.type, verified, title, content);
+      // 线索行引导语插在第一个线索行之前（保持块头语义：先声明「这些不是事实」）。
+      if (m.graphHint === true && graphSeen === 1) {
+        lines.push(STR.graphHintHeader[language]);
+      }
       if (pinned) {
         // pin 不扣块预算（上面那条设计注释的落地）：pin 一条就够击穿 MAX_BLOCK
         // （PINNED_CONTENT_MAX 2000 > MAX_BLOCK 1500），照扣会把 budget 压成负数，
