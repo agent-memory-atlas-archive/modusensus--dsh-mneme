@@ -464,6 +464,16 @@ export const Config = z.object({
   // 逐字节一致；走 feature_flags 面板可启停，lightMode 强制关闭。
   entityRecallEnabled: z.boolean().default(false),
 
+  // --- 图谱锚定层（issue #24 · 块1 Activation Anchoring）-------------------
+  // entityRecallEnabled 之上再开一层：以查询命中的实体为种子，沿实体关系表
+  // 级联扩散（默认深度 2），把「邻居实体挂联的记忆」也带进融合池。种子集
+  // 上限 graphSeedCap、级联深度 graphCascadeDepth 一并下发到 anchorSeeds /
+  // cascadeDepths（见 src/graph/anchoring.js）。默认关=行为与 #219 单跳轴
+  // 逐字节一致；走 feature_flags 面板可启停，lightMode 强制关闭。
+  graphAnchoringEnabled: z.boolean().default(false),
+  graphSeedCap: z.natural().min(1).max(30).default(12),
+  graphCascadeDepth: z.natural().min(1).max(3).default(2),
+
   // --- sleep mode: idle-triggered deep maintenance (v0.4.0) ---------------
   // Opt-in, off by default. Unlike autoDream (threshold-triggered, lightweight)
   // sleep fires when the store has been quiet for sleepIdleMinutes and deep-
@@ -712,6 +722,8 @@ const LIGHT_MODE_OFF = [
   "bm25SearchEnabled",
   // 轻量模式不开图召回轴（#219，依赖实体抽取产出；抽取本身已被关掉）。
   "entityRecallEnabled",
+  // 轻量模式不开图谱锚定层级联（#24，依赖实体抽取 + 关系表，抽取已关则无边可扩）。
+  "graphAnchoringEnabled",
   // 轻量模式不开叙述条（额外 LLM 调用；#164 对齐，opt-in）。
   "dreamNarrativeEnabled",
   // 轻量模式不开 document 指针行（#230，opt-in：注册/注入/检索增强全随闸）。
