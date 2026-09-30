@@ -52,6 +52,26 @@ function totalChars(memories) {
   return memories.reduce((sum, m) => sum + (m.title?.length ?? 0) + (m.content?.length ?? 0), 0);
 }
 
+// 阈值口径的唯一实现：活跃记忆（未归档、非 summary/document）的条数与正文字符数。
+// 触发判定（shouldTrigger）与「成功轮把基线落库」（runDream 的 finish）都走这里——
+// 两处若各写一份过滤条件，重启播种读到的基线就会和运行期判定口径漂移（一个把
+// document 算进去、一个不算），阈值随之失真，且这种漂移只会在重启后才显形。
+function activeStoreSize(service) {
+  const memories = service.all().filter((m) => !m.archived && m.type !== "summary" && m.type !== "document");
+  return { count: memories.length, chars: totalChars(memories) };
+}
+
+// 基线的唯一合法形状：两个非负整数；其余（缺字段、负数、非整数、整个对象缺失）
+// 一律视为「没有基线」→ 调用方退回 {0,0}。播种值来自持久化列，可能是老库的 NULL
+// 或手工改坏的库，判定必须比调用点更严格，而不是相信数据库里存的一定合法。
+function toBaseline(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const count = Number.isInteger(raw.count) && raw.count >= 0 ? raw.count : null;
+  const chars = Number.isInteger(raw.chars) && raw.chars >= 0 ? raw.chars : null;
+  if (count === null || chars === null) return null;
+  return { count, chars };
+}
+
 // ---------------------------------------------------------------- audit
 
 /**
@@ -760,7 +780,7 @@ export async function maintainIndexAfterDream(decisions, service, semantic) {
 // 用户配得比这更大的 dreamMinIntervalMinutes 基数压小（见 effectiveMinIntervalMs）。
 const FAILURE_BACKOFF_CAP_MS = 30 * 60 * 1000;
 
-export function createDreamScheduler({ onRun, thresholdCount = 10, thresholdChars = 5000, delayMs = 2000, minIntervalMs = 0, failureBackoff = false, logger, semantic = null, lastRunAtSeed = 0, peakHours = "", peakMaxDeferMinutes = 120, auditPeakSkip = null, now = () => Date.now(), setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout }) {
+export function createDreamScheduler({ onRun, thresholdCount = 10, thresholdChars = 5000, delayMs = 2000, minIntervalMs = 0, failureBackoff = false, logger, semantic = null, lastRunAtSeed = 0, baselineSeed = null, peakHours = "", peakMaxDeferMinutes = 120, auditPeakSkip = null, now = () => Date.now(), setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout }) {
   let pendingTimer = null;
   // Issue #239（第 4 项）镜像到巩固：高峰顺延定时器。与 pendingTimer 分开——两者
   // 语义不同（一个是「马上要跑」，一个是「等出高峰再跑」），合成一个变量会让
@@ -768,7 +788,13 @@ export function createDreamScheduler({ onRun, thresholdCount = 10, thresholdChar
   let deferTimer = null;
   let running = false;
   let disposed = false;
-  let baseline = { count: 0, chars: 0 };
+  // Issue #89（基线半边）：阈值基线跨重启持久化。baselineSeed 由调用方从
+  // dream_runs 读上次成功轮结束时的库规模（store.lastDreamBaseline）——它只活在
+  // 闭包内存里时进程重启即归零，而库里记忆远多于阈值，重启后第一条写入就满足
+  // overBase、绕过阈值开跑整轮（#291 只补了 lastRunAt 那半边）。缺种子（新库、
+  // 升级后还没跑过成功轮）或种子非法时退回 {0,0}：不假装知道基线，行为与升级前
+  // 逐字节一致——修的是「知道却不认」，不是凭空造一个基线。
+  let baseline = toBaseline(baselineSeed) ?? { count: 0, chars: 0 };
   let inFlight = null;
   // Issue #89（请求 2）：上一次实际开跑时刻。失败/degraded 的 run 也占用
   // 最小间隔——节流的目的正是防止失败调用连发；间隔内的触发静默跳过。
@@ -792,9 +818,7 @@ export function createDreamScheduler({ onRun, thresholdCount = 10, thresholdChar
   }
 
   function shouldTrigger(service) {
-    const memories = service.all().filter((m) => !m.archived && m.type !== "summary" && m.type !== "document");
-    const count = memories.length;
-    const chars = totalChars(memories);
+    const { count, chars } = activeStoreSize(service);
     const overBase = count >= baseline.count + thresholdCount || chars >= baseline.chars + thresholdChars;
     const overAbs = count >= thresholdCount || chars >= thresholdChars;
     return { trigger: overAbs && overBase, count, chars };
@@ -881,7 +905,10 @@ export function createDreamScheduler({ onRun, thresholdCount = 10, thresholdChar
         if (result && result.ok) {
           consecutiveFailures = 0; // Issue #292：成功清零，下次触发回到基数间隔
           try {
-            baseline = shouldTrigger(service);
+            // Issue #89（基线半边）：run 自报的基线（与审计行同一份数字）优先——重启
+            // 播种读的就是它，两条路径共用唯一口径；no-op 桩不回这个字段时退回现场
+            // 计算，最小测试替身的行为逐字节不变。
+            baseline = toBaseline(result.baseline) ?? shouldTrigger(service);
           } catch (error) {
             // Store closed mid-flight: keep the last known baseline.
             logger?.warn?.(`dsh-mneme dream: baseline refresh failed: ${String(error)}`);
@@ -986,6 +1013,19 @@ export function createDreamScheduler({ onRun, thresholdCount = 10, thresholdChar
       const applied = result.applied ?? 0;
       const summaryStored = result.summary ?? false;
       const receipt = buildReceipt({ runId, status, snapshotHash, inputCount: snapshot.size, applied, summaryStored });
+      // Issue #89（基线半边）：成功轮把「本轮结束后的库规模」落进审计行 = 阈值基线的
+      // 持久化副本，重启后由 store.lastDreamBaseline 播种。判定条件必须与调度器刷新
+      // 基线的条件严格一致（result.ok）——非 ok 轮不推进基线是既有语义，若这里也落值，
+      // 重启后播种就会拿到一个「其实没推进过」的假基线，阈值反而被抬高。
+      // 取不到（库已关闭等）就落 NULL：宁可不持久化，也不写一个错的基线。
+      let baselineSnapshot = null;
+      if (result.ok) {
+        try {
+          baselineSnapshot = activeStoreSize(service);
+        } catch {
+          baselineSnapshot = null;
+        }
+      }
       try {
         service.saveDreamRun({
           id: runId,
@@ -1023,12 +1063,18 @@ export function createDreamScheduler({ onRun, thresholdCount = 10, thresholdChar
           // 而非内联进 decisions——degraded 的 decisions 是合法子集，下游按「决策
           // 数组」消费，内联标记会污染其它读者（失败轮的 _validationFailed 是整单
           // 拒绝哨兵，语义与「部分应用」不同，也不复用）。
-          skipped: result.skipped
+          skipped: result.skipped,
+          // Issue #89（基线半边）：成功的 run 才带这两个值（见上方 baselineSnapshot
+          // 的注释）。两列要么同时有值、要么同时为 NULL，读侧以「同时有值」认账。
+          store_count: baselineSnapshot?.count,
+          store_chars: baselineSnapshot?.chars
         });
       } catch (error) {
         logger?.warn?.(`dsh-mneme dream: failed to record audit run: ${String(error)}`);
       }
-      return { ...result, runId, receipt, snapshotHash };
+      // Issue #89（基线半边）：把「与审计行同一份数字」的基线回给调度器，两条路径
+      // （进程内刷新 / 跨重启播种）因此共享唯一口径；调度器拿不到时会退出现场计算。
+      return { ...result, runId, receipt, snapshotHash, baseline: baselineSnapshot ?? undefined };
     };
     if (!route) {
       logger?.warn?.("dsh-mneme dream: no llm route available");
