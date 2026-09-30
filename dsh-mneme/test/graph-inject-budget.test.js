@@ -83,3 +83,22 @@ test("[检索线索] 引导语与线索行文本渲染正确（zh/en 双语）",
   const lineEn = STR.graphHintLine.en("technology", "Foo", "bar");
   assert.ok(lineEn.startsWith("- [hint/technology]"));
 });
+
+// ---- 复审回归 ---------------------------------------------------------------
+
+// 保守档（graphInjectHint 关）下线索行不许从 pin 池侧漏进注入块：pin 池取自打标
+// 之后、又不占 maxItems 名额，pin 若不排除 graphHint 行，「图召回 + 约束型记忆」
+// 就会在默认关档下照常进常驻注入文本，把线索开关整个绕过去。
+test("conservative mode: a graph hint row cannot leak in via the pin pool", () => {
+  const { store, service } = setup({ entityRecallEnabled: true, maxInjectedItems: 5, pinnedInjectBudget: 1 });
+  // 约束型记忆 + 命中查询实体：同时是 pin 候选与图线索候选（最坏交叉）。
+  const mem = service.saveWithDedupe({
+    type: "constraint", title: "部署约束", content: "生产环境不许直接改库", importance: 4
+  }).memory;
+  const ent = store.createEntity({ name: "PostgreSQL", type: "technology" });
+  store.saveAttr({ entity_id: ent.id, attr_key: "k", attr_value: "v", memory_id: mem.id });
+
+  const selected = service.injectCandidates({ maxItems: 5, query: "PostgreSQL" });
+  assert.equal(selected.filter((m) => m.graphHint === true).length, 0, "hint rows stay out while graphInjectHint is off");
+  store.close();
+});

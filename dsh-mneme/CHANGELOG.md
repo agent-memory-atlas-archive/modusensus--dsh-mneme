@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+## 🆕 新增
+
+- **关联提示防幻觉 Injection Budget（issue #24 块3）**：图召回候选进注入时默认只参与排序、不改变注入块构成（`graphInjectHint` 关，保守档）；开启后以固定句式「[检索线索]」标注、并在首个线索行前加引导语（链路信息非事实断言），条数由独立预算 `graphInjectBudget` 约束——既不受 document 预算约束、也不挤占 `maxItems` 槽位。线索行不进 pin 池（pin 会在保守档下把它放回块内，绕过开关）。新增两键注册进 feature_flags 白名单；lightMode 强制关。
+
 ## [0.8.11] - 2026-09-30
 
 ## 🐛 修复

@@ -274,10 +274,9 @@ export function createInjector(ctx, service, settings, config) {
     // 日志抢同一份预算后被降级」正是本议题要修的结构缺陷。单条仍有硬顶
     // （PINNED_CONTENT_MAX），超出照旧带截断提示，不静默。
     const pinnedCount = Math.max(0, Math.min(candidates.length, pinnedStats?.shown ?? 0));
-    // #24 块3：图召回线索行（graphHint）——渲染前数出数量，若 >0 在块头插入
-    // 一段固定引导语（链路信息非事实断言，防幻觉扩散）。线索行自身按
-    // graphHintLine 渲染（线索/ 前缀区别于普通记忆行）。
-    const graphCount = candidates.filter((m) => m.graphHint === true).length;
+    // #24 块3：图召回线索行（graphHint）——引导语插在第一个线索行之前（保持块头
+    // 语义：先声明「这些不是事实」）。线索行自身按 graphHintLine 渲染（线索/ 前缀
+    // 区别于普通记忆行）。
     let graphSeen = 0;
     for (let i = 0; i < candidates.length; i++) {
       const m = candidates[i];

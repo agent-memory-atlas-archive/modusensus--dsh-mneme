@@ -1559,7 +1559,10 @@ export function createService({ store, mirror, config, onWrite, logger, document
     // 超预算的条数回报给调用方，在块内如实标注（绝不静默省略）。
     const pinnedBudget = Math.max(0, Math.min(5, Math.floor(config?.pinnedInjectBudget ?? 0)));
     // eligible 留到块外：未展示条数要等 general 槽选完才算得准（见 selected 之后）。
-    const eligible = pinnedBudget > 0 ? candidates.filter((m) => PINNED_MEMORY_TYPES.has(m.type)) : [];
+    // graphHint 行不进 pin 池：pin 是「每轮必进的约束/偏好」，而线索行按定义是
+    // 「链路信息、非事实断言」，且 pin 长在候选池遍历之前——不排除的话，保守档
+    // （graphInjectHint 关）也能从 pin 侧把它放回注入块，线索开关就被绕过去了。
+    const eligible = pinnedBudget > 0 ? candidates.filter((m) => PINNED_MEMORY_TYPES.has(m.type) && m.graphHint !== true) : [];
     let pinned = [];
     if (pinnedBudget > 0 && eligible.length > 0) {
       pinned = eligible.slice(0, pinnedBudget);

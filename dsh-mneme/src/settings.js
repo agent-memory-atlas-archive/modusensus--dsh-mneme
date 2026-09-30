@@ -58,6 +58,9 @@ const FEATURE_FLAG_BOOLEANS = [
   // Issue #219：图召回轴——查询命中实体名时把挂联记忆并入检索融合池
   // （默认关；依赖实体抽取产出，lightMode 强制关闭）。
   "entityRecallEnabled",
+  // Issue #24 块3：关联提示防幻觉——图召回线索行以「[检索线索]」标注进注入
+  // （默认关=线索只参与排序不进块；依赖实体抽取产出，lightMode 强制关闭）。
+  "graphInjectHint",
   // Issue #164：叙述条——dream 期间按 tag 主题簇合成叙述落库（source=
   // narrative，evidence 回链簇内记忆；按需检索不常驻注入；默认关）。
   "dreamNarrativeEnabled",
@@ -143,7 +146,9 @@ const FEATURE_FLAG_INT_RANGES = {
   // Issue #257：sleep 冲突/模式阶段的 LLM 输出预算（原硬编码 2048，实测不足）。
   sleepMaxTokens: [256, 131072],
   // Issue #258：总览（dream_summarize）输入条数硬上限（0 = 不设上限）。
-  dreamSummaryMaxInputs: [0, 100000]
+  dreamSummaryMaxInputs: [0, 100000],
+  // Issue #24 块3：图线索行的独立注入预算（0 = 线索不进块）。
+  graphInjectBudget: [0, 5]
 };
 // 浮点开关的闭区间（与 config.js 的 z.number().min().max() 对齐）。与整数开关
 // 分开：面板的整数控件要求 Number.isInteger，而余弦相似度阈值必须允许小数。
