@@ -530,11 +530,25 @@ export function createService({ store, mirror, config, onWrite, logger, document
    * on the hot recall path). A touch failure must never break search/inject.
    */
   function touchRecalled(memories) {
-    if (config?.heatEnabled === false || !Array.isArray(memories) || memories.length === 0) return;
+    if (!Array.isArray(memories) || memories.length === 0) return;
+    // heatEnabled=false 只关 touchLastAccess 的热度消费（既有语义），但 #24
+    // 块4 被动确认独立于 heat——graphPassiveConfirm 开时照常 bump 关联边。
+    // 两条路径都 best-effort，失败绝不阻断检索/注入。
+    const heatOn = config?.heatEnabled !== false;
+    const passive = config?.graphPassiveConfirm === true;
+    const delta = config?.graphWeightDelta ?? 0.1;
     for (const m of memories) {
       if (!m?.id) continue;
       try {
-        store.touchLastAccess(m.id);
+        if (heatOn) store.touchLastAccess(m.id);
+        if (passive) {
+          // 正常触达=对该记忆挂联关系边的被动确认；bump 只加不减封顶 1.0，
+          // 自激回路由封顶天然遏制。「仅异常路径暴露给用户复核」的确认记录
+          // 侧在此落地，复核 UI 留后续块。
+          for (const rel of store.getRelationsByMemory(m.id)) {
+            store.bumpRelationWeight(rel.id, delta);
+          }
+        }
       } catch { /* touch is best effort */ }
     }
   }

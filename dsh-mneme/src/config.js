@@ -469,6 +469,10 @@ export const Config = z.object({
   graphWeightEnabled: z.boolean().default(false),
   // 单次有效触达的抬升幅度。
   graphWeightDelta: z.number().min(0).max(1).default(0.1),
+  // 被动确认（issue #24 块4）：heat 触达（记忆被召回/注入=被用）即对该记忆
+  // 挂联的关系边做被动确认——bumpRelationWeight 抬一格。默认关=零行为变化；
+  // 开=正常触达演化边权，「关系是用出来的」闭环落地（异常路径复核留后续块）。
+  graphPassiveConfirm: z.boolean().default(false),
 
   // --- sleep mode: idle-triggered deep maintenance (v0.4.0) ---------------
   // Opt-in, off by default. Unlike autoDream (threshold-triggered, lightweight)
@@ -720,6 +724,8 @@ const LIGHT_MODE_OFF = [
   "entityRecallEnabled",
   // 轻量模式不开边权重演化（#24 块2，依赖实体抽取产出；抽取关则无 v08 边可抬升）。
   "graphWeightEnabled",
+  // 轻量模式不开被动确认（#24 块4，依赖实体抽取产出；抽取关则无 v08 边可抬升）。
+  "graphPassiveConfirm",
   // 轻量模式不开叙述条（额外 LLM 调用；#164 对齐，opt-in）。
   "dreamNarrativeEnabled",
   // 轻量模式不开 document 指针行（#230，opt-in：注册/注入/检索增强全随闸）。

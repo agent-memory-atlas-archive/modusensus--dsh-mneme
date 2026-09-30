@@ -2500,6 +2500,19 @@ export function createStore(path) {
     ).all(entityId, entityId).map(toRelation);
   }
 
+  /**
+   * 按记忆反查关联边（issue #24 块4 被动确认）：一条记忆被召回/注入（触达）
+   * 时，挂在同一记忆上的关系行即「这条关系被用过了」的证据——正常触达视为
+   * 被动确认，调用方据此 bumpRelationWeight。返回 toRelation 行（含 weight/
+   * source）。索引 idx_relations_memory 已建（#219）。
+   */
+  function getRelationsByMemory(memoryId) {
+    if (!memoryId) return [];
+    return db.prepare(
+      "SELECT * FROM entity_relations WHERE memory_id = ?"
+    ).all(memoryId).map(toRelation);
+  }
+
   /** All entities (optionally name-filtered, newest first). Used by sleep phase 4
    *  orphan detection: an entity with zero relations is a candidate for relation
    *  completion. */
@@ -2884,6 +2897,7 @@ export function createStore(path) {
     bumpRelationWeight,
     migrateAttrsToMemory,
     getRelations,
+    getRelationsByMemory,
     setMirrorState,
     getMirrorState,
     markMirrorDirty,
