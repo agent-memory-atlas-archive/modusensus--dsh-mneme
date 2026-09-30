@@ -463,6 +463,12 @@ export const Config = z.object({
   // 检索融合池（与 BM25 同级的确认/回填信号）。默认关=检索行为与 #219 前
   // 逐字节一致；走 feature_flags 面板可启停，lightMode 强制关闭。
   entityRecallEnabled: z.boolean().default(false),
+  // 边权重演化（issue #24 块2）：touch 门控是否把被寻回路径的边权重抬升。
+  // 默认关=边初值纯由建边来源决定（store.RELATION_SOURCE_DEFAULTS），演化
+  // 不生效；开=被激活的边经 bumpRelationWeight 上涨（只加不减、封顶 1.0）。
+  graphWeightEnabled: z.boolean().default(false),
+  // 单次有效触达的抬升幅度。
+  graphWeightDelta: z.number().min(0).max(1).default(0.1),
 
   // --- sleep mode: idle-triggered deep maintenance (v0.4.0) ---------------
   // Opt-in, off by default. Unlike autoDream (threshold-triggered, lightweight)
@@ -712,6 +718,8 @@ const LIGHT_MODE_OFF = [
   "bm25SearchEnabled",
   // 轻量模式不开图召回轴（#219，依赖实体抽取产出；抽取本身已被关掉）。
   "entityRecallEnabled",
+  // 轻量模式不开边权重演化（#24 块2，依赖实体抽取产出；抽取关则无 v08 边可抬升）。
+  "graphWeightEnabled",
   // 轻量模式不开叙述条（额外 LLM 调用；#164 对齐，opt-in）。
   "dreamNarrativeEnabled",
   // 轻量模式不开 document 指针行（#230，opt-in：注册/注入/检索增强全随闸）。

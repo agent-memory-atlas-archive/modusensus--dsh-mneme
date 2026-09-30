@@ -249,7 +249,12 @@ CREATE TABLE IF NOT EXISTS entity_relations (
   relation_type TEXT NOT NULL,
   memory_id TEXT,
   created_at TEXT NOT NULL,
-  metadata TEXT
+  metadata TEXT,
+  -- issue #24 块2（权重演化）：边权重 + 建边来源。初值按 source 映射
+  -- （manual 1.0 / confirmed 保持 / tag 0.3 / llm 0.4），演化只经
+  -- bumpRelationWeight（只加不减、封顶），触达侧由 touch 门控驱动。
+  weight REAL NOT NULL DEFAULT 1.0,
+  source TEXT NOT NULL DEFAULT 'manual'
 );
 CREATE INDEX IF NOT EXISTS idx_relations_from ON entity_relations(from_entity);
 CREATE INDEX IF NOT EXISTS idx_relations_to ON entity_relations(to_entity);
@@ -549,6 +554,15 @@ function toRecallRun(row) {
   };
 }
 
+// issue #24 块2：建边来源 → 初值权重映射。tag 延续 LLM 偏差取低起步，
+// llm 抽取自动建边取中低，manual 全权（1.0 是满权，不含演化余量的上限）。
+export const RELATION_SOURCE_DEFAULTS = Object.freeze({
+  manual: 1.0,
+  confirmed: 1.0, // manual_confirmed：已人工确认，维持满权
+  tag: 0.3,
+  llm: 0.4
+});
+
 function toRecallEval(row) {
   if (!row) return undefined;
   let metrics;
@@ -612,6 +626,8 @@ function toRelation(row) {
     relation_type: row.relation_type,
     memory_id: row.memory_id ?? undefined,
     created_at: row.created_at,
+    weight: row.weight ?? 1.0,
+    source: row.source ?? "manual",
     metadata
   };
 }
@@ -751,6 +767,10 @@ export function createStore(path) {
   // 老库打开时 SCHEMA 的 CREATE TABLE 对既有表不生效，列还不存在，把索引写进 SCHEMA
   // 会直接报 no such column（与下方 llm_audit_logs.session_key 同理）。
   addColumn("memories", "content_hash", "ALTER TABLE memories ADD COLUMN content_hash TEXT");
+  // issue #24 块2（权重演化）：entity_relations 加 weight + source。存量关系
+  // 行缺列 → 默认 manual 1.0（最保守：既有语义不因迁移而变弱）。
+  addColumn("entity_relations", "weight", "ALTER TABLE entity_relations ADD COLUMN weight REAL NOT NULL DEFAULT 1.0");
+  addColumn("entity_relations", "source", "ALTER TABLE entity_relations ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'");
   // 列序是 content_hash 打头：哈希几乎唯一，等值 seek 就已收窄到候选行，type 只当同
   // 一次 seek 里的第二列过滤；反过来（type 打头）下面的存量回填就得全表扫——每次打开
   // 都要把全部正文读一遍。
@@ -2402,8 +2422,13 @@ export function createStore(path) {
   /**
    * Record a typed relation between two entities. metadata (optional) is a
    * free-form JSON blob describing the relation. Relations are append-only.
+   *
+   * issue #24 块2（权重演化）：source 决定边初值——manual 1.0 / confirmed
+   * 保持 / tag 0.3 / llm 0.4；显式传入 weight 时优先于 source 映射（manual
+   * 建边可自带权重）。哲学「关系是用出来的，不是建出来的」：初值只反映来源
+   * 偏见，真正的抬升留给 bumpRelationWeight（touch 门控驱动）。
    */
-  function saveRelation({ from_entity, to_entity, relation_type, memory_id, metadata }) {
+  function saveRelation({ from_entity, to_entity, relation_type, memory_id, metadata, weight, source }) {
     const id = randomUUID();
     const now = nowIso();
     const metaStr = metadata === undefined
@@ -2411,11 +2436,27 @@ export function createStore(path) {
       : typeof metadata === "string"
         ? metadata
         : JSON.stringify(metadata);
+    const src = source ?? "manual";
+    const w = weight ?? RELATION_SOURCE_DEFAULTS[src] ?? 1.0;
     db.prepare(
-      `INSERT INTO entity_relations (id, from_entity, to_entity, relation_type, memory_id, created_at, metadata)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, from_entity, to_entity, relation_type, memory_id ?? null, now, metaStr);
+      `INSERT INTO entity_relations (id, from_entity, to_entity, relation_type, memory_id, created_at, metadata, weight, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, from_entity, to_entity, relation_type, memory_id ?? null, now, metaStr, w, src);
     return toRelation(db.prepare("SELECT * FROM entity_relations WHERE id = ?").get(id));
+  }
+
+  /**
+   * 边权重演化（issue #24 块2）。只加不减、封顶 1.0——权重只能靠「被用」抬升、
+   * 不能靠被人为敲低，封顶防触达过频把边吹到无意义大。幂等（缺行直接返回 false）。
+   * delta 默认 0.1；调用方（touch 门控）决定何时算一次有效触达。**作用在关系行**，
+   * 与 memories 的 last_accessed_at 是两码事：这条是针对「这条边被激活了」的演化。
+   */
+  function bumpRelationWeight(id, delta = 0.1) {
+    const row = db.prepare("SELECT weight FROM entity_relations WHERE id = ?").get(id);
+    if (!row) return false;
+    const next = Math.min(1.0, (row.weight ?? 1.0) + (delta ?? 0.1));
+    db.prepare("UPDATE entity_relations SET weight = ? WHERE id = ?").run(next, id);
+    return true;
   }
 
   /**
@@ -2840,6 +2881,7 @@ export function createStore(path) {
     findEntitiesMentionedIn,
     getLinkedMemoryIds,
     saveRelation,
+    bumpRelationWeight,
     migrateAttrsToMemory,
     getRelations,
     setMirrorState,
