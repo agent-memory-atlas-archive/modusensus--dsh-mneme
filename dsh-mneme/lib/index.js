@@ -502,6 +502,11 @@ export const apply = (ctx, config) => {
       logger: ctx.logger,
       semantic: { embedder, vectorIndex },
       lastRunAtSeed: store.lastDreamRunAt("auto"),
+      // Issue #89（基线半边）：阈值基线同样跨重启恢复——只恢复 lastRunAt 的话，
+      // 重启后的第一条写入仍会绕过阈值（库里记忆多于阈值时 overBase 恒成立）开跑
+      // 整轮。种子取上次成功轮的库规模，口径与运行期刷新一致；读不到时调度器退回
+      // 零基线（= 升级前行为）。
+      baselineSeed: store.lastDreamBaseline("auto"),
       // Issue #239（第 4 项）镜像到巩固：高峰期不做梦，顺延到最近的高峰结束时刻。
       peakHours: cfg.dreamPeakHours ?? "",
       peakMaxDeferMinutes: cfg.dreamPeakMaxDeferMinutes ?? 120,
