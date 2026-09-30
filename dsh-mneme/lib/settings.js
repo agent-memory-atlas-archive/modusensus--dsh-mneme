@@ -58,6 +58,13 @@ const FEATURE_FLAG_BOOLEANS = [
   // Issue #219：图召回轴——查询命中实体名时把挂联记忆并入检索融合池
   // （默认关；依赖实体抽取产出，lightMode 强制关闭）。
   "entityRecallEnabled",
+  // Issue #24 块2：边权重演化总闸——关着时任何触达都不改边权（默认关；
+  // 依赖实体抽取产出，lightMode 强制关闭）。本块与树内 #341/#343 的键一并
+  // 登记，保证这条分支上出现在 config 里的键都进了白名单。
+  "graphWeightEnabled",
+  // Issue #24 块4：被动确认通道——正常触达即对该记忆挂联的边 bump 一格
+  // （默认关；需总闸 graphWeightEnabled 同开）。
+  "graphPassiveConfirm",
   // Issue #164：叙述条——dream 期间按 tag 主题簇合成叙述落库（source=
   // narrative，evidence 回链簇内记忆；按需检索不常驻注入；默认关）。
   "dreamNarrativeEnabled",
@@ -151,7 +158,9 @@ const FEATURE_FLAG_NUMBER_RANGES = {
   // Issue #127：vector 去重档的并入阈值。
   summarizeDedupeMinSim: [0.5, 0.99],
   // Issue #125：hybrid 判"高相似"的阈值。
-  dreamCandidateMinSim: [0.5, 0.99]
+  dreamCandidateMinSim: [0.5, 0.99],
+  // Issue #24 块2：单次有效触达的边权抬升幅度（与 config.js 的闭区间对齐）。
+  graphWeightDelta: [0, 1]
 };
 // 自由字符串开关（与 config.js 的 z.string() 同名同型）：trim 后 ≤200 字符，
 // 空串合法（= 跟随主对话模型/默认路径，面板显示 placeholder）。

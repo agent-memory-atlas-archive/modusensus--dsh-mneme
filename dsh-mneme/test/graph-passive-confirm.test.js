@@ -39,7 +39,7 @@ test("graphPassiveConfirm=false (default): touched memory does NOT bump relation
 });
 
 test("graphPassiveConfirm=true: touched memory bumps its linked relation weight", async () => {
-  const { store, service } = setup({ graphPassiveConfirm: true, graphWeightDelta: 0.1 });
+  const { store, service } = setup({ graphWeightEnabled: true, graphPassiveConfirm: true, graphWeightDelta: 0.1 });
   const mem = putMem(store, service, { title: "数据库迁移", content: "主库切换完成" });
   const rel = linkRelToMem(store, { fromName: "A", toName: "B", memoryId: mem.id, source: "llm" });
   assert.equal(rel.weight, 0.4);
@@ -50,7 +50,7 @@ test("graphPassiveConfirm=true: touched memory bumps its linked relation weight"
 });
 
 test("heatEnabled=false does NOT gate passive confirm (independent gates)", async () => {
-  const { store, service } = setup({ heatEnabled: false, graphPassiveConfirm: true, graphWeightDelta: 0.1 });
+  const { store, service } = setup({ heatEnabled: false, graphWeightEnabled: true, graphPassiveConfirm: true, graphWeightDelta: 0.1 });
   const mem = putMem(store, service, { title: "数据库迁移", content: "主库切换完成" });
   linkRelToMem(store, { fromName: "A", toName: "B", memoryId: mem.id, source: "llm" });
   await searchOnce(service, "数据库迁移");
@@ -69,6 +69,17 @@ test("repeated touches cap at 1.0 (never exceeds)", () => {
     store.bumpRelationWeight(rel.id, 0.3); // 0.4→0.7→1.0→1.0…
   }
   assert.equal(store.getRelations(a.id)[0].weight, 1.0, "capped at 1.0");
+  store.close();
+});
+
+// 总闸（块2 的 graphWeightEnabled）关着时被动确认不许生效——单开通道键就能演化
+// 边权的话，块2 立的「演化默认关」总闸形同虚设。
+test("graphWeightEnabled=false gates passive confirm (master switch)", async () => {
+  const { store, service } = setup({ graphPassiveConfirm: true, graphWeightDelta: 0.1 });
+  const mem = putMem(store, service, { title: "数据库迁移", content: "主库切换完成" });
+  linkRelToMem(store, { fromName: "A", toName: "B", memoryId: mem.id, source: "llm" });
+  await searchOnce(service, "数据库迁移");
+  assert.equal(store.getRelationsByMemory(mem.id)[0].weight, 0.4, "master switch off → weight untouched");
   store.close();
 });
 

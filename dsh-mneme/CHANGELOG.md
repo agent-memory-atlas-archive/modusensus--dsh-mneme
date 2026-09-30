@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+## 🆕 新增
+
+- **被动确认 Passive Confirmation（issue #24 块4）**：把「人工认可/删除/忽略」的确认门槛收敛成例外管理——正常触达（记忆被召回/注入）即视为对挂联关系边的被动确认，`store.getRelationsByMemory` 反查关联边后 `bumpRelationWeight` 抬一格（只加不减、封顶 1.0，自激回路由封顶遏制）。`graphPassiveConfirm` 与 heat 是独立闸门（`heatEnabled=false` 时仍可演化边权），且受块2 总闸 `graphWeightEnabled` 约束——两键同开才生效，单开通道键绕不过「演化默认关」。仅异常路径暴露给用户复核的复核 UI 留后续块。新增键注册进 feature_flags 白名单；lightMode 强制关。
+
 ## [0.8.11] - 2026-09-30
 
 ## 🐛 修复

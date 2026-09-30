@@ -533,9 +533,12 @@ export function createService({ store, mirror, config, onWrite, logger, document
     if (!Array.isArray(memories) || memories.length === 0) return;
     // heatEnabled=false 只关 touchLastAccess 的热度消费（既有语义），但 #24
     // 块4 被动确认独立于 heat——graphPassiveConfirm 开时照常 bump 关联边。
+    // graphWeightEnabled 是块2 立的演化总闸：它关着时任何触达都不该改边权，被动
+    // 确认只是它底下的一个通道（后续块还会接别的确认通道），两键同开才 bump，
+    // 否则单开通道键就等于绕过「演化默认关」的承诺。
     // 两条路径都 best-effort，失败绝不阻断检索/注入。
     const heatOn = config?.heatEnabled !== false;
-    const passive = config?.graphPassiveConfirm === true;
+    const passive = config?.graphPassiveConfirm === true && config?.graphWeightEnabled === true;
     const delta = config?.graphWeightDelta ?? 0.1;
     for (const m of memories) {
       if (!m?.id) continue;
