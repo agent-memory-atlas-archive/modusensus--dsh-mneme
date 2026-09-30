@@ -2437,7 +2437,9 @@ export function createStore(path) {
         ? metadata
         : JSON.stringify(metadata);
     const src = source ?? "manual";
-    const w = weight ?? RELATION_SOURCE_DEFAULTS[src] ?? 1.0;
+    // 只认映射表的自有键：src="constructor"/"toString" 会命中原型链上的函数，直接查表
+    // 拿到的是函数而非权重（绑进 SQL 就是整条写入抛错），必须回退默认 1.0。
+    const w = weight ?? (Object.hasOwn(RELATION_SOURCE_DEFAULTS, src) ? RELATION_SOURCE_DEFAULTS[src] : 1.0);
     db.prepare(
       `INSERT INTO entity_relations (id, from_entity, to_entity, relation_type, memory_id, created_at, metadata, weight, source)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -2447,16 +2449,21 @@ export function createStore(path) {
 
   /**
    * 边权重演化（issue #24 块2）。只加不减、封顶 1.0——权重只能靠「被用」抬升、
-   * 不能靠被人为敲低，封顶防触达过频把边吹到无意义大。幂等（缺行直接返回 false）。
-   * delta 默认 0.1；调用方（touch 门控）决定何时算一次有效触达。**作用在关系行**，
-   * 与 memories 的 last_accessed_at 是两码事：这条是针对「这条边被激活了」的演化。
+   * 不能靠被人为敲低，封顶防触达过频把边吹到无意义大。
+   * 下界守在这里而不是调用方：增量为负/非有限数一律拒绝（返回 false）。限幅只留
+   * 上界、把「只加不减」托付给配置范围，等于把存储接口的契约挂在调用方自觉上。
+   * 读改写合并成单条 UPDATE（MIN(1.0, weight + ?)）：memoryDir 可被多进程共用，
+   * 先 SELECT 再 UPDATE 会丢并发增量，还会拿旧值把别人已抬升的权重压回去。
+   * 幂等（缺行 changes=0 → false）；delta 默认 0.1，由调用方（touch 门控）决定
+   * 何时算一次有效触达。**作用在关系行**，与 memories 的 last_accessed_at 是两码
+   * 事：这条是针对「这条边被激活了」的演化。
    */
   function bumpRelationWeight(id, delta = 0.1) {
-    const row = db.prepare("SELECT weight FROM entity_relations WHERE id = ?").get(id);
-    if (!row) return false;
-    const next = Math.min(1.0, (row.weight ?? 1.0) + (delta ?? 0.1));
-    db.prepare("UPDATE entity_relations SET weight = ? WHERE id = ?").run(next, id);
-    return true;
+    if (!Number.isFinite(delta) || delta < 0) return false;
+    const result = db.prepare(
+      "UPDATE entity_relations SET weight = MIN(1.0, weight + ?) WHERE id = ?"
+    ).run(delta, id);
+    return result.changes > 0;
   }
 
   /**

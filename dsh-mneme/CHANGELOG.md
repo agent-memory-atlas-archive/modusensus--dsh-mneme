@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+## 🆕 新增
+
+- **边权重演化 Weight Evolution（issue #24 块2）**：`entity_relations` 加 `weight`/`source` 两列（幂等迁移，存量行按 manual 1.0 认账）——建边来源决定初值（manual/confirmed 1.0、llm 0.4、tag 0.3），LLM 抽取自动建的边标 `source='llm'`；演化走 `bumpRelationWeight`（只加不减、封顶 1.0，单条 `UPDATE ... MIN(1.0, weight + ?)` 原子抬升，负/非有限增量在存储边界拒绝）。新增两键 `graphWeightEnabled`/`graphWeightDelta` 注册进 feature_flags 白名单，面板可启停；lightMode 强制关。触达侧接线见块4（被动确认）。
+
 ## [0.8.11] - 2026-09-30
 
 ## 🐛 修复
