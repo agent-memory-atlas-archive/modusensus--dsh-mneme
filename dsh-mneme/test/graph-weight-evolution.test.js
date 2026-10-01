@@ -74,3 +74,32 @@ test("legacy relation rows migrate with manual weight default (no crash)", () =>
   assert.equal(r.weight, 1.0, "default source manual → weight 1.0");
   assert.equal(r.source, "manual");
 });
+
+// ---- #24 复审回归（review findings 逐条落锁）--------------------------------
+
+// 「只加不减」是存储接口自己的契约：负/非法增量必须在存储边界被拒（false +
+// 权值不动），不能把下界托付给调用方的配置范围——旧写法 bumpRelationWeight(id,
+// -0.2) 能把 0.4 敲到 0.2。
+test("bumpRelationWeight rejects negative and non-finite increments (只加不减)", () => {
+  const store = makeStore();
+  const a = store.createEntity({ name: "A", type: "technology" });
+  const b = store.createEntity({ name: "B", type: "technology" });
+  const r = store.saveRelation({ from_entity: a.id, to_entity: b.id, relation_type: "x", source: "llm" });
+  for (const bad of [-0.2, -1, Number.NaN, Number.POSITIVE_INFINITY, "0.2"]) {
+    assert.equal(store.bumpRelationWeight(r.id, bad), false, `increment ${String(bad)} must be refused`);
+    assert.equal(store.getRelations(a.id)[0].weight, 0.4, `weight must not move on increment ${String(bad)}`);
+  }
+  assert.equal(store.bumpRelationWeight(r.id, 0.2), true, "a valid increment still lands");
+  assert.ok(Math.abs(store.getRelations(a.id)[0].weight - 0.6) < 1e-9, "0.4 + 0.2 lands at 0.6 (float-safe)");
+});
+
+// 来源查询只认映射表的自有键：src="constructor"/"toString" 会命中原型链上的函数，
+// 旧写法把它当权重绑进 SQL（函数不可绑定 → 整条写入抛错）而不是回退默认 1.0。
+test("an inherited source name falls back to the default weight", () => {
+  const store = makeStore();
+  const a = store.createEntity({ name: "A", type: "technology" });
+  const b = store.createEntity({ name: "B", type: "technology" });
+  const r = store.saveRelation({ from_entity: a.id, to_entity: b.id, relation_type: "x", source: "constructor" });
+  assert.equal(r.weight, 1.0, "prototype-chain names must fall back to 1.0, not a function");
+  assert.equal(r.source, "constructor", "source is recorded verbatim");
+});

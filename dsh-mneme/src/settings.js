@@ -59,8 +59,7 @@ const FEATURE_FLAG_BOOLEANS = [
   // （默认关；依赖实体抽取产出，lightMode 强制关闭）。
   "entityRecallEnabled",
   // Issue #24 块2：边权重演化总闸——关着时任何触达都不改边权（默认关；
-  // 依赖实体抽取产出，lightMode 强制关闭）。本块与树内 #341/#343 的键一并
-  // 登记，保证这条分支上出现在 config 里的键都进了白名单。
+  // 依赖实体抽取产出，lightMode 强制关闭）。块4 的被动确认是它底下的一个通道。
   "graphWeightEnabled",
   // Issue #24 块4：被动确认通道——正常触达即对该记忆挂联的边 bump 一格
   // （默认关；需总闸 graphWeightEnabled 同开）。
