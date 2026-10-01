@@ -110,6 +110,25 @@ function toolResultEvent(text, isError, seq) {
   };
 }
 
+// DSH 0.2.x 内核对工具结果的实际投递形状：内核给的是 `role:"tool"` 消息本身，
+// content 里只有 `type:"text"` 块、isError 挂在消息上，不再有 tool-result 块。
+// 蒸馏曾只认旧块形状，于是真实会话里的工具输出与工具报错全部被静默丢弃。
+function toolRoleResultEvent(text, isError, seq) {
+  return {
+    seq,
+    type: "tool/result",
+    data: {
+      message: {
+        role: "tool",
+        source: { kind: "tool", callId: `call-${seq}` },
+        toolCallId: `call-${seq}`,
+        content: [{ type: "text", text }],
+        isError
+      }
+    }
+  };
+}
+
 function codeDispatchEvent(text, isError, seq) {
   return {
     seq,
@@ -958,6 +977,47 @@ test("collects real tool result and code dispatch payloads with failure status",
   const transcript = calls[0].messages.find((message) => message.role === "user").content[0].text;
   assert.match(transcript, /工具结果（失败）：TypeError: tool failed/);
   assert.match(transcript, /代码执行（成功）：代码执行结果/);
+});
+
+test("collects tool results delivered as role:tool messages, keeping the legacy block shape", async () => {
+  const { events, calls } = setup({ distillRateLimitIntervalMs: 0 });
+  const handler = events.find((e) => e.name === "session/event").fn;
+  const session = {
+    id: "s-tool-role-shape",
+    requestHeader: () => ({ config: { provider: "deepseek", model: "deepseek-chat" } }),
+    events: [
+      userMessage("检查工具结果两种形状", 1),
+      toolResultEvent("旧形状载荷", false, 2),
+      toolRoleResultEvent("新形状载荷", false, 3),
+      toolRoleResultEvent("TypeError: tool crashed", true, 4),
+      { seq: 5, type: "turn/end" }
+    ]
+  };
+
+  await handler(session, { seq: 5, type: "turn/end" });
+  const transcript = calls[0].messages.find((message) => message.role === "user").content[0].text;
+  assert.match(transcript, /工具结果（成功）：旧形状载荷/);
+  assert.match(transcript, /工具结果（成功）：新形状载荷/);
+  assert.match(transcript, /工具结果（失败）：TypeError: tool crashed/);
+});
+
+test("keeps prefix trimming for tool results delivered as role:tool messages", async () => {
+  const { events, calls } = setup({ distillRateLimitIntervalMs: 0 });
+  const handler = events.find((e) => e.name === "session/event").fn;
+  const session = {
+    id: "s-tool-role-trim",
+    requestHeader: () => ({ config: { provider: "deepseek", model: "deepseek-chat" } }),
+    events: [
+      userMessage("检查新形状截断", 1),
+      toolRoleResultEvent(`OUT_START ${"c".repeat(550)} OUT_END`, false, 2),
+      { seq: 3, type: "turn/end" }
+    ]
+  };
+
+  await handler(session, { seq: 3, type: "turn/end" });
+  const transcript = JSON.stringify(calls[0].messages);
+  assert.ok(transcript.includes("OUT_START"));
+  assert.ok(!transcript.includes("OUT_END"), "role:tool 结果同样走 500 字符前缀截断");
 });
 
 test("collects subagent delivery once across inbox and user-message views", async () => {

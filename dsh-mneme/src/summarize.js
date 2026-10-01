@@ -195,9 +195,14 @@ function collectMessages(session, maxChars = 8000, language = "zh", afterSeq, th
         break;
       }
       case "tool/result": {
-        const result = Array.isArray(data?.message?.content)
-          ? data.message.content.find((block) => block?.type === "tool-result")
-          : undefined;
+        // 工具结果有两种形状：旧形状把载荷与 isError 装在 content 内的
+        // `type:"tool-result"` 块上；DSH 0.2.x 起内核改为直接投递 `role:"tool"`
+        // 消息本身，content 里只有 `type:"text"` 块、isError 挂在消息上。只认
+        // 旧块形状时新形状落进 undefined 分支，工具输出与工具报错被静默丢弃。
+        const message = data?.message;
+        const blocks = Array.isArray(message?.content) ? message.content : [];
+        const legacy = blocks.find((block) => block?.type === "tool-result");
+        const result = legacy ?? (message?.role === "tool" ? message : undefined);
         const out = textOf(result?.content);
         const status = result?.isError === true ? STR.statusFail[language] : STR.statusOk[language];
         lines.push(STR.transcriptToolResult[language](status, trim(out, 500)));
