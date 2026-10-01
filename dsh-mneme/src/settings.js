@@ -58,6 +58,9 @@ const FEATURE_FLAG_BOOLEANS = [
   // Issue #219：图召回轴——查询命中实体名时把挂联记忆并入检索融合池
   // （默认关；依赖实体抽取产出，lightMode 强制关闭）。
   "entityRecallEnabled",
+  // Issue #24 块1：图谱锚定层级联——命中实体作种子、沿关系表向邻居扩散
+  // （默认关；依赖实体抽取产出，lightMode 强制关闭）。
+  "graphAnchoringEnabled",
   // Issue #24 块2：边权重演化——touch 门控把被寻回路径的边权重抬升
   // （默认关；依赖实体抽取产出，lightMode 强制关闭）。
   "graphWeightEnabled",
@@ -146,7 +149,10 @@ const FEATURE_FLAG_INT_RANGES = {
   // Issue #257：sleep 冲突/模式阶段的 LLM 输出预算（原硬编码 2048，实测不足）。
   sleepMaxTokens: [256, 131072],
   // Issue #258：总览（dream_summarize）输入条数硬上限（0 = 不设上限）。
-  dreamSummaryMaxInputs: [0, 100000]
+  dreamSummaryMaxInputs: [0, 100000],
+  // Issue #24 块1：锚定种子上限与级联深度（闭区间与 config.js 的 z.natural() 对齐）。
+  graphSeedCap: [1, 30],
+  graphCascadeDepth: [1, 3]
 };
 // 浮点开关的闭区间（与 config.js 的 z.number().min().max() 对齐）。与整数开关
 // 分开：面板的整数控件要求 Number.isInteger，而余弦相似度阈值必须允许小数。

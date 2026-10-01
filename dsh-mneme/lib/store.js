@@ -2553,6 +2553,38 @@ export function createStore(path) {
     ).all(entityId, entityId).map(toRelation);
   }
 
+  /**
+   * 批量邻接（issue #24 · 块1 锚定层级联）：给定多条实体 id，一并取全部关系行
+   * 并归并成「每个实体 → 相邻实体 id 去重列表」的邻接表。供 anchoring.js 的
+   * cascadeDepths 使用——多实体一族只需要一次 SQL（IN 查询），比逐实体调
+   * getRelations 的 N 次往返省。邻接是无向的（from/to 双向），往返不重复。
+   * 返回 Map<entityId, Array<entityId>>；未命中的实体缺省为 absent（级联视为
+   * 无邻居，Map 里不放键同行，null 同等对待）。
+   */
+  function getEntityNeighbors(entityIds) {
+    const out = new Map();
+    const ids = Array.isArray(entityIds) ? entityIds.filter(Boolean) : [];
+    if (!ids.length) return out;
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = db.prepare(
+      `SELECT from_entity, to_entity FROM entity_relations
+       WHERE from_entity IN (${placeholders}) OR to_entity IN (${placeholders})`
+    ).all(...ids, ...ids);
+    for (const r of rows) {
+      addNeighbor(out, r.from_entity, r.to_entity, ids);
+      addNeighbor(out, r.to_entity, r.from_entity, ids);
+    }
+    return out;
+  }
+
+  function addNeighbor(out, anchor, neighbor, queryIds) {
+    if (!queryIds.includes(anchor)) return; // 只以查询过的实体为锚
+    if (neighbor === anchor) return;        // 自环不构成扩散边
+    if (!out.has(anchor)) out.set(anchor, []);
+    const list = out.get(anchor);
+    if (!list.includes(neighbor)) list.push(neighbor);
+  }
+
   /** All entities (optionally name-filtered, newest first). Used by sleep phase 4
    *  orphan detection: an entity with zero relations is a candidate for relation
    *  completion. */
@@ -2938,6 +2970,7 @@ export function createStore(path) {
     bumpRelationWeight,
     migrateAttrsToMemory,
     getRelations,
+    getEntityNeighbors,
     setMirrorState,
     getMirrorState,
     markMirrorDirty,
