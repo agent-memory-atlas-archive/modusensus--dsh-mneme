@@ -52,7 +52,13 @@ CREATE TABLE IF NOT EXISTS dream_runs (
   receipt        TEXT NOT NULL,
   policy_epoch   INTEGER NOT NULL DEFAULT 0,  -- 裁决规则版本：规则升级后旧裁决降级为历史证据
   run_type       TEXT NOT NULL DEFAULT 'auto', -- auto | sleep | organize：周期审计的类别区分
-  skipped        TEXT                     -- JSON: degraded 轮被跳过的逐条明细（index/action/ids/error）
+  skipped        TEXT,                    -- JSON: degraded 轮被跳过的逐条明细（index/action/ids/error）
+  -- Issue #89（基线半边）：本轮成功刷新后的活跃记忆「条数 / 正文字符数」——阈值判定的
+  -- 基线原本只活在调度器闭包内存里，进程重启归零 → 库里记忆多于阈值时，重启后第一条
+  -- 写入就绕过阈值开跑整轮（#291 只持久化了 lastRunAt 那半边）。成功轮才落这两列，
+  -- 失败/降级不推进基线的既有语义不变；两列同时有值或同时为 NULL。
+  store_count    INTEGER,
+  store_chars    INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_dream_runs_created ON dream_runs(created_at);
 
@@ -482,7 +488,10 @@ function toDreamRun(row) {
     policy_epoch: row.policy_epoch ?? 0,
     run_type: row.run_type ?? "auto",
     // Issue #104：degraded 轮的逐条跳过明细（JSON 列，NULL = 该轮无跳过项）。
-    skipped: row.skipped ? JSON.parse(row.skipped) : undefined
+    skipped: row.skipped ? JSON.parse(row.skipped) : undefined,
+    // Issue #89（基线半边）：成功轮落下的阈值基线（NULL = 该轮没有推进基线）。
+    store_count: row.store_count ?? undefined,
+    store_chars: row.store_chars ?? undefined
   };
 }
 
@@ -780,6 +789,11 @@ export function createStore(path) {
   // Issue #104：degraded（合法子集已应用）轮被跳过的决策明细。此前只进 logger.warn，
   // 离线回放 dream_runs 无法定位 degraded 成因（跨类型 merge / update 保护期 / unknown id）。
   addColumn("dream_runs", "skipped", "ALTER TABLE dream_runs ADD COLUMN skipped TEXT");
+  // Issue #89（基线半边）：阈值基线跨重启持久化。存量行两列皆 NULL——历史行反推不出
+  // 「那轮结束时库有多大」（input_count 是窗口条数，不是库规模），所以升级后第一次
+  // 成功轮之前播种端拿不到基线，行为与升级前一致；跑过一轮之后闸门即跨重启生效。
+  addColumn("dream_runs", "store_count", "ALTER TABLE dream_runs ADD COLUMN store_count INTEGER");
+  addColumn("dream_runs", "store_chars", "ALTER TABLE dream_runs ADD COLUMN store_chars INTEGER");
 
   // Legacy mirror_state without v0.3.6 generation columns → add each missing
   // column idempotently (old DBs open cleanly, no data loss).
@@ -1605,17 +1619,26 @@ export function createStore(path) {
     // Issue #104：degraded 轮的跳过明细（JSON）。与 decisions/outcome 同为可选
     // 载荷，未提供时落 NULL（而不是 "[]"），审计行只记真实发生过的跳过。
     const skipped = run.skipped !== undefined ? JSON.stringify(run.skipped) : null;
+    // Issue #89（基线半边）：只有成功刷新过基线的 run 才带这两个值。非法/缺失一律落
+    // NULL——播种端以「两列同时有值」为唯一认账条件，半个基线（只有条数没有字符数）
+    // 会让阈值按 0 字符起算，比不认还糟。
+    const baselineKnown =
+      Number.isInteger(run.store_count) && run.store_count >= 0 &&
+      Number.isInteger(run.store_chars) && run.store_chars >= 0;
+    const storeCount = baselineKnown ? run.store_count : null;
+    const storeChars = baselineKnown ? run.store_chars : null;
     db.prepare(
       `INSERT INTO dream_runs (id, created_at, status, error, provider, model, snapshot_hash,
-        input_count, input, decisions, outcome, applied, summary_stored, receipt, policy_epoch, run_type, skipped)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        input_count, input, decisions, outcome, applied, summary_stored, receipt, policy_epoch, run_type, skipped,
+        store_count, store_chars)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          created_at=excluded.created_at, status=excluded.status, error=excluded.error,
          provider=excluded.provider, model=excluded.model, snapshot_hash=excluded.snapshot_hash,
          input_count=excluded.input_count, input=excluded.input, decisions=excluded.decisions,
          outcome=excluded.outcome, applied=excluded.applied, summary_stored=excluded.summary_stored,
          receipt=excluded.receipt, policy_epoch=excluded.policy_epoch, run_type=excluded.run_type,
-         skipped=excluded.skipped`
+         skipped=excluded.skipped, store_count=excluded.store_count, store_chars=excluded.store_chars`
     ).run(
       id,
       run.created_at ?? now,
@@ -1633,7 +1656,9 @@ export function createStore(path) {
       run.receipt,
       policyEpoch,
       runType,
-      skipped
+      skipped,
+      storeCount,
+      storeChars
     );
     return getDreamRun(id);
   }
@@ -1665,6 +1690,27 @@ export function createStore(path) {
     if (!row?.created_at) return 0;
     const ms = Date.parse(row.created_at);
     return Number.isFinite(ms) ? ms : 0;
+  }
+
+  // Issue #89（基线半边）：上次成功刷新后的阈值基线（活跃条数 / 正文字符数）。与
+  // lastDreamRunAt 同源——审计表就是事实源，不另开一份状态；差别只在只认「推进过
+  // 基线」的行（两列同时非 NULL = 那一轮是 ok）。按 run_type 隔离：sleep/organize
+  // 的轮次不参与 auto 的阈值判定，混用会让其余模块的库规模假扮成巩固基线。
+  // 认不出行时返回 null，调用方退回零基线（= 升级前行为），绝不假装知道基线。
+  function lastDreamBaseline(runType = null) {
+    const where = "store_count IS NOT NULL AND store_chars IS NOT NULL";
+    const row = runType
+      ? db.prepare(
+          `SELECT store_count, store_chars FROM dream_runs
+            WHERE run_type = ? AND ${where}
+            ORDER BY created_at DESC, id LIMIT 1`
+        ).get(runType)
+      : db.prepare(
+          `SELECT store_count, store_chars FROM dream_runs
+            WHERE ${where} ORDER BY created_at DESC, id LIMIT 1`
+        ).get();
+    if (!row) return null;
+    return { count: row.store_count, chars: row.store_chars };
   }
 
   /**
@@ -2820,6 +2866,7 @@ export function createStore(path) {
     searchVector,
     saveDreamRun,
     lastDreamRunAt,
+    lastDreamBaseline,
     getDreamRun,
     listDreamRuns,
     getLatestPolicyEpoch,
