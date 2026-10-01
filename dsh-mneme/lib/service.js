@@ -1612,6 +1612,26 @@ export function createService({ store, mirror, config, onWrite, logger, document
     if (config?.strictScope === true && scope) {
       candidates = candidates.filter((m) => isVisibleInScope(m, scope));
     }
+    // #24 块3：图召回候选打标。entityRecall 只在 entityRecallEnabled 开启时
+    // 有产出，这里为命中者贴 graphHint 标签——注入侧据此（a）graphInjectHint
+    // 开=标成 [检索线索] 前缀的线索行（独立预算），（b）关=线索行只参与排序
+    // 不改变注入块（保守档）。与检索侧共用同一图闸：块1 #341 把 entityRecall
+    // 升级成级联后，注入侧自动吃到同样的扩散信号，无需再改。只在语义/规则候选
+    // 为空时兜底检索，避免注入路径双倍候选成本。
+    if (config?.entityRecallEnabled === true && q) {
+      try {
+        const graphHits = entityRecall(q, maxItems * 2);
+        if (graphHits.length) {
+          const graphIds = new Set(graphHits.map((m) => m.id));
+          candidates = [
+            ...candidates.map((m) => graphIds.has(m.id) ? { ...m, graphHint: true } : m),
+            ...graphHits
+              .filter((m) => !candidates.some((c) => c.id === m.id))
+              .map((m) => ({ ...m, graphHint: true }))
+          ];
+        }
+      } catch { /* graph hint is best-effort */ }
+    }
     // #249 第一批：B1 pin 池。取在相关性排序之后、轮换之前——取谁按此刻的候选
     // 次序（即相关性次序），取到后从候选中摘除，于是下面的轮换重排碰不到它们
     // （验收：pin 不参与跨轮轮换）。独立预算的两层意义：pin 既不占 maxItems
@@ -1619,7 +1639,10 @@ export function createService({ store, mirror, config, onWrite, logger, document
     // 超预算的条数回报给调用方，在块内如实标注（绝不静默省略）。
     const pinnedBudget = Math.max(0, Math.min(5, Math.floor(config?.pinnedInjectBudget ?? 0)));
     // eligible 留到块外：未展示条数要等 general 槽选完才算得准（见 selected 之后）。
-    const eligible = pinnedBudget > 0 ? candidates.filter((m) => PINNED_MEMORY_TYPES.has(m.type)) : [];
+    // graphHint 行不进 pin 池：pin 是「每轮必进的约束/偏好」，而线索行按定义是
+    // 「链路信息、非事实断言」，且 pin 长在候选池遍历之前——不排除的话，保守档
+    // （graphInjectHint 关）也能从 pin 侧把它放回注入块，线索开关就被绕过去了。
+    const eligible = pinnedBudget > 0 ? candidates.filter((m) => PINNED_MEMORY_TYPES.has(m.type) && m.graphHint !== true) : [];
     let pinned = [];
     if (pinnedBudget > 0 && eligible.length > 0) {
       pinned = eligible.slice(0, pinnedBudget);
@@ -1640,9 +1663,23 @@ export function createService({ store, mirror, config, onWrite, logger, document
     // 注入块变成文档目录（#164 失败判据：批量把历史塞进上下文）。
     const documentBudget = config?.documentInjectBudget ?? 2;
     let documentSeen = 0;
+    // #24 块3：图线索行（graphHint）按独立预算 graphInjectBudget 进块；所谓
+    // 独立=既不受 document 预算约束、也不挤占 maxItems 槽位。graphInjectHint
+    // 关（默认保守档）时线索行**不进注入块**——它们只参与候选池排序（对融合无
+    // 影响，因为候选池生成的唯一用途就是注入），桥接信号不污染常驻文本；开时
+    // 才作为 [检索线索] 前缀行进入。与 document/pin 同构：预算只约束注入。
+    const hintOpen = config?.graphInjectHint === true;
+    let graphSeen = 0;
+    const graphBudget = hintOpen ? Math.max(0, Math.floor(config?.graphInjectBudget ?? 1)) : 0;
     const general = [];
     for (const m of candidates) {
-      if (general.length >= maxItems) break;
+      if (m.graphHint === true) {
+        if (!hintOpen) continue;      // 保守档：线索只排序不进块
+        if (graphSeen >= graphBudget) continue; // 独立预算内放行
+        graphSeen++;
+      } else if (general.length >= maxItems) {
+        break; // 普通候选受 maxItems 槽位上界
+      }
       if (m.type === "document") {
         if (documentSeen >= documentBudget) continue;
         documentSeen++;
