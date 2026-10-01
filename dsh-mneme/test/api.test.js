@@ -669,8 +669,9 @@ test("GET /api/dsh-mneme/features returns empty overrides and effective config d
   // issue #239 第 4 项镜像到巩固新增 dreamPeakHours/dreamPeakMaxDeferMinutes，
   // issue #292 新增 autoDreamFailureBackoff、
   // issue #254 新增 writeAdmission.enabled/writeAdmission.enforce，
-  // issue #34 恢复（#333）新增 injectTimePrefix）
-  assert.equal(Object.keys(data.effective).length, 59 + 3 + 2 + 1 + 2 + 2 + 2 + 1 + 1 + 1 + 2 + 1 + 2 + 1);
+  // issue #34 恢复（#333）新增 injectTimePrefix、
+  // issue #24 块1 新增 graphAnchoringEnabled/graphSeedCap/graphCascadeDepth）
+  assert.equal(Object.keys(data.effective).length, 59 + 3 + 2 + 1 + 2 + 2 + 2 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 3);
   assert.equal(data.effective.dreamSkipInvalid, true);
   assert.equal(data.effective.allowCrossTypeMerge, false);
   assert.equal(data.effective.dreamMinIntervalMinutes, 0);
