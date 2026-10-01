@@ -64,6 +64,9 @@ const FEATURE_FLAG_BOOLEANS = [
   // Issue #24 块2：边权重演化——touch 门控把被寻回路径的边权重抬升
   // （默认关；依赖实体抽取产出，lightMode 强制关闭）。
   "graphWeightEnabled",
+  // Issue #24 块3：关联提示防幻觉——图召回线索行以「[检索线索]」标注进注入
+  // （默认关=线索只参与排序不进块；依赖实体抽取产出，lightMode 强制关闭）。
+  "graphInjectHint",
   // Issue #164：叙述条——dream 期间按 tag 主题簇合成叙述落库（source=
   // narrative，evidence 回链簇内记忆；按需检索不常驻注入；默认关）。
   "dreamNarrativeEnabled",
@@ -152,7 +155,9 @@ const FEATURE_FLAG_INT_RANGES = {
   dreamSummaryMaxInputs: [0, 100000],
   // Issue #24 块1：锚定种子上限与级联深度（闭区间与 config.js 的 z.natural() 对齐）。
   graphSeedCap: [1, 30],
-  graphCascadeDepth: [1, 3]
+  graphCascadeDepth: [1, 3],
+  // Issue #24 块3：图线索行的独立注入预算（0 = 线索不进块）。
+  graphInjectBudget: [0, 5]
 };
 // 浮点开关的闭区间（与 config.js 的 z.number().min().max() 对齐）。与整数开关
 // 分开：面板的整数控件要求 Number.isInteger，而余弦相似度阈值必须允许小数。

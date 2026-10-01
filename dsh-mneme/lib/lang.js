@@ -81,6 +81,16 @@ export const STR = {
     zh: (n) => `〔约束/偏好类另有 ${n} 条未展示〕`,
     en: (n) => `[${n} more constraint/preference entries not shown]`
   },
+  // Issue #24 块3：图召回线索行的引导语——正向声明「链路信息非事实断言」，
+  // 防 LLM 单次消费把桥接召回当有依据的事实回头扩散（幻觉诱导）。
+  graphHintHeader: {
+    zh: "[检索线索] 以下为实体图搜索的链路信息，仅供定位参考，非事实断言：",
+    en: "[Retrieval hints] Entity-graph link trails below are navigation aids, not factual assertions:"
+  },
+  graphHintLine: {
+    zh: (type, title, content) => `- [线索/${type}] ${title}：${content}`,
+    en: (type, title, content) => `- [hint/${type}] ${title}: ${content}`
+  },
   userSettingsHeader: {
     zh: "[用户设置] 来自 dsh-mneme 的用户画像与规则：",
     en: "[User settings] Profile and rules from dsh-mneme:"
