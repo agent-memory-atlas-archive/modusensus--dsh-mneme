@@ -226,7 +226,10 @@ export async function extractEntities(memory, { store, config, callLLM, logger }
           to_entity: toId,
           relation_type: rel.type,
           memory_id: memory.id,
-          metadata: { model: options.model || "default" }
+          metadata: { model: options.model || "default" },
+          // issue #24 块2：LLM 抽取自动建边 → llm 来源（初值 0.4），区别于
+          // 人工/确认的满权边。来源进 metadata 之上的独立列，演化与审计可辨。
+          source: "llm"
         });
         savedRelations.push(saved);
       } catch (err) {

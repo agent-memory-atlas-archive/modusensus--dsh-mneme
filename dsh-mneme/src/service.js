@@ -11,6 +11,7 @@ import { createDocumentRegistrar } from "./document.js";
 import { createOrganizer } from "./organize.js";
 import { createBM25Index } from "./search/bm25.js";
 import { adaptiveThreshold } from "./search/adaptive.js";
+import { anchorSeeds, normalizePath, cascadeDepths, HOP_QUOTA } from "./graph/anchoring.js";
 
 const INJECT_TYPES = new Set(["preference", "project", "decision", "summary", "rejected_solution", "pitfall", "constraint"]);
 
@@ -448,30 +449,92 @@ export function createService({ store, mirror, config, onWrite, logger, document
   }
 
   /**
-   * Graph fourth recall path (issue #219). When the query text mentions a
-   * known entity name, memories linked to that entity (attrs + relations)
-   * join the fusion pool as a confirm/backfill signal — same standing as
-   * BM25, never dominating the semantic ranking. Tier scores: attr-linked
-   * 1.0 (direct evidence, same source searchByEntity trusts) > relation
-   * edge 0.9. Archived/forgotten rows never participate. Failures degrade
-   * to [] — a recall booster, never a correctness gate (same contract as
-   * bm25Recall).
+   * Graph fourth recall path (issue #219 → #24 块1 锚定层). When the query text
+   * mentions a known entity name, memories linked to that entity (attrs +
+   * relations) join the fusion pool as a confirm/backfill signal — same standing
+   * as BM25, never dominating the semantic ranking. Tier scores: attr-linked
+   * 1.0 (direct evidence, same source searchByEntity trusts) > relation edge
+   * 0.9. Archived/forgotten rows never participate. Failures degrade to [] —
+   * a recall booster, never a correctness gate (same contract as bm25Recall).
+   *
+   * #24 升级（graphAnchoringEnabled）：命中实体作为锚定种子，沿 entity_relations
+   * 级联扩散邻居（默认深度 2），邻居挂联的记忆以 hop 配额权重参与——把「关系是
+   * 用出来的」延伸成检索信号：查询命中的不只有直接挂联，还有跳跃可达的活跃子图。
+   * 邻居权重 = HOP_QUOTA[hop] × linked tier（attr 1.0 / relation 0.9），仍低于
+   * 直达种子的满权，绝不喧宾夺主。
    */
   function entityRecall(q, limit) {
     if (config?.entityRecallEnabled !== true) return [];
     try {
       const entities = store.findEntitiesMentionedIn(q);
       if (!entities.length) return [];
-      const linked = store.getLinkedMemoryIds(entities.map((e) => e.id));
-      if (!linked.size) return [];
-      const hits = [];
-      for (const [id, tier] of linked) {
-        const row = store.getById(id);
-        if (!row || row.archived || row.forgotten) continue;
-        hits.push({ ...row, score: tier === "attr" ? 1.0 : 0.9, source: "entity" });
-        if (hits.length >= limit * 2) break;
+      // 关闭锚定级联=逐字节复用 #219 单跳轴：种子裁剪/重排/截断全是 #24 新增的
+      // 行为，默认关时一条都不许漏进旧路径（graphSeedCap 也只在开启后生效——
+      // 无论 cap 调多小，关档时命中实体仍全量挂联）。
+      if (config?.graphAnchoringEnabled !== true) {
+        const linked = store.getLinkedMemoryIds(entities.map((e) => e.id));
+        if (!linked.size) return [];
+        const hits = [];
+        for (const [id, tier] of linked) {
+          const row = store.getById(id);
+          if (!row || row.archived || row.forgotten) continue;
+          hits.push({ ...row, score: tier === "attr" ? 1.0 : 0.9, source: "entity" });
+          if (hits.length >= limit * 2) break;
+        }
+        return hits;
       }
-      return hits;
+      // 锚定种子（精确名布尔通路——命名实体逻辑上是离散匹配，不参与 min-max）。
+      const exact = normalizePath(entities.map((e) => e.id), { path: "exact" });
+      const seeds = anchorSeeds({ paths: [exact], cap: config?.graphSeedCap ?? 12 });
+      if (!seeds.length) return [];
+      // 0-hop 直达：挂联记忆按 tier 定分（attr 1.0 / relation 0.9）——与 #219
+      // 单跳轴同分。MAX 语义：同一条记忆被多实体挂联时保留最高分。
+      const scored = new Map();
+      const push = (memId, score) => {
+        if (scored.has(memId) && scored.get(memId) >= score) return;
+        const row = store.getById(memId);
+        if (!row || row.archived || row.forgotten) return;
+        scored.set(memId, score);
+      };
+      const seedLinked = store.getLinkedMemoryIds(seeds.map((s) => s.id));
+      for (const [memId, tier] of seedLinked) {
+        push(memId, tier === "attr" ? 1.0 : 0.9);
+      }
+      // 级联：沿 entity_relations 走 BFS，邻居挂联的记忆以 hop 配额权重补位——
+      // 不覆盖种子直达分（MAX 语义保证），只填「种子里没有但邻居可达」的槽。
+      const seedIds = seeds.map((s) => s.id);
+      const adjacency = store.getEntityNeighbors(seedIds);
+      const depths = cascadeDepths({
+        seeds,
+        // 逐节点懒取邻居：初次查询只带种子那一层的邻接，BFS 走到 1-hop 节点时
+        // 必须按需再拉一层，否则 >1 跳永远拿到空邻居、graphCascadeDepth≥2 形同
+        // 虚设。节点数随图度数增长，热路径上以 graphCascadeDepth≤3 为天然上界，
+        // 真遇到大图再考虑查询配额。
+        adjacencyOf: (id) => {
+          if (!adjacency.has(id)) adjacency.set(id, store.getEntityNeighbors([id]).get(id) ?? []);
+          return adjacency.get(id);
+        },
+        maxDepth: config?.graphCascadeDepth ?? 2
+      });
+      let neighborsSeen = 0;
+      const neighborCap = (config?.graphSeedCap ?? 12) * HOP_QUOTA[1]; // 1-hop 配额即为邻居总量上界
+      for (const [nid, hop] of depths) {
+        if (hop < 1) continue;
+        if (neighborsSeen >= Math.max(1, Math.floor(neighborCap))) break;
+        neighborsSeen++;
+        const neighborLinked = store.getLinkedMemoryIds([nid]);
+        for (const [memId, tier] of neighborLinked) {
+          const tierW = tier === "attr" ? 1.0 : 0.9;
+          push(memId, HOP_QUOTA[Math.min(hop, 3)] * tierW);
+        }
+      }
+      const hits = [...scored.entries()]
+        .map(([id, score]) => {
+          const row = store.getById(id);
+          return { ...row, score, source: "entity" };
+        })
+        .sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      return hits.slice(0, limit * 2);
     } catch {
       return [];
     }

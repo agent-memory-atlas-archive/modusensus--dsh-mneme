@@ -58,6 +58,12 @@ const FEATURE_FLAG_BOOLEANS = [
   // Issue #219：图召回轴——查询命中实体名时把挂联记忆并入检索融合池
   // （默认关；依赖实体抽取产出，lightMode 强制关闭）。
   "entityRecallEnabled",
+  // Issue #24 块1：图谱锚定层级联——命中实体作种子、沿关系表向邻居扩散
+  // （默认关；依赖实体抽取产出，lightMode 强制关闭）。
+  "graphAnchoringEnabled",
+  // Issue #24 块2：边权重演化——touch 门控把被寻回路径的边权重抬升
+  // （默认关；依赖实体抽取产出，lightMode 强制关闭）。
+  "graphWeightEnabled",
   // Issue #24 块3：关联提示防幻觉——图召回线索行以「[检索线索]」标注进注入
   // （默认关=线索只参与排序不进块；依赖实体抽取产出，lightMode 强制关闭）。
   "graphInjectHint",
@@ -147,6 +153,9 @@ const FEATURE_FLAG_INT_RANGES = {
   sleepMaxTokens: [256, 131072],
   // Issue #258：总览（dream_summarize）输入条数硬上限（0 = 不设上限）。
   dreamSummaryMaxInputs: [0, 100000],
+  // Issue #24 块1：锚定种子上限与级联深度（闭区间与 config.js 的 z.natural() 对齐）。
+  graphSeedCap: [1, 30],
+  graphCascadeDepth: [1, 3],
   // Issue #24 块3：图线索行的独立注入预算（0 = 线索不进块）。
   graphInjectBudget: [0, 5]
 };
@@ -156,7 +165,9 @@ const FEATURE_FLAG_NUMBER_RANGES = {
   // Issue #127：vector 去重档的并入阈值。
   summarizeDedupeMinSim: [0.5, 0.99],
   // Issue #125：hybrid 判"高相似"的阈值。
-  dreamCandidateMinSim: [0.5, 0.99]
+  dreamCandidateMinSim: [0.5, 0.99],
+  // Issue #24 块2：单次有效触达的边权抬升幅度（与 config.js 的闭区间对齐）。
+  graphWeightDelta: [0, 1]
 };
 // 自由字符串开关（与 config.js 的 z.string() 同名同型）：trim 后 ≤200 字符，
 // 空串合法（= 跟随主对话模型/默认路径，面板显示 placeholder）。
