@@ -281,6 +281,14 @@ export const Config = z.object({
   // 显式开启后放宽跨类型合并检查（类型边界由用户自行承担）；配合
   // dreamSkipInvalid 理解：关闭 skipInvalid 时跨类型 merge 直接整单拒绝。
   allowCrossTypeMerge: z.boolean().default(false),
+  // issue #339 / E8 考卷：merge 护栏（opt-in，默认关 = 现状）。开启后合并对象
+  // 命中长保留类型（preference/pattern/rejected_solution/constraint/pitfall，
+  // 与 archive 护栏同一张表）的 merge 决策整条跳过——E8 实测巩固损耗里
+  // 10/26 条被丢约束已归位 guarded 类型仍被 merge 吃掉，而 archive 护栏只挡
+  // archive 不挡 merge，「更精炼的摘要」恰是约束失真的主通道。skipInvalid
+  // （默认开）时被跳条目进 dream_runs.skipped、run 记 degraded；关闭
+  // skipInvalid 时整单拒绝。与 allowCrossTypeMerge 同用时长 guard 先判。
+  dreamMergeGuard: z.boolean().default(false),
   // Rule version for dream adjudication: when this bumps, older dream_runs
   // degrade to historical evidence (their receipts no longer drive live
   // decisions). Default 0 = no versioning in use yet.
@@ -714,7 +722,8 @@ export const Config = z.object({
   // agent_scope, workspace_scope, sensitivity)。检索侧加权/过滤在 A2/A3 落地。
   // 也走 feature_flags（FEATURE_FLAG_BOOLEANS 白名单），面板可启停=线上回滚开关。
   scopeEnabled: z.boolean().default(false),
-  // strictScope（A3）：硬过滤模式。关闭=A2 软隔离（他 scope 降权保留可见）；
+  // strictScope（A3）：硬过滤模式。关闭=A2 软隔离（他 scope 降权保留可见，
+  // 检索与注入排序同权重，issue #339 补齐注入通道）；
   // 开启后检索/注入/list/get 按 issue #17 四象限可见性公式硬过滤——带他 scope
   // 的记忆完全不可见，未标注（NULL）恒可见；当前会话某维度解析不到时该维度
   // 带标注的记忆一律不可见（fail-closed：身份不明只见全局）。依赖 scopeEnabled
