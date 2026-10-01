@@ -2554,6 +2554,39 @@ export function createStore(path) {
   }
 
   /**
+  /**
+   * 批量邻接（issue #24 · 块1 锚定层级联）：给定多条实体 id，一并取全部关系行
+   * 并归并成「每个实体 → 相邻实体 id 去重列表」的邻接表。供 anchoring.js 的
+   * cascadeDepths 使用——多实体一族只需要一次 SQL（IN 查询），比逐实体调
+   * getRelations 的 N 次往返省。邻接是无向的（from/to 双向），往返不重复。
+   * 返回 Map<entityId, Array<entityId>>；未命中的实体缺省为 absent（级联视为
+   * 无邻居，Map 里不放键同行，null 同等对待）。
+   */
+  function getEntityNeighbors(entityIds) {
+    const out = new Map();
+    const ids = Array.isArray(entityIds) ? entityIds.filter(Boolean) : [];
+    if (!ids.length) return out;
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = db.prepare(
+      `SELECT from_entity, to_entity FROM entity_relations
+       WHERE from_entity IN (${placeholders}) OR to_entity IN (${placeholders})`
+    ).all(...ids, ...ids);
+    for (const r of rows) {
+      addNeighbor(out, r.from_entity, r.to_entity, ids);
+      addNeighbor(out, r.to_entity, r.from_entity, ids);
+    }
+    return out;
+  }
+
+  function addNeighbor(out, anchor, neighbor, queryIds) {
+    if (!queryIds.includes(anchor)) return; // 只以查询过的实体为锚
+    if (neighbor === anchor) return;        // 自环不构成扩散边
+    if (!out.has(anchor)) out.set(anchor, []);
+    const list = out.get(anchor);
+    if (!list.includes(neighbor)) list.push(neighbor);
+  }
+
+  /**
    * 按记忆反查关联边（issue #24 块4 被动确认）：一条记忆被召回/注入（触达）
    * 时，挂在同一记忆上的关系行即「这条关系被用过了」的证据——正常触达视为
    * 被动确认，调用方据此 bumpRelationWeight。返回 toRelation 行（含 weight/
@@ -2951,6 +2984,7 @@ export function createStore(path) {
     bumpRelationWeight,
     migrateAttrsToMemory,
     getRelations,
+    getEntityNeighbors,
     getRelationsByMemory,
     setMirrorState,
     getMirrorState,
