@@ -12,6 +12,8 @@
 - **边权重演化 Weight Evolution（issue #24 块2）**：`entity_relations` 加 `weight`/`source` 两列（幂等迁移，存量行按 manual 1.0 认账）——建边来源决定初值（manual/confirmed 1.0、llm 0.4、tag 0.3），LLM 抽取自动建的边标 `source='llm'`；演化走 `bumpRelationWeight`（只加不减、封顶 1.0，单条 `UPDATE ... MIN(1.0, weight + ?)` 原子抬升，负/非有限增量在存储边界拒绝）。新增两键 `graphWeightEnabled`/`graphWeightDelta` 注册进 feature_flags 白名单，面板可启停；lightMode 强制关。触达侧接线见块4（被动确认）。
 - **关联提示防幻觉 Injection Budget（issue #24 块3）**：图召回候选进注入时默认只参与排序、不改变注入块构成（`graphInjectHint` 关，保守档）；开启后以固定句式「[检索线索]」标注、并在首个线索行前加引导语（链路信息非事实断言），条数由独立预算 `graphInjectBudget` 约束——既不受 document 预算约束、也不挤占 `maxItems` 槽位。线索行不进 pin 池（pin 会在保守档下把它放回块内，绕过开关）。新增两键注册进 feature_flags 白名单；lightMode 强制关。
 
+- **被动确认 Passive Confirmation（issue #24 块4）**：把「人工认可/删除/忽略」的确认门槛收敛成例外管理——正常触达（记忆被召回/注入）即视为对挂联关系边的被动确认，`store.getRelationsByMemory` 反查关联边后 `bumpRelationWeight` 抬一格（只加不减、封顶 1.0，自激回路由封顶遏制）。`graphPassiveConfirm` 与 heat 是独立闸门（`heatEnabled=false` 时仍可演化边权），且受块2 总闸 `graphWeightEnabled` 约束——两键同开才生效，单开通道键绕不过「演化默认关」。仅异常路径暴露给用户复核的复核 UI 留后续块。新增键注册进 feature_flags 白名单；lightMode 强制关。
+
 ## 🧹 工程
 
 - **基线持久化回归集 9 条，全量测试 1441 → 1450**：无种子对照组与播种组同库同写入（一个仍触发、一个被拦下——锁的正是这个差异，否则播种被忽略时两条断言同真同假）、阈值照常累积（+10 条仍触发）、run 自报基线优先于现场计算（运行后再长 15 条仍不触发）、成功轮落库 / 失败轮不落、sleep 行不进 auto 基线、半个基线被拒、老库补列幂等、非法种子（半个 / 负数 / 非整数 / 非对象）一律按「没有基线」处理、收尾取证失败既不反噬审计行也不写假基线、`index.js` 接线源码锁。**变异检验**：把播种改成忽略种子（`toBaseline(baselineSeed)` 恒为空）→ 2 条变红；把「成功轮落基线」分支短路 → 1 条变红。

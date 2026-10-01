@@ -671,8 +671,9 @@ test("GET /api/dsh-mneme/features returns empty overrides and effective config d
   // issue #254 新增 writeAdmission.enabled/writeAdmission.enforce，
   // issue #34 恢复（#333）新增 injectTimePrefix、
   // issue #24 块1 新增 graphAnchoringEnabled/graphSeedCap/graphCascadeDepth、
-  // 块2 新增 graphWeightEnabled/graphWeightDelta、块3 新增 graphInjectHint/graphInjectBudget）
-  assert.equal(Object.keys(data.effective).length, 59 + 3 + 2 + 1 + 2 + 2 + 2 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 3 + 2 + 2);
+  // 块2 新增 graphWeightEnabled/graphWeightDelta、块3 新增 graphInjectHint/graphInjectBudget、
+  // 块4 新增 graphPassiveConfirm）
+  assert.equal(Object.keys(data.effective).length, 59 + 3 + 2 + 1 + 2 + 2 + 2 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 3 + 2 + 2 + 1);
   assert.equal(data.effective.dreamSkipInvalid, true);
   assert.equal(data.effective.allowCrossTypeMerge, false);
   assert.equal(data.effective.dreamMinIntervalMinutes, 0);

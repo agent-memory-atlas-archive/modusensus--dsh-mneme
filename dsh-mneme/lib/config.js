@@ -469,6 +469,10 @@ export const Config = z.object({
   graphWeightEnabled: z.boolean().default(false),
   // 单次有效触达的抬升幅度。
   graphWeightDelta: z.number().min(0).max(1).default(0.1),
+  // 被动确认（issue #24 块4）：heat 触达（记忆被召回/注入=被用）即对该记忆
+  // 挂联的关系边做被动确认——bumpRelationWeight 抬一格。默认关=零行为变化；
+  // 开=正常触达演化边权，「关系是用出来的」闭环落地（异常路径复核留后续块）。
+  graphPassiveConfirm: z.boolean().default(false),
 
   // --- 图谱锚定层（issue #24 · 块1 Activation Anchoring）-------------------
   // entityRecallEnabled 之上再开一层：以查询命中的实体为种子，沿实体关系表
@@ -743,6 +747,8 @@ const LIGHT_MODE_OFF = [
   "graphWeightEnabled",
   // 轻量模式不开关联提示标注（#24 块3，常驻注入文本多一段提示成本）。
   "graphInjectHint",
+  // 轻量模式不开被动确认（#24 块4，依赖实体抽取产出；抽取关则无 v08 边可抬升）。
+  "graphPassiveConfirm",
   // 轻量模式不开叙述条（额外 LLM 调用；#164 对齐，opt-in）。
   "dreamNarrativeEnabled",
   // 轻量模式不开 document 指针行（#230，opt-in：注册/注入/检索增强全随闸）。

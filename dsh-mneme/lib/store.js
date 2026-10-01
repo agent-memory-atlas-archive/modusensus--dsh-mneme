@@ -2554,6 +2554,7 @@ export function createStore(path) {
   }
 
   /**
+  /**
    * 批量邻接（issue #24 · 块1 锚定层级联）：给定多条实体 id，一并取全部关系行
    * 并归并成「每个实体 → 相邻实体 id 去重列表」的邻接表。供 anchoring.js 的
    * cascadeDepths 使用——多实体一族只需要一次 SQL（IN 查询），比逐实体调
@@ -2583,6 +2584,19 @@ export function createStore(path) {
     if (!out.has(anchor)) out.set(anchor, []);
     const list = out.get(anchor);
     if (!list.includes(neighbor)) list.push(neighbor);
+  }
+
+  /**
+   * 按记忆反查关联边（issue #24 块4 被动确认）：一条记忆被召回/注入（触达）
+   * 时，挂在同一记忆上的关系行即「这条关系被用过了」的证据——正常触达视为
+   * 被动确认，调用方据此 bumpRelationWeight。返回 toRelation 行（含 weight/
+   * source）。索引 idx_relations_memory 已建（#219）。
+   */
+  function getRelationsByMemory(memoryId) {
+    if (!memoryId) return [];
+    return db.prepare(
+      "SELECT * FROM entity_relations WHERE memory_id = ?"
+    ).all(memoryId).map(toRelation);
   }
 
   /** All entities (optionally name-filtered, newest first). Used by sleep phase 4
@@ -2971,6 +2985,7 @@ export function createStore(path) {
     migrateAttrsToMemory,
     getRelations,
     getEntityNeighbors,
+    getRelationsByMemory,
     setMirrorState,
     getMirrorState,
     markMirrorDirty,

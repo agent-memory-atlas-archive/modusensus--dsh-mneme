@@ -61,12 +61,15 @@ const FEATURE_FLAG_BOOLEANS = [
   // Issue #24 块1：图谱锚定层级联——命中实体作种子、沿关系表向邻居扩散
   // （默认关；依赖实体抽取产出，lightMode 强制关闭）。
   "graphAnchoringEnabled",
-  // Issue #24 块2：边权重演化——touch 门控把被寻回路径的边权重抬升
-  // （默认关；依赖实体抽取产出，lightMode 强制关闭）。
+  // Issue #24 块2：边权重演化总闸——关着时任何触达都不改边权（默认关；
+  // 依赖实体抽取产出，lightMode 强制关闭）。块4 的被动确认是它底下的一个通道。
   "graphWeightEnabled",
   // Issue #24 块3：关联提示防幻觉——图召回线索行以「[检索线索]」标注进注入
   // （默认关=线索只参与排序不进块；依赖实体抽取产出，lightMode 强制关闭）。
   "graphInjectHint",
+  // Issue #24 块4：被动确认通道——正常触达即对该记忆挂联的边 bump 一格
+  // （默认关；需总闸 graphWeightEnabled 同开）。
+  "graphPassiveConfirm",
   // Issue #164：叙述条——dream 期间按 tag 主题簇合成叙述落库（source=
   // narrative，evidence 回链簇内记忆；按需检索不常驻注入；默认关）。
   "dreamNarrativeEnabled",
