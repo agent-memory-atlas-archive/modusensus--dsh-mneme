@@ -63,7 +63,7 @@ dsh-mneme 是 DSH 宿主的记忆插件（蒸馏 / 注入 / 检索 / 巩固 / sc
 
 ## 闸门清单
 
-- `npm test`（CI 矩阵：ubuntu + windows × node 22/24）
+- `npm test`（CI 矩阵：ubuntu + windows × node 22/24；另有一条宿主兼容腿 `test-host-legacy`，把 peer 声明的 0.1.x 两段也真跑一遍）
 - check-sync（src ↔ lib 平价）
 - CodeRabbit 自动评审（每个 PR）
 - codecov 补丁覆盖率
