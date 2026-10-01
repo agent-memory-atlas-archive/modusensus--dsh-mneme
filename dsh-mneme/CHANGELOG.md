@@ -5,7 +5,7 @@
 ## 🐛 修复
 
 - **巩固阈值基线跨重启持久化（issue #89 基线半边）**：#291 只把时间闸门 `lastRunAt` 从 `dream_runs` 恢复了回来，阈值基线 `baseline{count,chars}` 仍是调度器闭包里的内存变量，进程重启归零。库里记忆远多于阈值（默认 10 条 / 5000 字符）时，重启后第一条写入（`notifyWrite` → `dreamHook` → `maybeSchedule`，更新类写入同样计入）就让 `overBase` 成立——**阈值被整个绕过**，直接开跑一整轮巩固。0.8.11 实测一天四次重启，其后第一轮巩固发生时窗口内只新增 6 / 7 / 0 / 8 条记忆（1427 / 1488 / 0 / 1509 字符），每轮约 16 万 tokens（consolidate ≈7.5 万 + 总览 ≈8.8 万，`llm_audit_logs` 实测）。现在成功轮把「本轮结束后的活跃库规模」写进 `dream_runs.store_count` / `store_chars`（新增两列，幂等迁移，两列同时有值或同时为 NULL），调度器构造时按 `run_type='auto'` 播种；认不出行（新库、升级后还没跑过成功轮、老行两列为 NULL）就退回零基线——**不假装知道基线**，行为与升级前逐字节一致。阈值口径抽成 `activeStoreSize()` 单一实现，`shouldTrigger` 与落库共用：两处各写一份过滤条件的话，重启播种读到的基线会与运行期判定漂移（一个把 document 算进去、一个不算），而这种漂移只在重启后才显形。run 自报的基线与审计行是同一份数字，进程内刷新改用它，两条路径不再各算一次。
-- **蒸馏 JSON 崩溃窗口的 salvage（issue #339，E8 考卷）**：E8 实测 10-20% 的蒸馏窗口输出了
+- **蒸馏 JSON 崩溃窗口的 salvage**：实测 10-20% 的蒸馏窗口输出了
   含记忆条目的完整 JSON 数组，只因中段一处语法错误（如杂散引号）被 `parseSummaryJsonResult`
   整窗拒收——失败路径的生产行为是游标不推进 + 温度 0 重试同文同错 = 该窗口记忆静默丢失，
   无任何用户可见信号；再蒸馏场景（摘要再当输入）崩溃率翻倍。修复：解析失败时做括号配对
@@ -20,17 +20,17 @@
 - **边权重演化 Weight Evolution（issue #24 块2）**：`entity_relations` 加 `weight`/`source` 两列（幂等迁移，存量行按 manual 1.0 认账）——建边来源决定初值（manual/confirmed 1.0、llm 0.4、tag 0.3），LLM 抽取自动建的边标 `source='llm'`；演化走 `bumpRelationWeight`（只加不减、封顶 1.0，单条 `UPDATE ... MIN(1.0, weight + ?)` 原子抬升，负/非有限增量在存储边界拒绝）。新增两键 `graphWeightEnabled`/`graphWeightDelta` 注册进 feature_flags 白名单，面板可启停；lightMode 强制关。触达侧接线见块4（被动确认）。
 - **关联提示防幻觉 Injection Budget（issue #24 块3）**：图召回候选进注入时默认只参与排序、不改变注入块构成（`graphInjectHint` 关，保守档）；开启后以固定句式「[检索线索]」标注、并在首个线索行前加引导语（链路信息非事实断言），条数由独立预算 `graphInjectBudget` 约束——既不受 document 预算约束、也不挤占 `maxItems` 槽位。线索行不进 pin 池（pin 会在保守档下把它放回块内，绕过开关）。新增两键注册进 feature_flags 白名单；lightMode 强制关。
 - **被动确认 Passive Confirmation（issue #24 块4）**：把「人工认可/删除/忽略」的确认门槛收敛成例外管理——正常触达（记忆被召回/注入）即视为对挂联关系边的被动确认，`store.getRelationsByMemory` 反查关联边后 `bumpRelationWeight` 抬一格（只加不减、封顶 1.0，自激回路由封顶遏制）。`graphPassiveConfirm` 与 heat 是独立闸门（`heatEnabled=false` 时仍可演化边权），且受块2 总闸 `graphWeightEnabled` 约束——两键同开才生效，单开通道键绕不过「演化默认关」。仅异常路径暴露给用户复核的复核 UI 留后续块。新增键注册进 feature_flags 白名单；lightMode 强制关。
-- **`dreamMergeGuard`（issue #339，E8 考卷，opt-in 默认关）**：巩固 merge 护栏——合并对象命中
+- **`dreamMergeGuard`（opt-in 默认关）**：巩固 merge 护栏——合并对象命中
   长保留类型（与 archive 护栏同表：preference/pattern/rejected_solution/constraint/pitfall）的
-  merge 决策整条跳过。E8 实测巩固损耗里 10/26 条被丢约束已归位 guarded 类型仍被 merge 吃掉
+  merge 决策整条跳过。实测巩固损耗里 10/26 条被丢约束已归位 guarded 类型仍被 merge 吃掉
   （archive 护栏只挡 archive 不挡 merge，「更精炼的摘要」恰是约束失真的主通道）。
   `dreamSkipInvalid`（默认开）时被跳条目进 `dream_runs.skipped`、run 记 degraded；关闭时整单拒绝。
   dream 与 sleep 两条链路同一判据；白名单 + 计数锁 +1。
 
 ### scope
 
-- **A2 软加权补齐到注入通道（issue #339，E7 考卷）**：此前 ×0.5/×1.25 只作用于 searchMemories，
-  E7 实测「explicit 标注 + 软档」的注入集与无标注逐条相同（80/80）——自动注入这个主泄露面上
+- **A2 软加权补齐到注入通道**：此前 ×0.5/×1.25 只作用于 searchMemories，
+  实测「explicit 标注 + 软档」的注入集与无标注逐条相同（80/80）——自动注入这个主泄露面上
   软档形同虚设，而文档本就承诺「关闭时全部为软隔离」。现 `scopeEnabled` 开启且会话至少一维
   可解析时，注入规则路比较器在层内数值积乘 `scopeMultiplier`（priority 档位不动）、selectiveInject
   相似度重排乘同乘数；未激活时乘 1，排序与改动前逐字节一致。strictScope 硬过滤保持在软加权
@@ -43,6 +43,10 @@
 - **brace-expansion 钉到 5.0.12（PR #345，CVE-2026-102276/102277/102278）**：osv-scanner 三条告警（两条 high 栈耗尽 DoS + 一条 medium 二次时间 DoS）全落在 devDependency 链的同一包上——实际打不着（不被仓库自身 import），但 lock 合规仍要清；overrides 抬 pin 号即清零，`npm audit` 双口径 0 vulnerabilities。
 - **测试数口径收拢到共用模块（PR #346）**：双 README 的测试数以五种形状重复（1 徽章 + 4 条命令注释），而两条写入路径各存一份替换规则——release-prep 只覆盖徽章 URL、`badge:sync` 才覆盖全部，**自动路径反倒成了漂移来源**（v0.8.11 发版后徽章 1437、注释停在 1431）；替换规则收进共用模块，两条路径单一实现，下次发版不再各改一半。
 - **CI 加宿主版本兼容腿（PR #348）**：新增 `test-host-legacy` 作业，把 `peerDependencies` 声明的 0.1.x 两段（0.1.0-rc.8 / 0.1.7-rc.2）各真跑一遍全量测试——此前这两段一直「声明支持却没人验证」，与 #344 是同一类缺口的两侧。
+
+### 贡献者 / Thanks
+
+- **@dustinmoon78** — 蒸馏采集兼容 `role:"tool"` 形状（PR #353，新旧形状都收），修复新内核下工具输出与工具报错被整批静默丢弃。
 
 ## [0.8.11] - 2026-09-30
 

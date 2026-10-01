@@ -143,7 +143,7 @@ Bug-fix PRs for existing desktop compatibility issues are still welcome.
 
 Versioning follows semantic versioning (`MAJOR.MINOR.PATCH`). Full flow:
 
-1. **Update CHANGELOG**: add a version entry (`## [X.Y.Z] - date`, split into 「修复 / 新增 / 测试」) at the top of `dsh-mneme/CHANGELOG.md`; update the root `CHANGELOG.md` if it tracks the same.
+1. **Update CHANGELOG**: add a version entry (`## [X.Y.Z] - date`, split into 「修复 / 新增 / 测试」) at the top of `dsh-mneme/CHANGELOG.md`; update the root `CHANGELOG.md` if it tracks the same. End the section with a `### 贡献者 / Thanks` subsection summarising outside contributors (`git log vPrev..HEAD --format='%an <%ae>' | sort -u`; list non-maintainers as "GitHub handle + what they did", and keep the inline 「感谢 @handle」 in the entry too); omit it when there are none. **Keep entries neutral**: no references to non-public issue numbers and no internal experiment codenames — nobody reading this repository can resolve them.
 2. **Bump version**: change `version` in `dsh-mneme/package.json` and `package-lock.json`.
 3. **Full test pass**: `npm test` must be green.
 4. **Commit and push**: commit → `git push origin main` → `git tag vX.Y.Z` → `git push origin vX.Y.Z`.
@@ -335,7 +335,7 @@ DSH 上游仍处于 developer preview 阶段，API 与服务接口变动频繁�
 
 版本号遵循语义化版本（`MAJOR.MINOR.PATCH`）。完整流程：
 
-1. **更新 CHANGELOG**：在 `dsh-mneme/CHANGELOG.md` 顶部新增版本条目（`## [X.Y.Z] - 日期`，分「修复 / 新增 / 测试」小节），根目录 `CHANGELOG.md` 如涉及同步更新。
+1. **更新 CHANGELOG**：在 `dsh-mneme/CHANGELOG.md` 顶部新增版本条目（`## [X.Y.Z] - 日期`，分「修复 / 新增 / 测试」小节），根目录 `CHANGELOG.md` 如涉及同步更新。小节末尾加 `### 贡献者 / Thanks` 汇总本版外部贡献者（`git log v上一版..HEAD --format='%an <%ae>' | sort -u`，非维护者逐条列「GitHub 用户名 + 一句话做了什么」，条目内也保留「感谢 @用户名」）；无外部贡献者时省掉该小节。**条目一律用中性措辞**：不引用非公开的 issue 编号、不出现内部实验代号——它们在公开仓库里解析不出来，读者只会困惑。
 2. **更新版本号**：改 `dsh-mneme/package.json` 的 `version` 与 `package-lock.json`（根目录无 package.json，勿臆造）。
 3. **全量测试**：`npm test` 确认通过。
 4. **提交并推送**：commit → `git push origin main` → `git tag vX.Y.Z` → `git push origin vX.Y.Z`。
