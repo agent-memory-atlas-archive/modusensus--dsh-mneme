@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHotMemory, estimateTokens } from "../src/hot-memory.js";
+import { createHotMemory, estimateTokens, roundsFromEvents } from "../src/hot-memory.js";
 import { createStore } from "../src/store.js";
 import { createService } from "../src/service.js";
 import { createVectorIndex } from "../src/vector-index.js";
@@ -142,4 +142,70 @@ test("selective injection re-orders candidates by query similarity", () => {
   });
   assert.equal(picked[0].id, thesis.id);
   assert.ok(picked.some((m) => m.id === plugin.id));
+});
+
+// --- roundsFromEvents：surface 投影（rewind 撤回内容不得回流热记忆） ---
+
+function userEvent(seq, text, kind) {
+  return { seq, type: "user/message", data: { source: kind ? { kind } : undefined, content: [text] } };
+}
+function assistantEvent(seq, text) {
+  return { seq, type: "assistant/message", data: { message: { content: [{ type: "text", text }] } } };
+}
+
+test("roundsFromEvents pairs user/assistant rounds and keeps the trailing pending query", () => {
+  const events = [
+    userEvent(1, "第一问"),
+    assistantEvent(2, "第一答"),
+    userEvent(3, "第二问")
+  ];
+  const rounds = roundsFromEvents(events, 5);
+  assert.equal(rounds.length, 2);
+  assert.equal(rounds[0].query, "第一问");
+  assert.equal(rounds[0].response, "第一答");
+  assert.equal(rounds[1].query, "第二问");
+  assert.equal(rounds[1].response, "");
+});
+
+test("roundsFromEvents excludes events shadowed off the surface (rewind/compact)", () => {
+  // append-only 日志里被撤回的轮次仍在，但 surface 只剩可见 seq——
+  // 热记忆必须与模型同源，被遮蔽的轮次不得回流。
+  const events = [
+    userEvent(1, "已被撤回的问题"),
+    assistantEvent(2, "已被撤回的回答"),
+    { seq: 3, type: "user/message", data: { source: { kind: "dsh-rewind" }, content: [""] } },
+    userEvent(4, "撤回后的新问题"),
+    assistantEvent(5, "撤回后的新回答")
+  ];
+  const visible = new Set([3, 4, 5]);
+  const rounds = roundsFromEvents(events, 5, visible);
+  assert.equal(rounds.length, 1);
+  assert.equal(rounds[0].query, "撤回后的新问题");
+  assert.equal(rounds[0].response, "撤回后的新回答");
+  assert.ok(!JSON.stringify(rounds).includes("已被撤回"));
+});
+
+test("roundsFromEvents with no surface info keeps the legacy full-log behavior", () => {
+  const events = [userEvent(1, "旧宿主问题"), assistantEvent(2, "旧宿主回答")];
+  const rounds = roundsFromEvents(events, 5, null);
+  assert.equal(rounds.length, 1);
+  assert.equal(rounds[0].query, "旧宿主问题");
+  assert.equal(rounds[0].response, "旧宿主回答");
+});
+
+test("roundsFromEvents skips rewind markers as queries even when on the surface", () => {
+  const events = [
+    { seq: 1, type: "user/message", data: { source: { kind: "dsh-rewind" }, content: [""] } },
+    userEvent(2, "标记后的第一问"),
+    assistantEvent(3, "标记后的第一答")
+  ];
+  const visible = new Set([1, 2, 3]);
+  const rounds = roundsFromEvents(events, 5, visible);
+  assert.equal(rounds.length, 1);
+  assert.equal(rounds[0].query, "标记后的第一问");
+});
+
+test("roundsFromEvents with an empty surface yields no rounds (model sees nothing)", () => {
+  const events = [userEvent(1, "问题"), assistantEvent(2, "回答")];
+  assert.equal(roundsFromEvents(events, 5, new Set()).length, 0);
 });
