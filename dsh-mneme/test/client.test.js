@@ -600,9 +600,12 @@ test("explorer chrome aligns with the host design system", () => {
     /\.mneme-vtab\.mneme-active::after/.test(clientSource),
     "active sub-tabs use the host underline treatment"
   );
+  // #178：这里原本直接断言宿主品牌蓝。宿主蓝在浅色画布上只有 4.23:1，对 13px
+  // 正文不足 AA，所以面板改用自己的语义色层 --mneme-accent（同一条宿主 token
+  // 往 label-primary 方向混 15%），换肤仍跟随宿主。意图不变：激活态是品牌蓝。
   assert.ok(
-    clientSource.includes(".mneme-vtab.mneme-active{color:var(--dsw-alias-state-business-primary)}"),
-    "active sub-tab text must turn the host brand blue"
+    clientSource.includes(".mneme-vtab.mneme-active{color:var(--mneme-accent)}"),
+    "active sub-tab text must turn the host brand blue (via the panel accent layer)"
   );
   assert.equal(
     /\.mneme-xmain\{[^}]*border:1px/.test(clientSource),

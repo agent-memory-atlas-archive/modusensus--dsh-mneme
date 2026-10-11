@@ -1269,18 +1269,34 @@ window.__ModuleLoader__.load({
       // --- shared controls ---
       ".mneme-search{box-sizing:border-box;height:30px;padding:0 10px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base,transparent);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;outline:none;transition:border-color .12s,box-shadow .12s}",
       ".mneme-search:focus{border-color:var(--dsw-alias-state-business-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-business-primary) 15%,transparent)}",
-      ".mneme-search::placeholder{color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-search::placeholder{color:var(--mneme-fg-dim)}",
       ".mneme-chip{height:26px;padding:0 10px;border-radius:8px;border:1px solid transparent;background:none;color:var(--dsw-alias-label-secondary);cursor:pointer;font-family:inherit;font-size:12px;line-height:16px;display:inline-flex;align-items:center}",
       ".mneme-chip:hover{background:var(--dsw-alias-interactive-bg-hover)}",
-      ".mneme-chip.mneme-active{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 10%,transparent)}",
+      ".mneme-chip.mneme-active{color:var(--mneme-accent);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 10%,transparent)}",
       ".mneme-select{box-sizing:border-box;height:30px;padding:0 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base,transparent);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;outline:none}",
       ".mneme-routeselect{width:240px;max-width:60%}",
       ".mneme-footbtn{border:none;background:none;color:var(--dsw-alias-label-secondary);cursor:pointer;font-family:inherit;font-size:12px;line-height:16px;padding:3px 8px;border-radius:6px}",
       ".mneme-footbtn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
-      ".mneme-hint{color:var(--dsw-alias-label-tertiary);padding:24px 0;text-align:center;font-size:13px}",
-      ".mneme-entitychip{flex:none;height:26px;padding:0 10px;border-radius:8px;border:none;background:none;color:var(--dsw-alias-state-business-primary);cursor:pointer;font-family:inherit;font-size:12px;line-height:16px;display:inline-flex;align-items:center}",
+      ".mneme-hint{color:var(--mneme-fg-dim);padding:24px 0;text-align:center;font-size:13px}",
+      ".mneme-entitychip{flex:none;height:26px;padding:0 10px;border-radius:8px;border:none;background:none;color:var(--mneme-accent);cursor:pointer;font-family:inherit;font-size:12px;line-height:16px;display:inline-flex;align-items:center}",
       ".mneme-entitychip:hover{background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 10%,transparent)}",
       // --- main-area memory library page ---
+      // 面板语义色层（#178）：宿主 token 在浅色下给正文/次要文字只有 1.26–4.49
+      // 的对比度，且面板还一直在引用 5 个根本不存在的宿主名（--dsw-alias-state-error
+      // / -warning / -success / -warn / --dsw-alias-border），
+      // 于是长年吃的是写在 fallback 里的硬编码色。这里按宿主真实 token 现算一组
+      // 面板自有语义色：混色基准全是宿主 token，宿主换肤时跟着走，不引入新字面量。
+      // 必须挂四个根——面板不只长在 .mneme-x 下：记忆库 sheet portal 到 body
+      // （.mneme-overlay）、侧边栏入口在宿主插槽（.mneme-triggerwrap）、顶部入口
+      // portal 到宿主侧边栏（.mneme-topentry）。
+      ".mneme-x,.mneme-overlay,.mneme-triggerwrap,.mneme-topentry{" +
+        "--mneme-fg-dim:color-mix(in srgb,var(--dsw-alias-label-primary) 60%,transparent);" +
+        "--mneme-graphic-dim:color-mix(in srgb,var(--dsw-alias-label-primary) 50%,transparent);" +
+        "--mneme-accent:color-mix(in srgb,var(--dsw-alias-state-business-primary) 85%,var(--dsw-alias-label-primary));" +
+        "--mneme-danger:color-mix(in srgb,var(--dsw-alias-state-error-primary) 80%,var(--dsw-alias-label-primary));" +
+        "--mneme-warn:color-mix(in srgb,var(--dsw-static-amber-600,#dd8629) 65%,var(--dsw-alias-label-primary));" +
+        "--mneme-ok:color-mix(in srgb,var(--dsw-static-green-500,#22c55e) 65%,var(--dsw-alias-label-primary))" +
+      "}",
       ".mneme-x{flex:1;min-height:0;height:100%;width:100%;box-sizing:border-box;display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-1);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);container-type:inline-size}",
       // 窄容器（better-sidebar 工作台 ~500px）下中央 vtabs 会与右缘悬浮的
       // 卡片/时间线切换器重叠：容器查询收窄时隐藏切换器，视图模式沿用
@@ -1289,14 +1305,14 @@ window.__ModuleLoader__.load({
       ".mneme-xbar{position:relative;flex:none;display:flex;align-items:center;justify-content:center;gap:6px;border-bottom:1px solid var(--dsw-alias-border-l2);padding:0 16px;min-height:52px}",
       ".mneme-filterbar{flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 16px;border-bottom:1px solid var(--dsw-alias-border-l2)}",
       ".mneme-vtabs{display:flex;align-items:stretch;height:46px}",
-      ".mneme-vtab{position:relative;border:0;background:none;cursor:pointer;padding:0 16px;color:var(--dsw-alias-label-tertiary);font-family:inherit;font-size:14px;font-weight:500;line-height:20px;display:inline-flex;align-items:center;gap:7px}",
+      ".mneme-vtab{position:relative;border:0;background:none;cursor:pointer;padding:0 16px;color:var(--mneme-fg-dim);font-family:inherit;font-size:14px;font-weight:500;line-height:20px;display:inline-flex;align-items:center;gap:7px}",
       ".mneme-vtab:hover{color:var(--dsw-alias-label-primary)}",
-      ".mneme-vtab.mneme-active{color:var(--dsw-alias-state-business-primary)}",
+      ".mneme-vtab.mneme-active{color:var(--mneme-accent)}",
       ".mneme-vtab.mneme-active::after{content:\"\";position:absolute;left:10px;right:10px;bottom:-1px;height:2.5px;border-radius:2px;background:var(--dsw-alias-state-business-primary)}",
       // transform 会自建层叠上下文：层级必须给在容器上——3 高于吸顶月份头(2)、
       // 低于详情抽屉(6)，下拉菜单/导入对话框随容器整体上浮。
       ".mneme-xtools{position:absolute;right:14px;top:50%;transform:translateY(-50%);display:flex;align-items:center;gap:8px;padding:0;z-index:3}",
-      ".mneme-xcount{flex:none;font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary);white-space:nowrap}",
+      ".mneme-xcount{flex:none;font-size:12px;line-height:16px;color:var(--mneme-fg-dim);white-space:nowrap}",
       // --- three-column browse layout: hairline separators, no outer box ---
       ".mneme-xmain{flex:1;min-height:0;display:flex;flex-direction:row;overflow:hidden}",
       ".mneme-xside{flex:none;width:236px;min-width:0;min-height:0;overflow-y:auto;padding:16px 14px;border-right:1px solid var(--dsw-alias-border-l2);box-sizing:border-box;display:flex;flex-direction:column;gap:8px}",
@@ -1305,23 +1321,23 @@ window.__ModuleLoader__.load({
       ".mneme-xrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}",
       ".mneme-xsearch{width:100%}",
       ".mneme-xselect{flex:1;min-width:0}",
-      ".mneme-xcolhead{flex:none;font-size:12px;font-weight:500;margin:0;color:var(--dsw-alias-label-tertiary);padding:2px 8px 8px}",
+      ".mneme-xcolhead{flex:none;font-size:12px;font-weight:500;margin:0;color:var(--mneme-fg-dim);padding:2px 8px 8px}",
       ".mneme-xtype{display:flex;justify-content:flex-start;align-items:center;gap:8px;width:100%;padding:5px 8px;border:none;border-radius:8px;background:none;color:var(--dsw-alias-label-secondary);cursor:pointer;font-family:inherit;font-size:13px;line-height:18px;text-align:left}",
       ".mneme-xtype:hover{background:var(--dsw-alias-interactive-bg-hover)}",
       ".mneme-xtype.mneme-active{background:var(--dsw-alias-interactive-bg-active);color:var(--dsw-alias-label-primary);font-weight:500}",
-      ".mneme-xcount2{flex:none;margin-left:auto;font-size:12px;color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-xcount2{flex:none;margin-left:auto;font-size:12px;color:var(--mneme-fg-dim)}",
       ".mneme-xmonth{display:flex;align-items:center;gap:4px;width:100%;padding:6px 8px 4px;border:none;border-radius:8px;background:none;color:var(--dsw-alias-label-primary);cursor:pointer;font-family:inherit;font-size:13px;font-weight:500;line-height:18px;text-align:left}",
       ".mneme-xmonth:first-child{margin-top:0}",
       ".mneme-xmonth:hover{background:var(--dsw-alias-interactive-bg-hover)}",
-      ".mneme-xcaret{flex:none;font-size:10px;color:var(--dsw-alias-label-tertiary);width:10px}",
-      ".mneme-xday{display:flex;align-items:center;gap:4px;margin:6px 0 2px 22px;padding:2px 6px;border:none;border-radius:6px;background:none;font-family:inherit;font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary);cursor:pointer;text-align:left}",
+      ".mneme-xcaret{flex:none;font-size:10px;color:var(--mneme-fg-dim);width:10px}",
+      ".mneme-xday{display:flex;align-items:center;gap:4px;margin:6px 0 2px 22px;padding:2px 6px;border:none;border-radius:6px;background:none;font-family:inherit;font-size:12px;line-height:16px;color:var(--mneme-fg-dim);cursor:pointer;text-align:left}",
       ".mneme-xday:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
       ".mneme-xitem{display:flex;gap:8px;align-items:baseline;width:calc(100% - 22px);margin-left:22px;padding:4px 8px;border:none;border-radius:8px;background:none;color:var(--dsw-alias-label-secondary);cursor:pointer;font-family:inherit;font-size:13px;line-height:18px;text-align:left}",
       ".mneme-xitem:hover{background:var(--dsw-alias-interactive-bg-hover)}",
       ".mneme-xitem.mneme-active{background:var(--dsw-alias-interactive-bg-active);color:var(--dsw-alias-label-primary)}",
-      ".mneme-xtime{flex:none;font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}",
+      ".mneme-xtime{flex:none;font-size:12px;line-height:16px;color:var(--mneme-fg-dim);font-variant-numeric:tabular-nums}",
       ".mneme-xname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-      ".mneme-xempty{padding:18px 16px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:13px}",
+      ".mneme-xempty{padding:18px 16px;text-align:center;color:var(--mneme-fg-dim);font-size:13px}",
       // --- memory-type color dots (mirrored across filter / timeline / detail) ---
       ".mneme-xdot{flex:none;display:inline-block;width:8px;height:8px;border-radius:50%;background:currentColor}",
       ".mneme-xdot--all{background:transparent;border:1.5px solid currentColor;opacity:.55;box-sizing:border-box}",
@@ -1333,7 +1349,7 @@ window.__ModuleLoader__.load({
       ".mneme-xtree{flex:1;min-height:0;overflow-y:auto;padding:8px 10px 28px}",
       ".mneme-xdinner{max-width:720px}",
       ".mneme-xdtitle{font-size:16px;font-weight:600;line-height:24px;color:var(--dsw-alias-label-primary);margin-bottom:10px;word-break:break-word}",
-      ".mneme-xdmeta{display:flex;flex-wrap:wrap;gap:4px 14px;margin-bottom:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-xdmeta{display:flex;flex-wrap:wrap;gap:4px 14px;margin-bottom:6px;font-size:12px;line-height:18px;color:var(--mneme-fg-dim)}",
       ".mneme-xdsrc{display:inline-block;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}",
       ".mneme-xdcontent{margin-top:14px;font-size:14px;line-height:1.75;color:var(--dsw-alias-label-primary);white-space:pre-wrap;word-break:break-word}",
       ".mneme-xdactions{display:flex;gap:8px;margin-top:18px}",
@@ -1346,42 +1362,44 @@ window.__ModuleLoader__.load({
       ".mneme-gnode:hover circle{stroke-width:4}",
       ".mneme-gnode.mneme-groot circle{stroke:var(--dsw-alias-state-business-primary);stroke-width:3}",
       ".mneme-glabel{fill:var(--dsw-alias-label-secondary);font-size:11px;text-anchor:middle;pointer-events:none;user-select:none}",
-      ".mneme-gedge{stroke:var(--dsw-alias-label-dimmed);stroke-width:1.5;cursor:pointer}",
+      ".mneme-gedge{stroke:var(--mneme-graphic-dim);stroke-width:1.5;cursor:pointer}",
       ".mneme-gedge:hover{stroke:var(--dsw-alias-state-business-primary)}",
-      ".mneme-gedge-dashed{stroke-dasharray:5 4;opacity:.7}",
-      ".mneme-graphhint{flex:none;color:var(--dsw-alias-label-tertiary);font-size:13px;text-align:center;padding:6px 0 2px}",
+      // 虚线态靠 dash 图案区分，不再叠 opacity：50% 的描边再乘 .7 后浅色画布上
+      // 只剩 2.28，低于图形要求的 3:1（图案已经承担了「没有 memory_id」这个语义）。
+      ".mneme-gedge-dashed{stroke-dasharray:5 4}",
+      ".mneme-graphhint{flex:none;color:var(--mneme-fg-dim);font-size:13px;text-align:center;padding:6px 0 2px}",
       ".mneme-graphside{flex:none;max-height:220px;overflow-y:auto;border-top:1px solid var(--dsw-alias-border-l1);margin-top:10px;padding-top:10px}",
       ".mneme-gs-title{font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary);margin-bottom:4px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}",
-      ".mneme-gs-meta{font-size:13px;color:var(--dsw-alias-label-tertiary);margin-bottom:6px}",
+      ".mneme-gs-meta{font-size:13px;color:var(--mneme-fg-dim);margin-bottom:6px}",
       ".mneme-gs-attr{display:flex;gap:6px;font-size:13px;padding:2px 0}",
-      ".mneme-gs-attrkey{flex:none;color:var(--dsw-alias-label-tertiary);font-size:13px}",
+      ".mneme-gs-attrkey{flex:none;color:var(--mneme-fg-dim);font-size:13px}",
       ".mneme-gs-attrval{color:var(--dsw-alias-label-secondary);word-break:break-word;font-size:13px}",
       ".mneme-gs-link{display:block;width:100%;text-align:left;border:none;background:none;color:var(--dsw-alias-label-secondary);cursor:pointer;font-family:inherit;font-size:13px;padding:3px 6px;border-radius:6px;word-break:break-word}",
       ".mneme-gs-link:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
       // --- entity explorer: rail + layered detail (entities → attrs → relations → graph) ---
       ".mneme-ent{flex:1;min-height:0;display:flex;overflow:hidden}",
       ".mneme-entrail{flex:none;width:224px;min-height:0;overflow-y:auto;padding:12px;border-right:1px solid var(--dsw-alias-border-l2);box-sizing:border-box;display:flex;flex-direction:column;gap:4px}",
-      ".mneme-enttype{display:flex;align-items:center;gap:6px;width:100%;padding:8px 8px 2px;border:none;background:none;color:var(--dsw-alias-label-tertiary);cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;line-height:16px;text-align:left;letter-spacing:.02em}",
+      ".mneme-enttype{display:flex;align-items:center;gap:6px;width:100%;padding:8px 8px 2px;border:none;background:none;color:var(--mneme-fg-dim);cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;line-height:16px;text-align:left;letter-spacing:.02em}",
       ".mneme-entitem{display:flex;align-items:center;gap:8px;width:100%;padding:5px 8px;border:none;border-radius:8px;background:none;color:var(--dsw-alias-label-secondary);cursor:pointer;font-family:inherit;font-size:13px;line-height:18px;text-align:left}",
       ".mneme-entitem:hover{background:var(--dsw-alias-interactive-bg-hover)}",
       ".mneme-entitem.mneme-active{background:var(--dsw-alias-interactive-bg-active);color:var(--dsw-alias-label-primary)}",
       ".mneme-entname{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-      ".mneme-entmentions{flex:none;font-size:11px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}",
+      ".mneme-entmentions{flex:none;font-size:11px;color:var(--mneme-fg-dim);font-variant-numeric:tabular-nums}",
       ".mneme-entdetail{flex:1;min-width:0;min-height:0;overflow-y:auto;padding:20px 24px 32px;box-sizing:border-box}",
       ".mneme-entinner{max-width:720px}",
       ".mneme-enttitle{display:flex;align-items:center;gap:10px;font-size:17px;font-weight:600;line-height:24px;color:var(--dsw-alias-label-primary);word-break:break-word}",
       ".mneme-enttitle .mneme-xdot{width:10px;height:10px}",
-      ".mneme-entmeta{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-entmeta{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;font-size:12px;line-height:18px;color:var(--mneme-fg-dim)}",
       ".mneme-layer{margin-top:24px}",
       ".mneme-layerhead{display:flex;align-items:baseline;gap:8px;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);margin-bottom:10px}",
-      ".mneme-layercount{font-size:12px;font-weight:400;color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-layercount{font-size:12px;font-weight:400;color:var(--mneme-fg-dim)}",
       ".mneme-attrgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}",
       ".mneme-attrcard{min-width:0;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:8px 12px}",
-      ".mneme-attrkey{font-size:11px;color:var(--dsw-alias-label-tertiary);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+      ".mneme-attrkey{font-size:11px;color:var(--mneme-fg-dim);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       ".mneme-attrval{font-size:13px;line-height:19px;color:var(--dsw-alias-label-primary);word-break:break-word}",
       ".mneme-relrow{display:flex;align-items:center;gap:10px;width:100%;padding:7px 10px;border:none;border-radius:10px;background:none;color:var(--dsw-alias-label-secondary);cursor:pointer;font-family:inherit;font-size:13px;line-height:20px;text-align:left}",
       ".mneme-relrow:hover{background:var(--dsw-alias-interactive-bg-hover)}",
-      ".mneme-reltype{flex:none;font-size:11px;line-height:16px;color:var(--dsw-alias-state-business-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-state-business-primary) 35%,transparent);border-radius:6px;padding:0 6px}",
+      ".mneme-reltype{flex:none;font-size:11px;line-height:16px;color:var(--mneme-accent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-business-primary) 35%,transparent);border-radius:6px;padding:0 6px}",
       ".mneme-relname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       // --- settings: quiet stacked sections, one concern per section ---
       ".mneme-set{flex:1;min-height:0;overflow-y:auto;padding:8px 24px 48px;box-sizing:border-box}",
@@ -1389,25 +1407,25 @@ window.__ModuleLoader__.load({
       // 设置页各节一律用 boxed 卡（.mneme-set-card）+ 分组标题（.mneme-set-grouphead）：
       // 旧的「无框 set-sec + 有框 set-card」混排是版面杂乱的一半来源
       ".mneme-set-title{font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary);margin-bottom:4px}",
-      ".mneme-set-desc{font-size:13px;line-height:19px;color:var(--dsw-alias-label-tertiary);margin-bottom:14px}",
+      ".mneme-set-desc{font-size:13px;line-height:19px;color:var(--mneme-fg-dim);margin-bottom:14px}",
       ".mneme-set-input{box-sizing:border-box;width:100%;height:34px;padding:0 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base,transparent);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;outline:none;margin-bottom:10px;transition:border-color .12s,box-shadow .12s}",
       ".mneme-set-input:focus{border-color:var(--dsw-alias-state-business-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-business-primary) 15%,transparent)}",
-      ".mneme-set-input::placeholder{color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-set-input::placeholder{color:var(--mneme-fg-dim)}",
       ".mneme-set-input--area{height:auto;min-height:76px;padding:8px 12px;resize:vertical;line-height:1.6}",
       ".mneme-btn{flex:none;height:30px;padding:0 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:none;color:var(--dsw-alias-label-primary);cursor:pointer;font-family:inherit;font-size:12px;line-height:16px;display:inline-flex;align-items:center;gap:6px}",
       ".mneme-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}",
       ".mneme-btn:disabled{opacity:.5;cursor:default}",
-      ".mneme-saved{font-size:12px;color:var(--dsw-alias-state-success,#2a7)}",
+      ".mneme-saved{font-size:12px;color:var(--mneme-ok)}",
       // rule rows: numbered chips + hover-revealed delete
       ".mneme-set-row{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;margin-bottom:8px;background:var(--dsw-alias-bg-base,transparent)}",
-      ".mneme-set-idx{flex:none;width:20px;height:20px;border-radius:50%;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:18px;display:inline-flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums}",
+      ".mneme-set-idx{flex:none;width:20px;height:20px;border-radius:50%;border:1px solid var(--dsw-alias-border-l2);color:var(--mneme-fg-dim);font-size:11px;line-height:18px;display:inline-flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums}",
       ".mneme-set-ruletext{flex:1;min-width:0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary);word-break:break-word}",
-      ".mneme-set-del{flex:none;opacity:0;transition:opacity .12s;border:none;background:none;color:var(--dsw-alias-label-tertiary);cursor:pointer;font-size:14px;line-height:20px;padding:0 4px;border-radius:6px}",
+      ".mneme-set-del{flex:none;opacity:0;transition:opacity .12s;border:none;background:none;color:var(--mneme-fg-dim);cursor:pointer;font-size:14px;line-height:20px;padding:0 4px;border-radius:6px}",
       ".mneme-set-row:hover .mneme-set-del,.mneme-set-row:focus-within .mneme-set-del{opacity:1}",
-      ".mneme-set-del:hover{color:var(--dsw-alias-state-error,#c33);background:var(--dsw-alias-interactive-bg-hover)}",
+      ".mneme-set-del:hover{color:var(--mneme-danger);background:var(--dsw-alias-interactive-bg-hover)}",
       ".mneme-set-cmd{flex:1;min-width:0}",
-      ".mneme-set-cmdname{font-size:13px;font-weight:600;color:var(--dsw-alias-state-business-primary)}",
-      ".mneme-set-cmddesc{font-size:12px;line-height:17px;color:var(--dsw-alias-label-tertiary);margin-top:1px;word-break:break-word}",
+      ".mneme-set-cmdname{font-size:13px;font-weight:600;color:var(--mneme-accent)}",
+      ".mneme-set-cmddesc{font-size:12px;line-height:17px;color:var(--mneme-fg-dim);margin-top:1px;word-break:break-word}",
       // --- settings sub-view ---
       ".mneme-set{flex:1;min-height:0;overflow-y:auto;padding:8px 24px 48px;box-sizing:border-box}",
       // --- 记忆库页面：居中 sheet，非全屏 ---
@@ -1427,9 +1445,9 @@ window.__ModuleLoader__.load({
       ".mneme-stars{display:inline-flex;align-items:center;gap:2px}",
       // 热度徽章三档：热（橙）/温（次级文字）/冷（弱化文字），冷档藏百分比只留图标。
       ".mneme-heat{display:inline-flex;align-items:center;gap:2px;font-size:11px;line-height:14px;font-variant-numeric:tabular-nums}",
-      ".mneme-heat--hot{color:var(--dsw-alias-state-warning,#d97706)}",
+      ".mneme-heat--hot{color:var(--mneme-warn)}",
       ".mneme-heat--warm{color:var(--dsw-alias-label-secondary)}",
-      ".mneme-heat--cold{color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-heat--cold{color:var(--mneme-fg-dim)}",
       ".mneme-heat--cold .mneme-heatpct{display:none}",
       // 侧边栏入口两种形态的样式（挂载与搬移逻辑见 SidebarTopEntry 的头注释）。
       // 展开态兜底：逐条镜像宿主 panelRow（36px 行高 / 透明底 / 2px 外边距 /
@@ -1452,12 +1470,12 @@ window.__ModuleLoader__.load({
       // 菜单让位只在「收起 + 入口确实挂在标题栏里」时生效；展开态完全不碰宿主变量。
       "html[data-windows-titlebar]:has([data-sidebar-collapsed=true]):has([data-plugin-entry=\"@modusensus/dsh-mneme\"]){--dsh-windows-menu-start:120px}",
       // --- 功能开关：一行一开关，Claude 式安静排版 ---
-      ".mneme-featgroup{flex:none;font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--dsw-alias-label-tertiary);margin:16px 0 2px}",
+      ".mneme-featgroup{flex:none;font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--mneme-fg-dim);margin:16px 0 2px}",
       ".mneme-featrow{display:flex;align-items:center;gap:14px;padding:11px 2px;border-bottom:1px solid var(--dsw-alias-border-l1)}",
       ".mneme-featrow:last-child{border-bottom:none}",
       ".mneme-featmain{flex:1;min-width:0}",
       ".mneme-featname{font-size:13.5px;font-weight:500;line-height:20px;color:var(--dsw-alias-label-primary)}",
-      ".mneme-feathint{font-size:12.5px;line-height:18px;color:var(--dsw-alias-label-tertiary);margin-top:2px}",
+      ".mneme-feathint{font-size:12.5px;line-height:18px;color:var(--mneme-fg-dim);margin-top:2px}",
       ".mneme-switch{position:relative;flex:none;width:36px;height:22px;border-radius:11px;border:none;cursor:pointer;background:var(--dsw-alias-interactive-bg-active);transition:background .15s}",
       ".mneme-switch::after{content:\"\";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--dsw-alias-bg-layer-1,#fff);box-shadow:0 1px 3px color-mix(in srgb,var(--dsw-alias-label-primary) 25%,transparent);transition:transform .15s}",
       ".mneme-switch.mneme-on{background:var(--dsw-alias-state-business-primary)}",
@@ -1473,14 +1491,14 @@ window.__ModuleLoader__.load({
       ".mneme-strinput:focus{border-color:var(--dsw-alias-state-business-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-business-primary) 15%,transparent)}",
       ".mneme-featsub{margin:2px 0 8px;padding:10px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;display:flex;flex-direction:column;gap:6px}",
       ".mneme-featsub .mneme-featnum{padding:6px 0;border-bottom:none}",
-      ".mneme-featsubhint{font-size:12px;line-height:17px;color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-featsubhint{font-size:12px;line-height:17px;color:var(--mneme-fg-dim)}",
       // 运行时那一块的说明文字：比常规 hint 再小一档，它是背景信息而不是要读的正文。
-      ".mneme-runtimehint{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-runtimehint{font-size:11px;line-height:16px;color:var(--mneme-fg-dim)}",
       // --- 交互式记忆库：工具栏 / 卡片网格 / 详情抽屉 / 更多菜单 ---
       // sheet 边距放宽：与窗口边缘保持呼吸距离，居中不顶满。
       // 视图切换（卡片/时间线）分段控件挂在子页栏右侧。
       ".mneme-seg{display:inline-flex;align-items:center;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;overflow:hidden}",
-      ".mneme-seg button{border:none;background:none;color:var(--dsw-alias-label-tertiary);cursor:pointer;font-family:inherit;font-size:12px;line-height:16px;padding:5px 10px;display:inline-flex;align-items:center;gap:5px}",
+      ".mneme-seg button{border:none;background:none;color:var(--mneme-fg-dim);cursor:pointer;font-family:inherit;font-size:12px;line-height:16px;padding:5px 10px;display:inline-flex;align-items:center;gap:5px}",
       ".mneme-seg button:hover{color:var(--dsw-alias-label-primary)}",
       ".mneme-seg button.mneme-active{background:var(--dsw-alias-interactive-bg-active);color:var(--dsw-alias-label-primary);font-weight:500}",
       // 卡片网格：响应式 auto-fill，卡片悬停轻浮起
@@ -1488,34 +1506,34 @@ window.__ModuleLoader__.load({
       ".mneme-card{display:flex;flex-direction:column;gap:7px;min-width:0;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:12px 13px;background:var(--dsw-alias-bg-layer-1);cursor:pointer;font-family:inherit;text-align:left;transition:border-color .12s,box-shadow .12s,transform .12s}",
       ".mneme-card:hover{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 45%,var(--dsw-alias-border-l2));box-shadow:0 6px 20px color-mix(in srgb,var(--dsw-alias-label-primary) 10%,transparent);transform:translateY(-1px)}",
       ".mneme-card.mneme-active{border-color:var(--dsw-alias-state-business-primary)}",
-      ".mneme-cardhead{display:flex;align-items:center;gap:6px;font-size:11.5px;line-height:16px;color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-cardhead{display:flex;align-items:center;gap:6px;font-size:11.5px;line-height:16px;color:var(--mneme-fg-dim)}",
       ".mneme-cardtitle{font-size:13.5px;font-weight:600;line-height:19px;color:var(--dsw-alias-label-primary);word-break:break-word;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
       ".mneme-cardexcerpt{font-size:12.5px;line-height:18px;color:var(--dsw-alias-label-secondary);word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}",
-      ".mneme-cardfoot{display:flex;align-items:center;gap:8px;margin-top:auto;font-size:11.5px;line-height:16px;color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-cardfoot{display:flex;align-items:center;gap:8px;margin-top:auto;font-size:11.5px;line-height:16px;color:var(--mneme-fg-dim)}",
       ".mneme-cardsrc{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       // 徽章：冲突待确认 / 已归档
       ".mneme-badge{flex:none;display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 7px;border-radius:6px;font-size:11px;line-height:14px}",
-      ".mneme-badge--conflict{color:var(--dsw-alias-state-error,#c33);background:color-mix(in srgb,var(--dsw-alias-state-error,#c33) 10%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-error,#c33) 30%,transparent)}",
-      ".mneme-badge--archived{color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-interactive-bg-hover)}",
-      ".mneme-badge--scope{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 10%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-business-primary) 30%,transparent)}",
+      ".mneme-badge--conflict{color:var(--mneme-danger);background:color-mix(in srgb,var(--mneme-danger) 10%,transparent);border:1px solid color-mix(in srgb,var(--mneme-danger) 30%,transparent)}",
+      ".mneme-badge--archived{color:var(--mneme-fg-dim);background:var(--dsw-alias-interactive-bg-hover)}",
+      ".mneme-badge--scope{color:var(--mneme-accent);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 10%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-business-primary) 30%,transparent)}",
       // 冲突集中处理队列（v0.8.0）：状态页的待确认冲突列表
       ".mneme-conflictq{display:flex;flex-direction:column;gap:10px}",
       ".mneme-conflictq-head{display:flex;align-items:center;gap:8px}",
-      ".mneme-conflict-item{border:1px solid var(--dsw-alias-border,var(--dsw-alias-interactive-bg-hover));border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px}",
+      ".mneme-conflict-item{border:1px solid var(--dsw-alias-border-l1,var(--dsw-alias-interactive-bg-hover));border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px}",
       ".mneme-conflict-reason{font-size:12px;line-height:17px;color:var(--dsw-alias-label-secondary)}",
       ".mneme-conflict-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}",
-      ".mneme-conflict-side{border:1px solid var(--dsw-alias-border,var(--dsw-alias-interactive-bg-hover));border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:4px;min-width:0}",
-      ".mneme-conflict-sidelabel{font-size:11px;color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-conflict-side{border:1px solid var(--dsw-alias-border-l1,var(--dsw-alias-interactive-bg-hover));border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:4px;min-width:0}",
+      ".mneme-conflict-sidelabel{font-size:11px;color:var(--mneme-fg-dim)}",
       ".mneme-conflict-sidetitle{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       ".mneme-conflict-snippet{font-size:12px;line-height:17px;color:var(--dsw-alias-label-secondary);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}",
-      ".mneme-conflict-missing{font-size:12px;color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-conflict-missing{font-size:12px;color:var(--mneme-fg-dim)}",
       ".mneme-conflict-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}",
-      ".mneme-conflict-hint{font-size:11px;color:var(--dsw-alias-label-tertiary);margin-right:auto}",
+      ".mneme-conflict-hint{font-size:11px;color:var(--mneme-fg-dim);margin-right:auto}",
       // #177 冲突队列视觉批次：A/B 侧色、相似度条、词级 diff、主色按钮、空态
       ".mneme-conflict-side--a{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 35%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 4%,transparent)}",
-      ".mneme-conflict-side--a .mneme-conflict-sidelabel{color:var(--dsw-alias-state-business-primary);font-weight:600}",
-      ".mneme-conflict-side--b{border-color:color-mix(in srgb,var(--dsw-alias-state-warning,#e6a23c) 45%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-warning,#e6a23c) 5%,transparent)}",
-      ".mneme-conflict-side--b .mneme-conflict-sidelabel{color:var(--dsw-alias-state-warning,#e6a23c);font-weight:600}",
+      ".mneme-conflict-side--a .mneme-conflict-sidelabel{color:var(--mneme-accent);font-weight:600}",
+      ".mneme-conflict-side--b{border-color:color-mix(in srgb,var(--mneme-warn) 45%,transparent);background:color-mix(in srgb,var(--mneme-warn) 5%,transparent)}",
+      ".mneme-conflict-side--b .mneme-conflict-sidelabel{color:var(--mneme-warn);font-weight:600}",
       ".mneme-conflict-simrow{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--dsw-alias-label-secondary)}",
       ".mneme-conflict-simbar{position:relative;flex:1;height:5px;border-radius:3px;background:var(--dsw-alias-interactive-bg-hover);overflow:hidden}",
       ".mneme-conflict-simfill{position:absolute;top:0;bottom:0;left:0;border-radius:3px;background:var(--dsw-alias-state-business-primary)}",
@@ -1526,25 +1544,25 @@ window.__ModuleLoader__.load({
       // 页），那时 46vh 会算成 0px，展开态直接看不见字——实测踩过。
       ".mneme-conflict-diff--full{display:block;-webkit-line-clamp:unset;max-height:28em;overflow-y:auto}",
       ".mneme-conflict-text{font-size:12px;line-height:18px;color:var(--dsw-alias-label-primary);white-space:pre-wrap;overflow-wrap:anywhere;max-height:28em;overflow-y:auto}",
-      ".mneme-conflict-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-conflict-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11px;line-height:16px;color:var(--mneme-fg-dim)}",
       ".mneme-conflict-metaval{color:var(--dsw-alias-label-secondary)}",
       // 窄面板下并排会把每侧挤到无法阅读，退成单列（容器查询按面板实际宽度判）
       "@container (max-width:560px){.mneme-conflict-pair{grid-template-columns:1fr}}",
       ".mneme-conflict-mark{text-decoration:none;border-radius:3px;padding:0 1px}",
-      ".mneme-conflict-mark--del{background:color-mix(in srgb,var(--dsw-alias-state-error,#c33) 16%,transparent);text-decoration:line-through}",
-      ".mneme-conflict-mark--ins{background:color-mix(in srgb,var(--dsw-alias-state-success,#3c9) 18%,transparent)}",
-      ".mneme-conflict-primary{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 10px;border-radius:8px;border:none;background:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-bg-layer-1);cursor:pointer;font-family:inherit;font-size:12px;line-height:16px}",
+      ".mneme-conflict-mark--del{background:color-mix(in srgb,var(--mneme-danger) 16%,transparent);text-decoration:line-through}",
+      ".mneme-conflict-mark--ins{background:color-mix(in srgb,var(--mneme-ok) 18%,transparent)}",
+      ".mneme-conflict-primary{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 10px;border-radius:8px;border:none;background:var(--mneme-accent);color:var(--dsw-alias-bg-layer-1);cursor:pointer;font-family:inherit;font-size:12px;line-height:16px}",
       ".mneme-conflict-primary:disabled{opacity:.55;cursor:default}",
-      ".mneme-conflict-primary:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 85%,black)}",
-      ".mneme-badge--frozen{color:var(--dsw-alias-state-warning,#e6a23c);background:color-mix(in srgb,var(--dsw-alias-state-warning,#e6a23c) 12%,transparent)}",
+      ".mneme-conflict-primary:hover:not(:disabled){background:color-mix(in srgb,var(--mneme-accent) 85%,var(--dsw-alias-label-primary))}",
+      ".mneme-badge--frozen{color:var(--mneme-warn);background:color-mix(in srgb,var(--mneme-warn) 12%,transparent)}",
       ".mneme-conflict-empty{border:1px dashed var(--dsw-alias-border-l2);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}",
       ".mneme-conflict-empty-title{font-size:12.5px;font-weight:600;color:var(--dsw-alias-label-secondary)}",
-      ".mneme-conflict-empty-body{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}",
-      ".mneme-statuscard--actionable{border-color:color-mix(in srgb,var(--dsw-alias-state-warning,#e6a23c) 55%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--dsw-alias-state-warning,#e6a23c) 35%,transparent)}",
-      ".mneme-entrybadge{position:absolute;top:-3px;right:-3px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--dsw-alias-state-error,#c33);color:var(--dsw-alias-bg-layer-1,#fff);font-size:10.5px;line-height:16px;font-weight:600;text-align:center;box-shadow:0 0 0 2px var(--dsw-alias-bg-layer-1)}",
+      ".mneme-conflict-empty-body{font-size:12px;line-height:18px;color:var(--mneme-fg-dim)}",
+      ".mneme-statuscard--actionable{border-color:color-mix(in srgb,var(--mneme-warn) 55%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--mneme-warn) 35%,transparent)}",
+      ".mneme-entrybadge{position:absolute;top:-3px;right:-3px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--mneme-danger);color:var(--dsw-alias-bg-layer-1,#fff);font-size:10.5px;line-height:16px;font-weight:600;text-align:center;box-shadow:0 0 0 2px var(--dsw-alias-bg-layer-1)}",
       ".mneme-triggerwrap{position:relative;pointer-events:none}",
       ".mneme-triggerwrap .mneme-trigger{pointer-events:auto}",
-      ".mneme-conflict-jump .mneme-statuscard{border-color:color-mix(in srgb,var(--dsw-alias-state-warning,#e6a23c) 55%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--dsw-alias-state-warning,#e6a23c) 35%,transparent)}",
+      ".mneme-conflict-jump .mneme-statuscard{border-color:color-mix(in srgb,var(--mneme-warn) 55%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--mneme-warn) 35%,transparent)}",
       ".mneme-conflict-jump:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px;border-radius:12px}",
       // 详情抽屉：sheet 内右侧滑出，覆盖在浏览区之上
       ".mneme-xmain{position:relative}",
@@ -1556,7 +1574,7 @@ window.__ModuleLoader__.load({
       ".mneme-drawertitle{width:100%;font-size:16px;font-weight:600;line-height:23px;color:var(--dsw-alias-label-primary);word-break:break-word}",
       ".mneme-drawertitle-input{width:100%;box-sizing:border-box;font-size:15px;font-weight:600;line-height:22px;padding:7px 10px;border-radius:8px;border:1px solid var(--dsw-alias-state-business-primary);background:var(--dsw-alias-bg-base,transparent);color:var(--dsw-alias-label-primary);font-family:inherit;outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-business-primary) 15%,transparent)}",
       ".mneme-dmeta{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin-top:12px;font-size:12.5px;line-height:19px}",
-      ".mneme-dmetakey{color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-dmetakey{color:var(--mneme-fg-dim)}",
       ".mneme-dmetaval{color:var(--dsw-alias-label-secondary);min-width:0;word-break:break-word}",
       ".mneme-dcontent{margin-top:14px;font-size:13.5px;line-height:1.75;color:var(--dsw-alias-label-primary);white-space:pre-wrap;word-break:break-word}",
       ".mneme-dcontent-input{width:100%;box-sizing:border-box;min-height:180px;font-size:13.5px;line-height:1.7;padding:9px 11px;border-radius:8px;border:1px solid var(--dsw-alias-state-business-primary);background:var(--dsw-alias-bg-base,transparent);color:var(--dsw-alias-label-primary);font-family:inherit;outline:none;resize:vertical;box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-business-primary) 15%,transparent)}",
@@ -1576,12 +1594,12 @@ window.__ModuleLoader__.load({
       // --- explorer refresh: paged month tree, sticky headers, inline icons ---
       ".mneme-vtabico{flex:none;opacity:.85}",
       ".mneme-xsearchwrap{position:relative;flex:none}",
-      ".mneme-xsearchico{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--dsw-alias-label-tertiary);pointer-events:none}",
+      ".mneme-xsearchico{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--mneme-fg-dim);pointer-events:none}",
       ".mneme-xsearchwrap .mneme-xsearch{padding-left:27px}",
       ".mneme-footbtn{display:inline-flex;align-items:center;gap:4px}",
       ".mneme-xmonth{position:sticky;top:0;z-index:2;background:var(--dsw-alias-bg-layer-1);display:flex;align-items:center;gap:6px}",
-      ".mneme-xmonthcount{margin-left:auto;color:var(--dsw-alias-label-tertiary);font-weight:400;font-variant-numeric:tabular-nums}",
-      ".mneme-xcaret{display:inline-flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-xmonthcount{margin-left:auto;color:var(--mneme-fg-dim);font-weight:400;font-variant-numeric:tabular-nums}",
+      ".mneme-xcaret{display:inline-flex;align-items:center;justify-content:center;color:var(--mneme-fg-dim)}",
       ".mneme-xmore{display:flex;justify-content:center;align-items:center;padding:10px 0 24px;min-height:20px}",
       ".mneme-xemptyico{display:block;margin:0 auto 6px;opacity:.7}",
       // --- status sub-view: responsive stat-card grid (auto-fill, ~220px min) ---
@@ -1595,45 +1613,45 @@ window.__ModuleLoader__.load({
       "@container (min-width:452px) and (max-width:683px){.mneme-statuscard--vectorwide{grid-column:span 2}}",
       "@container (min-width:452px){.mneme-statuscard--wide{grid-column:span 2}}",
       // 状态页分组标题（库内一览 / 后台运转）：只做扫读锚点，压得比卡片标题低
-      ".mneme-statushead{max-width:1000px;margin:0 auto 10px;font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-statushead{max-width:1000px;margin:0 auto 10px;font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--mneme-fg-dim)}",
       ".mneme-statusgrid+.mneme-statushead{margin-top:26px}",
       ".mneme-statuscard{min-width:0;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:16px 16px 14px}",
       // 指标行：一行一指标（label 左 / 数值右），取代「·」串联的说明长句——
       // 拥挤感的根源是把多指标压进一段会换行的散文
       ".mneme-statrows{margin-top:10px;display:flex;flex-direction:column;gap:4px}",
-      ".mneme-statrow{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:12px;line-height:17px;color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-statrow{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:12px;line-height:17px;color:var(--mneme-fg-dim)}",
       ".mneme-statrow>span:first-child{flex:none;white-space:nowrap}",
       ".mneme-statrow .mneme-heatdot{align-self:center}",
       ".mneme-statrowval{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;text-align:right}",
-      ".mneme-statfoot{margin-top:8px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-dimmed)}",
+      ".mneme-statfoot{margin-top:8px;font-size:11px;line-height:16px;color:var(--mneme-fg-dim)}",
       // 热度分布条：三档占比一图看清，行标只补数字（类名带双横线，与 heatdot 同款）
       ".mneme-heatbar{display:flex;height:6px;border-radius:3px;overflow:hidden;margin-top:12px;background:var(--dsw-alias-interactive-bg-hover)}",
       ".mneme-heatbar-seg{min-width:2px}",
-      ".mneme-heatbar--hot{background:var(--dsw-alias-state-warning,#d97706)}",
-      ".mneme-heatbar--warm{background:var(--dsw-alias-label-tertiary)}",
-      ".mneme-heatbar--cold{background:var(--dsw-alias-label-dimmed)}",
+      ".mneme-heatbar--hot{background:var(--mneme-warn)}",
+      ".mneme-heatbar--warm{background:var(--mneme-fg-dim)}",
+      ".mneme-heatbar--cold{background:var(--mneme-graphic-dim)}",
       ".mneme-heatdot{flex:none;width:8px;height:8px;border-radius:50%}",
-      ".mneme-heatdot--hot{background:var(--dsw-alias-state-warning,#d97706)}",
-      ".mneme-heatdot--warm{background:var(--dsw-alias-label-tertiary)}",
-      ".mneme-heatdot--cold{background:var(--dsw-alias-label-dimmed)}",
+      ".mneme-heatdot--hot{background:var(--mneme-warn)}",
+      ".mneme-heatdot--warm{background:var(--mneme-fg-dim)}",
+      ".mneme-heatdot--cold{background:var(--mneme-graphic-dim)}",
       // --- 状态页工作台：让用户看见插件在干活（动态/沉淀/归档） ---
       ".mneme-wbhead{margin:28px auto 10px;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);max-width:1000px;display:flex;align-items:baseline;justify-content:space-between;gap:8px}",
       ".mneme-wblist{max-width:1000px;display:flex;flex-direction:column;gap:6px}",
       ".mneme-wbrow{display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px}",
-      ".mneme-wbdot{flex:none;width:8px;height:8px;border-radius:50%;margin-top:6px;background:var(--dsw-alias-state-success,#2a9d6a)}",
-      ".mneme-wbdot--err{background:var(--dsw-alias-state-error,#c33)}",
+      ".mneme-wbdot{flex:none;width:8px;height:8px;border-radius:50%;margin-top:6px;background:var(--mneme-ok)}",
+      ".mneme-wbdot--err{background:var(--mneme-danger)}",
       ".mneme-wbmain{min-width:0;flex:1}",
       ".mneme-wbtitle{font-size:13px;line-height:19px;color:var(--dsw-alias-label-primary)}",
-      ".mneme-wbsub{font-size:12px;line-height:17px;color:var(--dsw-alias-label-tertiary);margin-top:1px}",
+      ".mneme-wbsub{font-size:12px;line-height:17px;color:var(--mneme-fg-dim);margin-top:1px}",
       ".mneme-wbmemo{display:flex;gap:10px;align-items:center;padding:10px 14px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px}",
       ".mneme-wbmemo .mneme-xdot{flex:none}",
       ".mneme-wbmemo-main{min-width:0;flex:1}",
       ".mneme-statusnum{font-size:24px;font-weight:600;line-height:32px;color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums}",
-      ".mneme-statuscap{margin-top:4px;font-size:13px;line-height:19px;color:var(--dsw-alias-label-tertiary);word-break:break-word}",
+      ".mneme-statuscap{margin-top:4px;font-size:13px;line-height:19px;color:var(--mneme-fg-dim);word-break:break-word}",
       // --- destructive actions: red outline = delete, solid red = confirm ---
-      ".mneme-btndanger{color:var(--dsw-alias-state-error,#c33);border-color:var(--dsw-alias-state-error,#c33)}",
-      ".mneme-btndanger:hover{background:color-mix(in srgb,var(--dsw-alias-state-error,#c33) 12%,transparent)}",
-      ".mneme-btndangerconfirm{background:var(--dsw-alias-state-error,#c33);border-color:var(--dsw-alias-state-error,#c33);color:#fff}",
+      ".mneme-btndanger{color:var(--mneme-danger);border-color:var(--mneme-danger)}",
+      ".mneme-btndanger:hover{background:color-mix(in srgb,var(--mneme-danger) 12%,transparent)}",
+      ".mneme-btndangerconfirm{background:var(--mneme-danger);border-color:var(--mneme-danger);color:var(--dsw-alias-bg-layer-1)}",
       ".mneme-btndangerconfirm:hover{filter:brightness(.9)}",
       // --- settings cards: boxed cards for the runtime-mode and external-API
       // sections — each card owns its fetch/PUT state, so it renders as a
@@ -1641,14 +1659,14 @@ window.__ModuleLoader__.load({
       ".mneme-set-card{border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:16px;margin-bottom:10px}",
       // 设置页分组标题（个性化 / 记忆引擎 / 搜索 / 连接与安全 / 帮助）：
       // 先给「这一段在管什么」，卡片才是具体选项
-      ".mneme-set-grouphead{font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--dsw-alias-label-tertiary);margin:24px 0 10px}",
+      ".mneme-set-grouphead{font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--mneme-fg-dim);margin:24px 0 10px}",
       ".mneme-set-grouphead:first-child{margin-top:8px}",
       ".mneme-set-token{font-family:monospace;font-size:12px;padding:7px 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-base,transparent);color:var(--dsw-alias-label-primary);word-break:break-all;user-select:all}",
-      ".mneme-set-hint{font-size:12px;color:var(--dsw-alias-label-tertiary)}",
+      ".mneme-set-hint{font-size:12px;color:var(--mneme-fg-dim)}",
       // --- 重要性编辑行：与查看态同一份 Lucide 星形（此前是文本星号下拉，角更尖锐且与其他星不统一） ---
       ".mneme-staredit{display:inline-flex;align-items:center;gap:1px;justify-self:start}",
       ".mneme-starbtn{border:none;background:none;cursor:pointer;padding:2px 1px;display:inline-flex;color:var(--dsw-alias-label-secondary);transition:transform .12s}",
-      ".mneme-starbtn--on{color:var(--dsw-alias-state-warning,#d97706)}",
+      ".mneme-starbtn--on{color:var(--mneme-warn)}",
       ".mneme-starbtn:hover{transform:scale(1.12)}",
       ".mneme-starbtn:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px;border-radius:4px}",
       // --- 意见与反馈：图标行 + 版本 footer，收在设置页末尾当「关于」用 ---
@@ -1659,8 +1677,8 @@ window.__ModuleLoader__.load({
       ".mneme-feedrow:hover .mneme-feedico{background:var(--dsw-alias-interactive-bg-active)}",
       ".mneme-feedtext{display:flex;flex-direction:column;gap:1px;min-width:0}",
       ".mneme-feedname{font-size:13px;line-height:18px;font-weight:500;color:var(--dsw-alias-label-primary)}",
-      ".mneme-feedsub{font-size:12px;line-height:17px;color:var(--dsw-alias-label-tertiary)}",
-      ".mneme-set-foot{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-top:12px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l1);font-size:12px;color:var(--dsw-alias-label-tertiary)}"
+      ".mneme-feedsub{font-size:12px;line-height:17px;color:var(--mneme-fg-dim)}",
+      ".mneme-set-foot{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-top:12px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l1);font-size:12px;color:var(--mneme-fg-dim)}"
     ].join("\n");
     if (typeof document !== "undefined" && document.querySelector(`style[data-plugin-css="${CSS_TAG}"]`) === null) {
       const tag = document.createElement("style");
@@ -3008,7 +3026,7 @@ window.__ModuleLoader__.load({
             h("textarea", { className: "mneme-set-input mneme-set-input--area", style: { minHeight: 56 }, value: newCmd.instruction, placeholder: t("memory.settings.cmdInstruction"), onChange: (e) => setNewCmd({ ...newCmd, instruction: e.target.value }) }),
             h("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
               h("button", { className: "mneme-btn", onClick: addCommand }, t("memory.settings.cmdAdd")),
-              cmdError && h("span", { style: { fontSize: 12, color: "var(--dsw-alias-state-error, #c33)" } }, cmdError)
+              cmdError && h("span", { style: { fontSize: 12, color: "var(--mneme-danger)" } }, cmdError)
             )
           )
         ),
@@ -3019,7 +3037,7 @@ window.__ModuleLoader__.load({
         h("section", { className: "mneme-set-card" },
           h("div", { className: "mneme-set-title" }, t("memory.settings.mode.title")),
           h("div", { className: "mneme-set-desc" }, t("memory.settings.mode.desc")),
-          modeError && h("div", { style: { fontSize: 12, color: "var(--dsw-alias-state-error,#c33)", marginBottom: 8 } }, modeError),
+          modeError && h("div", { style: { fontSize: 12, color: "var(--mneme-danger)", marginBottom: 8 } }, modeError),
           mode === null && !modeError
             ? h("div", { className: "mneme-set-hint" }, "…")
             : h(react.Fragment, null,
@@ -3070,7 +3088,7 @@ window.__ModuleLoader__.load({
         h("section", { className: "mneme-set-card" },
           h("div", { className: "mneme-set-title" }, t("memory.settings.extapi.title")),
           h("div", { className: "mneme-set-desc" }, t("memory.settings.extapi.desc")),
-          extapiError && h("div", { style: { fontSize: 12, color: "var(--dsw-alias-state-error,#c33)", marginBottom: 8 } }, extapiError),
+          extapiError && h("div", { style: { fontSize: 12, color: "var(--mneme-danger)", marginBottom: 8 } }, extapiError),
           extapi === null && !extapiError
             ? h("div", { className: "mneme-set-hint" }, "…")
             : h(react.Fragment, null,
@@ -3314,7 +3332,7 @@ window.__ModuleLoader__.load({
         loading
           ? h("div", { className: "mneme-statusnum" }, "…")
           : error
-            ? h("div", { className: "mneme-statuscap", style: { color: "var(--dsw-alias-state-error,#c33)" } }, t("memory.status.error"))
+            ? h("div", { className: "mneme-statuscap", style: { color: "var(--mneme-danger)" } }, t("memory.status.error"))
             : h(react.Fragment, null,
                 h("div", { className: "mneme-statusnum" }, num),
                 rows && rows.length
@@ -3708,7 +3726,7 @@ window.__ModuleLoader__.load({
         return () => { cancelled = true; };
       }, []);
       if (state.loading || !state.suppressed) return null;
-      return h("div", { className: "mneme-statuscard", style: { borderColor: "var(--dsw-alias-state-warning,#e6a23c)" } },
+      return h("div", { className: "mneme-statuscard", style: { borderColor: "var(--mneme-warn)" } },
         h("div", { className: "mneme-statusnum", style: { fontSize: "16px", lineHeight: "24px" } }, t("memory.status.injectSuppressed")),
         h("div", { className: "mneme-statuscap" }, t("memory.status.injectSuppressedHint"))
       );
@@ -4442,7 +4460,7 @@ window.__ModuleLoader__.load({
             ? h(react.Fragment, null,
                 confirmWiden
                   ? h(react.Fragment, null,
-                      h("span", { style: { fontSize: 12, color: "var(--dsw-alias-state-warn,#b8860b)" } },
+                      h("span", { style: { fontSize: 12, color: "var(--mneme-warn)" } },
                         t("memory.explorer.detail.scopeWidenHint")),
                       h("button", { type: "button", className: "mneme-btn mneme-btndangerconfirm", disabled: busy, onClick: save },
                         t("memory.explorer.detail.scopeWidenConfirm")),
@@ -4465,7 +4483,7 @@ window.__ModuleLoader__.load({
                   }
                 }, t("memory.explorer.detail.cancel")),
                 savedTick && h("span", { className: "mneme-saved" }, t("memory.explorer.detail.saved")),
-                saveError && h("span", { style: { fontSize: 12, color: "var(--dsw-alias-state-error,#c33)" } }, t("memory.explorer.detail.archiveFailed"))
+                saveError && h("span", { style: { fontSize: 12, color: "var(--mneme-danger)" } }, t("memory.explorer.detail.archiveFailed"))
               )
             : h(react.Fragment, null,
                 h("button", { type: "button", className: "mneme-btn", onClick: () => setEditing(true) }, t("memory.explorer.detail.edit")),
@@ -4493,7 +4511,7 @@ window.__ModuleLoader__.load({
                     )
                   : h("button", { type: "button", className: "mneme-btn mneme-btndanger", onClick: () => setConfirmDelete(true) },
                       t("memory.explorer.delete")),
-                deleteError && h("span", { style: { fontSize: 12, color: "var(--dsw-alias-state-error,#c33)" } },
+                deleteError && h("span", { style: { fontSize: 12, color: "var(--mneme-danger)" } },
                   t("memory.explorer.deleteFailed"))
               )
         )
@@ -4548,7 +4566,7 @@ window.__ModuleLoader__.load({
             onChange: (e) => { setFile((e.target.files && e.target.files[0]) || null); setErr(""); }
           })
         ),
-        err && h("div", { className: "mneme-featsubhint", style: { color: "var(--dsw-alias-state-error,#c33)", marginTop: 8 } }, err),
+        err && h("div", { className: "mneme-featsubhint", style: { color: "var(--mneme-danger)", marginTop: 8 } }, err),
         msg && h("div", { className: "mneme-saved", style: { marginTop: 8 } }, msg),
         h("div", { className: "mneme-improw", style: { justifyContent: "flex-end" } },
           h("button", { type: "button", className: "mneme-btn", disabled: busy, onClick: onClose }, t("memory.explorer.importCancel")),
