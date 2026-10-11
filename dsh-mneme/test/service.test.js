@@ -53,7 +53,10 @@ test("injectCandidates returns preferences + high-importance items within limit"
   const types = candidates.map((c) => c.type);
   assert.ok(types.includes("preference"), "preferences included");
   assert.ok(types.includes("project"), "high-importance project included");
-  assert.ok(!types.includes("history"), "history excluded by default");
+  // #369：history 曾被注入白名单挡在门外，现按「注入侧收编」进池（理由与实测数字
+  // 见 src/service.js 的 INJECT_TYPES 注释）。这里从「锁排除」改成「锁收编」——
+  // 白名单日后若被收窄，这条会红，而不是静默把两成条目关回不可注入。
+  assert.ok(types.includes("history"), "history included since #369");
   assert.ok(candidates.length <= 5, "respects maxItems");
 });
 
@@ -220,7 +223,9 @@ test("Bug4: injectCandidates with an empty query keeps the legacy rule-based sel
   assert.deepEqual(noQuery.map((c) => c.id), legacy.map((c) => c.id), "empty query behaves identically to the old logic");
   assert.deepEqual(blankQuery.map((c) => c.id), legacy.map((c) => c.id), "whitespace-only query degrades too");
   assert.equal(legacy[0].type, "summary", "summary still leads");
-  assert.ok(!legacy.some((c) => c.type === "history"), "history still excluded");
+  // #369 收编后 history 可进池；本用例的重心是「空查询与旧规则路逐字节同序」，
+  // 这条只确认收编没有撼动优先级分层——summary 仍打头。
+  assert.ok(legacy.some((c) => c.type === "history"), "history included since #369");
 });
 
 test("Bug4: injectCandidates ignores the query when hybridInject is disabled", () => {
