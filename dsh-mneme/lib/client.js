@@ -4640,7 +4640,11 @@ window.__ModuleLoader__.load({
           .then((res) => { if (!res.ok) throw new Error("http"); return res.json(); })
           .then((d) => {
             setMsg(d && d.action === "merged" ? t("memory.explorer.newMerged") : t("memory.explorer.newCreated"));
-            setBusy(false);
+            // 成功后**不**重置 busy。这 900ms 是留给提示的阅读时间，而「新建」按钮此刻
+            // 若重新可点，第二次同 type+title 会落进同一行，service 走 appendContent 把
+            // 正文再追加一遍，提示还会从「已新建」翻成「已并入」——一次误触就写坏一条
+            // 记忆。保持 busy 直到关窗，按钮全程 disabled（成功路径组件随即卸载，没有
+            // 需要复原的状态）。
             // 停 900ms 让提示可读，再关窗并把新建的行选中（见 onCreated）。
             setTimeout(() => { onCreated(d); onClose(); }, 900);
           })
@@ -4706,7 +4710,7 @@ window.__ModuleLoader__.load({
         h("div", { className: "mneme-improw", style: { justifyContent: "flex-end" } },
           h("button", { type: "button", className: "mneme-btn", disabled: busy, onClick: onClose }, t("memory.explorer.importCancel")),
           h("button", { type: "button", className: "mneme-btn", disabled: busy, onClick: submit },
-            busy ? t("memory.explorer.newSaving") : t("memory.explorer.newConfirm"))
+            busy && !msg ? t("memory.explorer.newSaving") : t("memory.explorer.newConfirm"))
         )
       );
     }

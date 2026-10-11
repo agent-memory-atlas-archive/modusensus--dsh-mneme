@@ -1280,16 +1280,31 @@ test("panel can create a memory by hand: menu entry wired to the dialog", () => 
     "the dialog must post to the panel create route");
   assert.ok(/d\.action === "merged" \? t\("memory\.explorer\.newMerged"\) : t\("memory\.explorer\.newCreated"\)/.test(clientSource),
     "merged and created are different facts and must be reported differently");
-  // 表单字段与 memory_save 工具对齐；scope/sensitivity 刻意不放（见 CreateDialog 注释）。
-  for (const field of ["type", "title", "content", "importance", "tags"]) {
-    assert.ok(clientSource.includes(`${field}`), `form must carry ${field}`);
-  }
-  assert.equal(/CreateDialog[\s\S]{0,4000}?newScope|CreateDialog[\s\S]{0,4000}?sensitivity/.test(clientSource), false,
-    "the create form must not offer scope/sensitivity: that path bypasses the widen-confirm guard");
-  // document 不在类型下拉里：铸造口唯一（registerDocument，#230），后端也会 400。
+  // 弹层源码切片：下面「表单里有什么 / 没有什么」的断言一律在这段上做。在整包上做
+  // 等于没锁——这些字段名在 bundle 里到处都是，`clientSource.includes("title")` 恒真。
   const dialogStart = clientSource.indexOf("function CreateDialog");
   const dialogEnd = clientSource.indexOf("function MemoryExplorer", dialogStart);
+  assert.ok(dialogStart >= 0 && dialogEnd > dialogStart, "CreateDialog must be findable in the bundle");
   const dialogSource = clientSource.slice(dialogStart, dialogEnd);
+  // 表单字段与 memory_save 工具对齐，且锁的是**真实请求体写法**：多一个字段（比如
+  // scope/sensitivity）这段就匹配不上，少一个 trim 也匹配不上。锁裸字段名会恒真。
+  assert.match(dialogSource,
+    /JSON\.stringify\(\{\s*type,\s*title: title\.trim\(\),\s*content: content\.trim\(\),\s*importance,\s*tags: tags\.split\(","\)\.map\(\(s\) => s\.trim\(\)\)\.filter\(Boolean\)\s*\}\)/,
+    "the create request body must carry exactly type/title/content/importance/tags");
+  // 成功路径**不得**重置 busy：提示要停 900ms 才关窗，这期间按钮若重新可点，第二次
+  // 同 type+title 会落进同一行并把正文再追加一遍（service 走 appendContent），一次
+  // 误触就写坏一条记忆。所以全弹层只允许 catch 那条路重置 busy。
+  assert.equal(dialogSource.split("setBusy(false)").length - 1, 1,
+    "only the error path may reset busy; the success path must stay disabled until the dialog closes");
+  assert.match(dialogSource, /\.catch\(\(\) => \{ setBusy\(false\); setErr\(t\("memory\.explorer\.newFailed"\)\); \}\)/,
+    "the single busy reset must be the error path");
+  // 按钮文案同理：成功后 busy 仍为 true，若只看 busy，写入早就完成了按钮还写着「保存
+  // 中…」——既骗用户又和旁边那行「已新建」自相矛盾。msg 一置上就切回正常文案。
+  assert.match(dialogSource, /busy && !msg \? t\("memory\.explorer\.newSaving"\) : t\("memory\.explorer\.newConfirm"\)/,
+    "once the write succeeded the button must stop claiming it is still saving");
+  assert.equal(/newScope|sensitivity/.test(dialogSource), false,
+    "the create form must not offer scope/sensitivity: that path bypasses the widen-confirm guard");
+  // document 不在类型下拉里：铸造口唯一（registerDocument，#230），后端也会 400。
   assert.equal(dialogSource.includes('"document"'), false,
     "document rows are minted only via registerDocument and must not be offered here");
   // 类型白名单与 src/tools.js 的 memory_save enum 逐字一致（缺一个就会有人点进去才被拒）。
