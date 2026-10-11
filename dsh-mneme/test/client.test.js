@@ -1426,6 +1426,25 @@ test("maintenance card: execution carries the verbatim dryRun:false + confirm:tr
   // 窗口非法时不得发请求：0 在服务端是「清掉全部快照」，畸形输入绝不能静默落进最坏解释。
   assert.ok(src.includes('if (!/^\\d+$/.test(days)) { setError(t("memory.status.maint.badWindow")); setArmed(false); return; }'),
     "a non-numeric window must be rejected locally before any round trip");
+  // 上界同样在本地拦：/^\d+$/ 放得过 1e20 与 400 位数字（后者化成 Infinity），后端
+  // 会回 400，但那时用户只看到一句「回收失败」，分不清是窗口不合法还是网络问题。
+  assert.match(src, /const MAX_WINDOW_DAYS = 3650;/,
+    "the card must carry the same upper bound as the backend");
+  assert.ok(src.includes('if (Number(days) > MAX_WINDOW_DAYS) { setError(t("memory.status.maint.badWindow")); setArmed(false); return; }'),
+    "an out-of-range window must be rejected locally, before any round trip");
+});
+
+test("maintenance card: 'no receipt' does not claim a single cause", () => {
+  // writeReceipt 返回 null 有两种成因：审计被关（config.llmAudit.enabled === false），
+  // 或回执写库失败（saveLlmAudit 抛错，只 warn）。旧文案「无（审计未启用）」把第二种
+  // 情况说成第一种——而这行出现在不可逆操作的结果区，用户会照它去对账。
+  for (const wording of [
+    '"memory.status.maint.receiptNone": "未记录（审计未启用或回执写入失败）"',
+    '"memory.status.maint.receiptNone": "Not recorded (audit disabled or receipt write failed)"'
+  ]) {
+    assert.ok(clientSource.includes(wording),
+      `the missing-receipt wording must name both causes: ${wording}`);
+  }
 });
 
 test("maintenance card: no window.confirm — the host webview cannot be relied on for it", () => {

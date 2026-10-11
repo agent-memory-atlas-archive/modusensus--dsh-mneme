@@ -772,7 +772,7 @@ window.__ModuleLoader__.load({
         "memory.status.maint.clearedInputs": "已清理输入快照",
         "memory.status.maint.clearedEmbeddings": "已清理归档向量",
         "memory.status.maint.receipt": "审计回执",
-        "memory.status.maint.receiptNone": "无（审计未启用）",
+        "memory.status.maint.receiptNone": "未记录（审计未启用或回执写入失败）",
         "memory.status.maint.duration": "耗时",
         "memory.status.maint.vacuumRan": "VACUUM 已执行",
         "memory.status.maint.vacuumOff": "未 VACUUM",
@@ -1293,7 +1293,7 @@ window.__ModuleLoader__.load({
         "memory.status.maint.clearedInputs": "Input snapshots cleared",
         "memory.status.maint.clearedEmbeddings": "Archived embeddings cleared",
         "memory.status.maint.receipt": "Audit receipt",
-        "memory.status.maint.receiptNone": "None (audit disabled)",
+        "memory.status.maint.receiptNone": "Not recorded (audit disabled or receipt write failed)",
         "memory.status.maint.duration": "Duration",
         "memory.status.maint.vacuumRan": "VACUUM ran",
         "memory.status.maint.vacuumOff": "Not VACUUMed",
@@ -3726,6 +3726,9 @@ window.__ModuleLoader__.load({
       // 与 src/maintenance.js 的 DEFAULT_INPUT_RETENTION_DAYS 同值：这里只用来初始化
       // 输入框与首屏那次 GET，真正的默认值仍由服务端兜底。
       const DEFAULT_WINDOW_DAYS = 7;
+      // 与后端 MAX_RECLAIM_WINDOW_DAYS 同值。超界窗口服务端会回 400，但本地先拦一道：
+      // 否则用户点「重新估算」只会看到一句服务端错误，还以为是网络问题。
+      const MAX_WINDOW_DAYS = 3650;
       // 面板走 in-process 路由，与 CLI/standalone 底下是同一条 reclaim 实现。
       const RECLAIM_PATH = "/api/dsh-mneme/maintenance/reclaim";
       const [days, setDays] = useState(String(DEFAULT_WINDOW_DAYS));
@@ -3754,6 +3757,9 @@ window.__ModuleLoader__.load({
       // 只由「重新估算」按钮调用，不在 onChange 里调用（见上面 ③）。
       const estimate = () => {
         if (!/^\d+$/.test(days)) { setError(t("memory.status.maint.badWindow")); setArmed(false); return; }
+        // 上界也在这里拦：`1e20` 与 400 位数字都能过 /^\d+$/（后者化成 Infinity），
+        // 后端会回 400，但那样用户看到的是一句「回收失败」，不如直接说窗口不合法。
+        if (Number(days) > MAX_WINDOW_DAYS) { setError(t("memory.status.maint.badWindow")); setArmed(false); return; }
         setEstimating(true);
         setError("");
         // 窗口一变，上一轮的确认态连同它显示的数字一起作废；上一次执行的回执也别再跟

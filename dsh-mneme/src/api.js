@@ -33,6 +33,12 @@ function sendAttachment(res, status, contentType, filename, body) {
 // defaults in config.js (externalApiPort / externalApiHost).
 const EXTERNAL_API_DEFAULTS = { enabled: false, port: 8790, host: "127.0.0.1" };
 
+// 回收窗口（天）的上界。maintenance.reclaim 拿这个数算 `now() - days * 86400000` 再
+// toISOString()：日期一旦超出 Date 的有效范围就抛 RangeError。整数校验挡不住量级——
+// 1e20 也是「整数」，JSON 里还能写成 400 位数字。所以显式钉一个上界，取值与既有保留
+// 窗口配置一致（config.js 的 llmAudit.retentionDays / recallRetentionDays 都是 max 3650）。
+const MAX_RECLAIM_WINDOW_DAYS = 3650;
+
 /** Merge persisted external-api kv over the defaults for client display. */
 function fullExternalConfig(kv = {}) {
   return {
@@ -722,6 +728,12 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
             olderThanDays = undefined;
           } else if (/^\d+$/.test(raw)) {
             olderThanDays = Number(raw);
+            // 十进制字面量不保证是个能算日期的数：400 位数字会化成 Infinity。上界与
+            // POST 侧同一条（见 MAX_RECLAIM_WINDOW_DAYS 的说明）。
+            if (!Number.isFinite(olderThanDays) || olderThanDays > MAX_RECLAIM_WINDOW_DAYS) {
+              sendJson(res, 400, { error: "invalid-older-than-days" });
+              return;
+            }
           } else {
             sendJson(res, 400, { error: "invalid-older-than-days" });
             return;
@@ -761,7 +773,8 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
           const olderThanDays = body.olderThanDays === undefined || body.olderThanDays === null
             ? undefined
             : body.olderThanDays;
-          if (olderThanDays !== undefined && (!Number.isInteger(olderThanDays) || olderThanDays < 0)) {
+          if (olderThanDays !== undefined
+            && (!Number.isInteger(olderThanDays) || olderThanDays < 0 || olderThanDays > MAX_RECLAIM_WINDOW_DAYS)) {
             sendJson(res, 400, { error: "invalid-older-than-days" });
             return;
           }
@@ -773,10 +786,22 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
             // 拒执行，但把 dry-run 报告一并回给调用方：确认的依据就是这份数字。报告
             // 必须描述**将要执行的那个动作**，所以 vacuum 原样带上——否则调用方看到
             // 的是「不 VACUUM」的数字，却带着 vacuum 去执行。
+            //
+            // 这份报告是在**回调里**算的，外层 try 已经退栈了：它抛出去就是一个没人接的
+            // rejection，客户端拿到的不是 500 而是「一个字节都没回」。所以本地兜住，与
+            // 执行路径给出同一个 500 internal。
+            let report;
+            try {
+              report = maintenance.reclaim({ olderThanDays, vacuum: body.vacuum === true, dryRun: true });
+            } catch (error) {
+              ctx.logger?.warn?.(`[dsh-mneme] storage reclaim failed: ${String(error)}`);
+              sendJson(res, 500, { error: "internal" });
+              return;
+            }
             sendJson(res, 400, {
               error: "confirm-required",
               hint: "先看 dry-run 报告，确认后带 {\"dryRun\":false,\"confirm\":true} 再发",
-              report: maintenance.reclaim({ olderThanDays, vacuum: body.vacuum === true, dryRun: true })
+              report
             });
             return;
           }

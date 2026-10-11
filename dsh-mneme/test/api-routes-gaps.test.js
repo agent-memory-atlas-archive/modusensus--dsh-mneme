@@ -545,6 +545,17 @@ test("reclaim GET honours olderThanDays and rejects malformed windows", async ()
     out = await callReclaim(route, { path: `${RECLAIM_PATH}?olderThanDays=0` });
     assert.equal(out.status, 200);
     assert.equal(out.body.olderThanDays, 0);
+
+    // 量级也要挡：十进制字面量不保证是能算日期的数，400 位数字会化成 Infinity，
+    // 而 maintenance 会拿它算 `now() - days * 86400000` 再 toISOString() 抛 RangeError。
+    for (const huge of ["1" + "0".repeat(400), "100000000000000000000", "3651"]) {
+      out = await callReclaim(route, { path: `${RECLAIM_PATH}?olderThanDays=${huge}` });
+      assert.equal(out.status, 400, `olderThanDays=${huge} 必须被拒`);
+      assert.equal(out.body.error, "invalid-older-than-days");
+    }
+    out = await callReclaim(route, { path: `${RECLAIM_PATH}?olderThanDays=3650` });
+    assert.equal(out.status, 200, "上界本身是合法的");
+    assert.equal(out.body.olderThanDays, 3650);
   } finally {
     bench.close();
   }
@@ -685,9 +696,20 @@ test("reclaim POST validates olderThanDays as a JSON number, not a string", asyn
       assert.equal(out.status, 400, `olderThanDays=${JSON.stringify(bad)} 必须被拒`);
       assert.equal(out.body.error, "invalid-older-than-days");
     }
+    // 量级也是「坏输入」：1e20 是整数，却会让 maintenance 算日期时抛 RangeError
+    // （#410 评审）。400 位数字不在此列——它化成 Infinity，而 JSON.stringify 把
+    // Infinity 写成 null，落进「与缺省同义」那条规则（GET 侧才测得到它）。
+    for (const huge of [1e20, 1e21, 3651]) {
+      const out = await callReclaim(route, { method: "POST", body: { olderThanDays: huge } });
+      assert.equal(out.status, 400, `olderThanDays=${String(huge)} 必须被拒`);
+      assert.equal(out.body.error, "invalid-older-than-days");
+    }
     let ok = await callReclaim(route, { method: "POST", body: { olderThanDays: 0 } });
     assert.equal(ok.status, 200);
     assert.equal(ok.body.olderThanDays, 0);
+    ok = await callReclaim(route, { method: "POST", body: { olderThanDays: 3650 } });
+    assert.equal(ok.status, 200, "上界本身是合法的");
+    assert.equal(ok.body.olderThanDays, 3650);
     ok = await callReclaim(route, { method: "POST", body: { olderThanDays: null } });
     assert.equal(ok.status, 200);
     assert.equal(ok.body.olderThanDays, 7, "null 与缺省同义：落默认窗口，不是 0");
@@ -731,7 +753,14 @@ test("reclaim maps a throwing maintenance.reclaim to 500 instead of leaking", as
       assert.equal(out.status, 500);
       assert.equal(out.body.error, "internal");
 
-      assert.equal(warnings.length, 2, "两个方法各留一条 warn");
+      // confirm-required 那条也要算上：它在 readBody 的回调里算 dry-run 报告，外层 try
+      // 那时已经退栈，漏了这道守卫就变成一个没人接的 rejection——客户端拿到的是「一个
+      // 字节都没回」而不是 500（#410 评审指出的正是这条）。
+      out = await callReclaim(route, { method: "POST", body: { dryRun: false } });
+      assert.equal(out.status, 500, "confirm-required 的报告抛错必须回 500，不能无响应");
+      assert.equal(out.body.error, "internal");
+
+      assert.equal(warnings.length, 3, "三条会调 reclaim 的路径各留一条 warn");
       for (const w of warnings) {
         assert.match(w, /storage reclaim failed/);
         assert.match(w, /database is locked/, "原始错误文本要留住，否则现场无从下手");
