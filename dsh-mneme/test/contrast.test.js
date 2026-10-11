@@ -15,9 +15,10 @@ import { fileURLToPath } from "node:url";
 //
 // 面板的坑有两层，这条锁两层都咬：
 //   ① 宿主 token 在浅色下给正文只有 1.26–4.49 的对比度（label-tertiary 50 处、
-//      label-dimmed 4 处），照抄宿主名就等于照抄不合规；
-//   ② 面板还长期引用 6 个**根本不存在的**宿主名（--dsw-alias-state-error /
-//      -warning / -success / -warn / --dsw-alias-label-dimmed / --dsw-alias-border），
+//      label-dimmed 4 处），照抄宿主名就等于照抄不合规——注意这两个名字**都是
+//      真实存在的**宿主 token，只是宿主把它们定位成分隔线/占位符的低对比层；
+//   ② 面板还长期引用 5 个**根本不存在的**宿主名（--dsw-alias-state-error /
+//      -warning / -success / -warn / --dsw-alias-border），
 //      于是吃的一直是写在 fallback 里的硬编码色。所以除了比值，还要锁「引用到的
 //      宿主名必须真实存在」。
 //
@@ -31,6 +32,9 @@ const HOST_TOKENS = {
   "--dsw-alias-label-primary": { light: "#0f1115", dark: "#f9fafb" },
   "--dsw-alias-label-secondary": { light: "#61666b", dark: "#cfd3d6" },
   "--dsw-alias-label-tertiary": { light: "#81858c", dark: "#adb2b8" },
+  // 真名，不是幻影：宿主确有 --dsw-alias-label-dimmed（指向 static-neutral-bluish-200
+  // / -750）。它留在快照里是为了让存在性锁**不**把它当幻影报错——该拦的是「拿它当
+  // 正文/图形色」的用法，那由上面的比值锁负责。
   "--dsw-alias-label-dimmed": { light: "#e1e5ee", dark: "#43454a" },
   "--dsw-alias-state-business-primary": { light: "#4176e6", dark: "#7aaaff" },
   "--dsw-alias-state-error-primary": { light: "#ec1313", dark: "#f25a5a" },
@@ -196,7 +200,15 @@ for (const r of rules) {
   const need = fs >= 24 || (fs >= 18.66 && fw >= 700) ? 3 : 4.5;
   for (const theme of ["light", "dark"]) {
     const fg = colorOf(colM[1], theme);
-    if (!fg) continue;
+    // 解析不出来**不算通过**：面板 CSS 块里的 color 全是 hex/rgb/var/color-mix
+    // （没有 inherit/currentColor 之类的关键字），所以 null 只可能意味着引用了
+    // 不存在的 token 或写了个解析器不认识的值——那正是要拦的东西。若在这里
+    // `continue`，把一条声明改成 `color:var(--mneme-unknown)` 就能静默溜过，
+    // 剩下的声明仍然够 audited >= 200。
+    if (!fg) {
+      failures.push(`${theme} ${r.sel} 颜色解析失败：${colM[1].trim()}`);
+      continue;
+    }
     audited++;
     const cr = contrast(fg, backgroundOf(r.sel, theme));
     if (cr < need) {
@@ -210,7 +222,7 @@ test("面板每个 color 声明在浅/深两主题下都达到 WCAG AA（#178 �
   assert.deepEqual(failures, [], "以下声明对比度不足：\n" + failures.join("\n"));
 });
 
-// 幻影 token 的回归锁：面板曾经引用 6 个宿主里不存在的名字，于是长年吃 fallback
+// 幻影 token 的回归锁：面板曾经引用 5 个宿主里不存在的名字，于是长年吃 fallback
 // 里的硬编码色（换肤不跟随、深色主题翻车）。这条锁不看比值、只看名字是否存在，
 // 因此将来任何「顺手写个听起来合理的 --dsw-* 名」都会被拦下。
 test("面板引用的宿主 token 必须真实存在（幻影 token 回归锁）", () => {
@@ -267,4 +279,16 @@ test("图形色（热度/打卡/连线）在浅深两主题下都达到 3:1", ()
     }
   }
   assert.deepEqual(problems, [], "图形色对比度不足：\n" + problems.join("\n"));
+});
+
+// 虚线关系边曾经在 .mneme-gedge-dashed 上再叠一层 opacity:.7，把已经只有 50% 的
+// 描边压到浅色 2.28（低于图形 3:1）。上面那条图形锁只读单条规则自己的 stroke，
+// 看不到「同一条边同时命中两条规则、其中一条在降透明度」这种叠加，所以单独锁一层：
+// 虚线态只允许用 dash 图案区分，不许再动透明度。
+test("虚线关系边不得靠降低不透明度区分", () => {
+  const dashed = rules.find((r) => r.sel === ".mneme-gedge-dashed");
+  assert.ok(dashed, ".mneme-gedge-dashed 规则没了（虚线态怎么区分无 memory_id 的边？）");
+  const op = /(?:^|;)\s*opacity\s*:\s*([^;]+)/.exec(dashed.body);
+  assert.equal(op, null, `虚线边又叠了 opacity（${op?.[1].trim()}）：50% 描边乘上它会在浅色画布跌破 3:1`);
+  assert.match(dashed.body, /stroke-dasharray/, "虚线态丢了 dash 图案，就和实线边分不出来了");
 });

@@ -1282,8 +1282,8 @@ window.__ModuleLoader__.load({
       ".mneme-entitychip:hover{background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 10%,transparent)}",
       // --- main-area memory library page ---
       // 面板语义色层（#178）：宿主 token 在浅色下给正文/次要文字只有 1.26–4.49
-      // 的对比度，且面板还一直在引用 6 个根本不存在的宿主名（--dsw-alias-state-error
-      // / -warning / -success / -warn / --dsw-alias-label-dimmed / --dsw-alias-border），
+      // 的对比度，且面板还一直在引用 5 个根本不存在的宿主名（--dsw-alias-state-error
+      // / -warning / -success / -warn / --dsw-alias-border），
       // 于是长年吃的是写在 fallback 里的硬编码色。这里按宿主真实 token 现算一组
       // 面板自有语义色：混色基准全是宿主 token，宿主换肤时跟着走，不引入新字面量。
       // 必须挂四个根——面板不只长在 .mneme-x 下：记忆库 sheet portal 到 body
@@ -1364,7 +1364,9 @@ window.__ModuleLoader__.load({
       ".mneme-glabel{fill:var(--dsw-alias-label-secondary);font-size:11px;text-anchor:middle;pointer-events:none;user-select:none}",
       ".mneme-gedge{stroke:var(--mneme-graphic-dim);stroke-width:1.5;cursor:pointer}",
       ".mneme-gedge:hover{stroke:var(--dsw-alias-state-business-primary)}",
-      ".mneme-gedge-dashed{stroke-dasharray:5 4;opacity:.7}",
+      // 虚线态靠 dash 图案区分，不再叠 opacity：50% 的描边再乘 .7 后浅色画布上
+      // 只剩 2.28，低于图形要求的 3:1（图案已经承担了「没有 memory_id」这个语义）。
+      ".mneme-gedge-dashed{stroke-dasharray:5 4}",
       ".mneme-graphhint{flex:none;color:var(--mneme-fg-dim);font-size:13px;text-align:center;padding:6px 0 2px}",
       ".mneme-graphside{flex:none;max-height:220px;overflow-y:auto;border-top:1px solid var(--dsw-alias-border-l1);margin-top:10px;padding-top:10px}",
       ".mneme-gs-title{font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary);margin-bottom:4px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}",
