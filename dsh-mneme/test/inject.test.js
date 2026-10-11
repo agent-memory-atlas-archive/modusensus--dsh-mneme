@@ -418,3 +418,26 @@ test("issue #334: snapshot query carries no lone surrogate (query path cut at ex
   assert.ok(snap.query.length > 0, "query recorded");
   assert.ok(!hasLoneSurrogate(snap.query), "snapshot query is surrogate-clean");
 });
+
+// surface.nodes 是宿主 getter：消息投影所属插件被移除时，dsh-session 的
+// _assertProjections 直接 throw。读取不设防的话，异常会冒到调用方的 try，表现为
+// 热记忆整块不渲染 + 语义查询为空——比「沿用可见面失效前的旧行为」更糟。
+// 夹具用宿主真实的抛错文案，锁住「拿不到可见面就退回全量事件」这条退化路径。
+test("throwing surface getter degrades to full-log hot memory instead of a blank block", () => {
+  const { contexts } = setup();
+  const events = [
+    { type: "user/message", data: { source: { kind: "user" }, content: [{ type: "text", text: "把投影插件卸了会怎样" }] } },
+    { type: "assistant/message", data: { message: { content: [{ type: "text", text: "热记忆不该因此整块消失" }] } } }
+  ];
+  const session = {
+    snapshotEvents: () => events,
+    get surface() {
+      throw new Error('session message projection "dsh-rewind" was removed or replaced; restore the session with its owning plugin');
+    }
+  };
+  const text = contexts[0].text({ agent: { session } });
+  assert.ok(text.includes("[短期上下文]"), "热记忆块仍应渲染");
+  assert.ok(text.includes("把投影插件卸了会怎样"), "轮次提问应照旧进入");
+  assert.ok(text.includes("热记忆不该因此整块消失"), "轮次回复应照旧进入");
+  assert.equal(getInjectionSnapshot().query, "把投影插件卸了会怎样", "语义查询不受 getter 抛错影响");
+});

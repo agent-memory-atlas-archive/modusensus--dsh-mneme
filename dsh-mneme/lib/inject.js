@@ -20,9 +20,16 @@ export function getInjectionSnapshot() {
 // 「模型可见事件 seq」集合：宿主在 session.surface.nodes 维护可见面——rewind 的
 // surfaceOp replace 与 compact 的隐藏替换都作用在这层（dsh-rewind 插件即据此计算
 // 替换区间）。拿不到（老版本宿主）返回 null，调用方退回「全量事件」的旧行为。
+// 读取必须在 try 内：`surface.nodes` 是宿主 getter，其 _assertProjections 在消息投影
+// 所属插件被移除时会 throw（dsh-session lib/types/surface.js）。抛出等同于「没有
+// 可见面」，绝不能让整块热记忆消失——那是比旧偏差更糟的退化。
 function visibleSeqsOf(session) {
-  const nodes = session?.surface?.nodes;
-  return Array.isArray(nodes) ? new Set(nodes) : null;
+  try {
+    const nodes = session?.surface?.nodes;
+    return Array.isArray(nodes) ? new Set(nodes) : null;
+  } catch {
+    return null;
+  }
 }
 
 // Best-effort extraction of the current user's latest message text from the
