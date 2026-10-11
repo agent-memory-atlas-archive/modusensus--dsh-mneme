@@ -103,3 +103,42 @@ test("slotFillRate = 注入条数 / (轮数 × 槽位数)", () => {
   assert.equal(stats.injection.slotFillRate, 3 / 4);
   store.close();
 });
+
+// #369：history 曾被注入白名单挡在门外（蒸馏产得出、注入收不进）。这两条断言分
+// 别锁「收编生效」与「重要度闸门对 history 不豁免」——后者一旦失效，短流水账会
+// 直接挤掉决策类条目，那才是这个改动真正的风险面。
+test("#369: history 进注入候选池", () => {
+  const { service } = setup();
+  service.saveWithDedupe({ type: "history", title: "切到暗色主题", content: "用户本次会话把界面切成暗色主题", importance: 4 });
+  const titles = service.injectCandidates({ maxItems: 5 }).map((m) => m.title);
+  assert.ok(titles.includes("切到暗色主题"), "importance>=3 的 history 应进注入候选");
+});
+
+test("#369: 低于重要度闸门的 history 不得例外放行", () => {
+  const { service } = setup();
+  service.saveWithDedupe({ type: "history", title: "打开过一次终端", content: "用户中途打开过一次终端", importance: 2 });
+  const titles = service.injectCandidates({ maxItems: 5 }).map((m) => m.title);
+  assert.ok(!titles.includes("打开过一次终端"), "history 不是 summary/preference，闸门照样生效");
+});
+
+// pattern 只由手工写入，却已被 dreamMergeGuard 列为长保留受保护类型——巩固层当资产
+// 护住、注入面一次不给看是同一条口径的两头不一致。这条锁它进池。
+test("#369: 手写的 pattern 进注入候选池", () => {
+  const { service } = setup();
+  service.saveWithDedupe({ type: "pattern", title: "重复字符串先抽共用模块", content: "多处重复的截断逻辑先收拢成共用模块，再改调用方", importance: 5 });
+  const titles = service.injectCandidates({ maxItems: 5 }).map((m) => m.title);
+  assert.ok(titles.includes("重复字符串先抽共用模块"), "importance>=3 的 pattern 应进注入候选");
+});
+
+// CodeRabbit on PR #404：语义缓存回填分支曾独漏重要度门槛（向量路与 BM25 路都带）。
+// 一正一反：反向锁「低于闸门的行走缓存也不许进池」，正向锁「达标的照常进池」，
+// 免得断言退化成常量真；缓存没被灌进来时正向那条会先红，用例不会空压。
+test("#369: 语义缓存回填同样受重要度闸门约束", async () => {
+  const { service } = setup();
+  const low = service.saveWithDedupe({ type: "history", title: "终端开了一次", content: "用户中途打开过一次终端做检查", importance: 2 });
+  const high = service.saveWithDedupe({ type: "history", title: "终端方案定案", content: "用户终端接入方案已定案并验证", importance: 4 });
+  await service.searchMemories("终端", { mode: "keyword", useRerank: false, recordRecall: false });
+  const ids = service.injectCandidates({ query: "终端", maxItems: 5 }).map((m) => m.id);
+  assert.ok(ids.includes(high.memory.id), "i4 的 history 应经缓存回填进池（正向对照）");
+  assert.equal(ids.includes(low.memory.id), false, "低于闸门的行不得借语义缓存绕开门槛");
+});

@@ -13,7 +13,15 @@ import { createBM25Index } from "./search/bm25.js";
 import { adaptiveThreshold } from "./search/adaptive.js";
 import { anchorSeeds, normalizePath, cascadeDepths, HOP_QUOTA } from "./graph/anchoring.js";
 
-const INJECT_TYPES = new Set(["preference", "project", "decision", "summary", "rejected_solution", "pitfall", "constraint"]);
+// Issue #369：蒸馏白名单（src/summarize.js 的 VALID）产得出 history，注入白名单
+// 原先不收——本机活跃库实测 378/1820（20.8%）因此永不可自动注入，而它们在同一库
+// 的 recall_runs `auto` 模式里被按需检索过 328 次：不是垃圾数据，只是进不了注入池。
+// 收编后候选池 1362 → 1713（+25.8%），按 top_k=5 粗算约多占 1 席；重要度闸门对
+// history 一视同仁（见 injectCandidates 的 importance >= threshold），低于闸门照旧出局。
+// pattern 一并收编：它只由手工写入（实测 40 条全 source=manual），却已被 dreamMergeGuard
+// 列为长保留受保护类型（docs/CONFIGURATION.md）——巩固层当资产护住、注入面一次不给看，
+// 是同一条口径的两头不一致。
+const INJECT_TYPES = new Set(["preference", "project", "decision", "summary", "rejected_solution", "pitfall", "constraint", "history", "pattern"]);
 
 // document 摘要行（#230）：仅 documentMemoryEnabled 开启时进注入候选。独立
 // 集合而非常改共享 Set——INJECT_TYPES 本身是「类型可注入」的静态事实，flag
@@ -1634,9 +1642,14 @@ export function createService({ store, mirror, config, onWrite, logger, document
         } catch { /* vector unavailable: fall through to the recall cache */ }
       }
       if (!semanticItems.length && lastSemanticRecall?.query === q && lastSemanticRecall.items?.length) {
+        // CodeRabbit on #404：这条回填分支此前独漏重要度门槛——向量路（上方）与
+        // BM25 路（下方 :1655 注释「门控与向量路径一致（含 importance 阈值）」）
+        // 都带着它。#369 收编 history 后缺口会被放大：库里低于闸门的行（实测
+        // history 378 条中有 27 条 i<=2）走一次检索进缓存就能绕开门槛占注入位。
         for (const m of lastSemanticRecall.items) {
           if (m && !m.archived && injectTypes.has(m.type) && !m.forgotten &&
-            (m.source !== "narrative" || allowNarrative) && codingGate(m)) semanticItems.push(m);
+            (m.source !== "narrative" || allowNarrative) && codingGate(m) &&
+            (m.type === "summary" || m.type === "preference" || m.importance >= threshold)) semanticItems.push(m);
         }
       }
       // Issue #198：首轮（无向量、无缓存召回）的同步兜底——BM25 词法召回领位。
