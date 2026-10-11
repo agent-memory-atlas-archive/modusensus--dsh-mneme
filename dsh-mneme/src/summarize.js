@@ -574,23 +574,28 @@ export function createSummarizer(ctx, service, config, deps = {}) {
       // 判定纯规则（字符数），无模型参与；被挡下的窗口照常消费游标，否则每个
       // turn/end 都会重新评估同一段短文本。skip 原因进审计，作为后续按真实负载
       // 决定下一级规则的依据。
+      //
+      // 字符数改为无条件计算并写进审计 metadata：它是「下一级预判该不该开、阈值
+      // 该给多少」的唯一依据，而原先开关一关就一个数都不留（维护者本机 1240 条
+      // summarize_compress 成功行的 metadata 里窗口字符数为 0 条），验收 4「默认配置
+      // 下调用量可量化下降」因此无法对账。本改动只加计量，不动任何跳过决策——
+      // summarizeMinWindowChars 仍为 0 时行为逐字节不变。
+      const distillChars = messages.reduce(
+        (total, message) => total + (Array.isArray(message.content) ? message.content : [])
+          .reduce((n, part) => n + (typeof part?.text === "string" ? part.text.length : 0), 0),
+        0
+      );
       const minWindowChars = config.summarizeMinWindowChars ?? 0;
-      if (minWindowChars > 0) {
-        const distillChars = messages.reduce(
-          (total, message) => total + (Array.isArray(message.content) ? message.content : [])
-            .reduce((n, part) => n + (typeof part?.text === "string" ? part.text.length : 0), 0),
-          0
-        );
-        if (distillChars < minWindowChars) {
-          commitCursor(session.id, nextSeq);
-          writeAudit({
-            timestamp: new Date().toISOString(),
-            model_id: route ? `${route.provider}:${route.model}` : "unknown",
-            status: "skipped",
-            error_message: "window-too-small"
-          });
-          return;
-        }
+      if (minWindowChars > 0 && distillChars < minWindowChars) {
+        commitCursor(session.id, nextSeq);
+        writeAudit({
+          timestamp: new Date().toISOString(),
+          model_id: route ? `${route.provider}:${route.model}` : "unknown",
+          status: "skipped",
+          error_message: "window-too-small",
+          metadata: { distillChars, minWindowChars }
+        });
+        return;
       }
       // 只有真正准备发起一次 LLM 蒸馏时才占用最小间隔与 run 预算；失败路径仍按
       // 原语义占用（调用确实发生过），aborted 则由 finally 回滚。
@@ -809,8 +814,12 @@ export function createSummarizer(ctx, service, config, deps = {}) {
         // 空数组是合法成功：没有记忆写入，但本次事件窗口仍然应被持久消费。
         persistCursor(session.id, nextSeq);
       }
-      if (audit && (capped > 0 || deduped > 0 || parsedResult.salvaged)) {
+      // Issue #239 定标：窗口字符数无条件随成功行落进 metadata。原先只有
+      // capped / deduped / salvaged 其中一项发生时才建 metadata，默认档位下
+      // 一条都不留——下一级预判规则的阈值就无从定标。
+      if (audit) {
         audit.metadata = {
+          distillChars,
           parsed: parsed.length,
           ...(parsedResult.salvaged ? { json_salvaged: true } : {}),
           ...(capped > 0 ? { capped } : {}),
