@@ -129,3 +129,16 @@ test("#369: 手写的 pattern 进注入候选池", () => {
   const titles = service.injectCandidates({ maxItems: 5 }).map((m) => m.title);
   assert.ok(titles.includes("重复字符串先抽共用模块"), "importance>=3 的 pattern 应进注入候选");
 });
+
+// CodeRabbit on PR #404：语义缓存回填分支曾独漏重要度门槛（向量路与 BM25 路都带）。
+// 一正一反：反向锁「低于闸门的行走缓存也不许进池」，正向锁「达标的照常进池」，
+// 免得断言退化成常量真；缓存没被灌进来时正向那条会先红，用例不会空压。
+test("#369: 语义缓存回填同样受重要度闸门约束", async () => {
+  const { service } = setup();
+  const low = service.saveWithDedupe({ type: "history", title: "终端开了一次", content: "用户中途打开过一次终端做检查", importance: 2 });
+  const high = service.saveWithDedupe({ type: "history", title: "终端方案定案", content: "用户终端接入方案已定案并验证", importance: 4 });
+  await service.searchMemories("终端", { mode: "keyword", useRerank: false, recordRecall: false });
+  const ids = service.injectCandidates({ query: "终端", maxItems: 5 }).map((m) => m.id);
+  assert.ok(ids.includes(high.memory.id), "i4 的 history 应经缓存回填进池（正向对照）");
+  assert.equal(ids.includes(low.memory.id), false, "低于闸门的行不得借语义缓存绕开门槛");
+});

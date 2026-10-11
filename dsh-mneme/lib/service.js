@@ -1642,9 +1642,14 @@ export function createService({ store, mirror, config, onWrite, logger, document
         } catch { /* vector unavailable: fall through to the recall cache */ }
       }
       if (!semanticItems.length && lastSemanticRecall?.query === q && lastSemanticRecall.items?.length) {
+        // CodeRabbit on #404：这条回填分支此前独漏重要度门槛——向量路（上方）与
+        // BM25 路（下方 :1655 注释「门控与向量路径一致（含 importance 阈值）」）
+        // 都带着它。#369 收编 history 后缺口会被放大：库里低于闸门的行（实测
+        // history 378 条中有 27 条 i<=2）走一次检索进缓存就能绕开门槛占注入位。
         for (const m of lastSemanticRecall.items) {
           if (m && !m.archived && injectTypes.has(m.type) && !m.forgotten &&
-            (m.source !== "narrative" || allowNarrative) && codingGate(m)) semanticItems.push(m);
+            (m.source !== "narrative" || allowNarrative) && codingGate(m) &&
+            (m.type === "summary" || m.type === "preference" || m.importance >= threshold)) semanticItems.push(m);
         }
       }
       // Issue #198：首轮（无向量、无缓存召回）的同步兜底——BM25 词法召回领位。
