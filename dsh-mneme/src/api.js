@@ -1,6 +1,7 @@
 import { URL } from "node:url";
 import { timingSafeEqual, randomBytes } from "node:crypto";
 import { FEATURE_FLAG_SPEC } from "./settings.js";
+import { TYPES } from "./store.js";
 import { TYPE_FILE, renderMirrorText, renderFileHeader, parseHumanEdits, MIRROR_READONLY_TYPES } from "./mirror.js";
 import { langOf } from "./lang.js";
 import { computeHeat } from "./heat.js";
@@ -595,6 +596,94 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
           if (Object.keys(patch).length) service.update(id, patch, { actor: "panel" });
           if (body.archived !== undefined) service.setArchived(id, body.archived);
           sendJson(res, 200, { memory: service.getById(id) });
+        });
+      } catch {
+        sendJson(res, 500, { error: "internal" });
+      }
+    }
+  });
+
+  // --- 新建一条记忆（面板写路径，与 /update、/delete 对称命名）---------------
+  // #386 第 5 条：CLI `add` 与 standalone `POST /memories` 都能建行，面板此前只
+  // 能看/改/删/导入。字段与 memory_save 工具对齐（type/title/content/importance/
+  // tags），走同一条 saveWithDedupe 路径——去重键仍是 (type, title, scope,
+  // sensitivity)，所以「面板建」与「工具建」同标题会并入同一行，不会长出两份。
+  //
+  // 三处刻意的口径差异（都写在代码里，免得下一个人以为是抄漏）：
+  //  1. content 要求 trim 后非空，与 /update 一致而非 standalone 的宽松版：
+  //     面板是人工输入，空正文只可能是误操作；standalone 面对的是程序化调用，
+  //     放宽是为了兼容「先建壳再补内容」的既有客户端。
+  //  2. document 直接 400：行铸造口唯一（registerDocument，#230），saveWithDedupe
+  //     会 throw，这里提前给干净错误码而不是让它落成 500。
+  //  3. 不接受 scope/sensitivity 字段——面板的 scope 编辑在详情抽屉里（带放宽
+  //     确认的安全阀，见 lib/client.js 的 MemoryDrawer），新建时就盖章 explicit
+  //     会绕过那道确认。传了也不报错，只是不生效（与 /update 的「字段出现即校验」
+  //     不同，因为这里根本没有该字段的语义）。
+  register({
+    kind: "exact",
+    path: "/api/dsh-mneme/create",
+    handler(req, res) {
+      try {
+        if (req.method !== "POST") {
+          sendJson(res, 404, { error: "not-found" });
+          return;
+        }
+        if (!requireAuth(req, res, apiToken)) return;
+        return readBody(req).then((text) => {
+          const body = parseBody(text);
+          if (!TYPES.has(body.type)) {
+            sendJson(res, 400, { error: "invalid-type" });
+            return;
+          }
+          if (body.type === "document") {
+            sendJson(res, 400, { error: "document-requires-register" });
+            return;
+          }
+          if (typeof body.title !== "string" || !body.title.trim()) {
+            sendJson(res, 400, { error: "invalid-title" });
+            return;
+          }
+          if (typeof body.content !== "string" || !body.content.trim()) {
+            sendJson(res, 400, { error: "invalid-content" });
+            return;
+          }
+          if (body.importance !== undefined
+            && (!Number.isInteger(body.importance) || body.importance < 1 || body.importance > 5)) {
+            sendJson(res, 400, { error: "invalid-importance" });
+            return;
+          }
+          if (body.tags !== undefined && (!Array.isArray(body.tags) || !body.tags.every((tag) => typeof tag === "string"))) {
+            sendJson(res, 400, { error: "invalid-tags" });
+            return;
+          }
+          try {
+            const result = service.saveWithDedupe({
+              type: body.type,
+              title: body.title.trim(),
+              content: body.content.trim(),
+              importance: body.importance,
+              tags: body.tags ?? [],
+              // 面板不是工具也不是外部程序，来源要能在详情抽屉里一眼认出是谁写的。
+              source: "panel"
+            });
+            // #254 写入准入在无会话身份时放行（write-admission.js 首行早退），面板
+            // 路由恰好不带 _sessionKey，所以今天到不了这个分支。仍然显式写出来：
+            // 将来若把会话身份接进面板，落到 toApiList([null]) 上会变成 500，把
+            // 「被拒」伪装成「服务器出错」——两者的处置完全不同。
+            if (result.action === "denied") {
+              sendJson(res, 422, { error: "write-rejected", reason: result.reason });
+              return;
+            }
+            // action 随行透出（created/merged）：面板据此提示「已并入同标题的既有条目」
+            // 还是「新建成功」——两者对用户是不同的事实，不能都报「已保存」。
+            sendJson(res, result.action === "created" ? 201 : 200, {
+              ...service.toApiList([result.memory])[0],
+              action: result.action
+            });
+          } catch (error) {
+            ctx.logger?.warn?.(`[dsh-mneme] panel create failed: ${String(error)}`);
+            sendJson(res, 500, { error: "internal" });
+          }
         });
       } catch {
         sendJson(res, 500, { error: "internal" });
@@ -1429,7 +1518,7 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
   });
 
   return {
-    routes: 32,
+    routes: 33,
     dispose: () => {
       for (const dispose of disposers) dispose();
     }

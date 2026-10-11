@@ -577,6 +577,20 @@ window.__ModuleLoader__.load({
         "memory.explorer.imported": "已合并 {n} 条编辑",
         "memory.explorer.importFailed": "导入失败",
         "memory.explorer.importNoFile": "请先选择文件",
+        "memory.explorer.newMemory": "新增记忆…",
+        "memory.explorer.newTitle": "新增记忆",
+        "memory.explorer.newHint": "手动写一条记忆。同类型同标题会并入既有条目，而不是长出第二行。",
+        "memory.explorer.newType": "类型",
+        "memory.explorer.newTitlePlaceholder": "短标题，也是去重键",
+        "memory.explorer.newContentPlaceholder": "正文",
+        "memory.explorer.newTagsPlaceholder": "标签，逗号分隔（可留空）",
+        "memory.explorer.newConfirm": "新建",
+        "memory.explorer.newSaving": "保存中…",
+        "memory.explorer.newCreated": "已新建",
+        "memory.explorer.newMerged": "已并入同标题的既有条目",
+        "memory.explorer.newFailed": "新建失败",
+        "memory.explorer.newNoTitle": "请先填写标题",
+        "memory.explorer.newNoContent": "请先填写内容",
         "memory.explorer.exportFailed": "导出失败",
         "memory.explorer.conflictBadge": "冲突",
         "memory.explorer.archivedBadge": "已归档",
@@ -1052,6 +1066,20 @@ window.__ModuleLoader__.load({
         "memory.explorer.imported": "Merged {n} edits",
         "memory.explorer.importFailed": "Import failed",
         "memory.explorer.importNoFile": "Choose a file first",
+        "memory.explorer.newMemory": "New memory…",
+        "memory.explorer.newTitle": "New memory",
+        "memory.explorer.newHint": "Write one memory by hand. Same type + same title merges into the existing entry instead of minting a second row.",
+        "memory.explorer.newType": "Type",
+        "memory.explorer.newTitlePlaceholder": "Short title; also the dedupe key",
+        "memory.explorer.newContentPlaceholder": "Body",
+        "memory.explorer.newTagsPlaceholder": "Tags, comma separated (optional)",
+        "memory.explorer.newConfirm": "Create",
+        "memory.explorer.newSaving": "Saving…",
+        "memory.explorer.newCreated": "Created",
+        "memory.explorer.newMerged": "Merged into the existing entry with that title",
+        "memory.explorer.newFailed": "Create failed",
+        "memory.explorer.newNoTitle": "Title is required",
+        "memory.explorer.newNoContent": "Body is required",
         "memory.explorer.exportFailed": "Export failed",
         "memory.explorer.conflictBadge": "Conflict",
         "memory.explorer.archivedBadge": "Archived",
@@ -4576,6 +4604,113 @@ window.__ModuleLoader__.load({
       );
     }
 
+    // #386 第 5 条：面板手动新增一条记忆。字段与 memory_save 工具对齐
+    //（type/title/content/importance/tags），但**不放 scope/sensitivity**：归属的
+    // 显式声明走详情抽屉那条路，它带「放宽可见性」二次确认；在新建表单里顺手盖
+    // 章会绕开那道确认。后端的去重键仍是 (type, title, scope, sensitivity)，所以
+    // 同类型同标题会并入既有行——服务端回的 action 决定提示语说「已新建」还是
+    // 「已并入」，两者对用户是不同的事实，不能都报「已保存」。
+    function CreateDialog({ t, onClose, onCreated }) {
+      const [type, setType] = useState("preference");
+      const [title, setTitle] = useState("");
+      const [content, setContent] = useState("");
+      const [importance, setImportance] = useState(3);
+      const [tags, setTags] = useState("");
+      const [busy, setBusy] = useState(false);
+      const [msg, setMsg] = useState("");
+      const [err, setErr] = useState("");
+      const submit = () => {
+        // 前端先拦一次空标题/空正文：后端也会 400，但往返一趟只为报「标题不能
+        // 为空」不值当。服务端校验仍是权威——它同时管着类型白名单与去重。
+        if (!title.trim()) { setErr(t("memory.explorer.newNoTitle")); return; }
+        if (!content.trim()) { setErr(t("memory.explorer.newNoContent")); return; }
+        setBusy(true);
+        setErr("");
+        apiFetch("/api/dsh-mneme/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type,
+            title: title.trim(),
+            content: content.trim(),
+            importance,
+            tags: tags.split(",").map((s) => s.trim()).filter(Boolean)
+          })
+        })
+          .then((res) => { if (!res.ok) throw new Error("http"); return res.json(); })
+          .then((d) => {
+            setMsg(d && d.action === "merged" ? t("memory.explorer.newMerged") : t("memory.explorer.newCreated"));
+            setBusy(false);
+            // 停 900ms 让提示可读，再关窗并把新建的行选中（见 onCreated）。
+            setTimeout(() => { onCreated(d); onClose(); }, 900);
+          })
+          .catch(() => { setBusy(false); setErr(t("memory.explorer.newFailed")); });
+      };
+      return h("div", { className: "mneme-impdialog", role: "region", "aria-label": t("memory.explorer.newTitle") },
+        h("div", { className: "mneme-set-title" }, t("memory.explorer.newTitle")),
+        h("div", { className: "mneme-featsubhint", style: { marginTop: 4 } }, t("memory.explorer.newHint")),
+        h("div", { className: "mneme-improw" },
+          h("span", { className: "mneme-featnumlabel" }, t("memory.explorer.newType")),
+          h("select", { className: "mneme-select", value: type, onChange: (e) => setType(e.target.value) },
+            // document 刻意不在列：它是 agent 注册长文档的指针行，铸造口唯一
+            //（registerDocument，#230），后端路由也会 400。列出来只会让人点了
+            // 才被拒。
+            ["preference", "project", "decision", "history", "rejected_solution", "pitfall", "constraint"].map((k) =>
+              h("option", { key: k, value: k }, typeLabel(t, k))))
+        ),
+        h("div", { className: "mneme-improw" },
+          h("input", {
+            type: "text",
+            className: "mneme-set-input",
+            value: title,
+            placeholder: t("memory.explorer.newTitlePlaceholder"),
+            "aria-label": t("memory.explorer.newTitlePlaceholder"),
+            onChange: (e) => { setTitle(e.target.value); setErr(""); }
+          })
+        ),
+        h("div", { className: "mneme-improw" },
+          h("textarea", {
+            className: "mneme-set-input mneme-set-input--area",
+            value: content,
+            placeholder: t("memory.explorer.newContentPlaceholder"),
+            "aria-label": t("memory.explorer.newContentPlaceholder"),
+            rows: 4,
+            onChange: (e) => { setContent(e.target.value); setErr(""); }
+          })
+        ),
+        h("div", { className: "mneme-improw" },
+          h("input", {
+            type: "text",
+            className: "mneme-set-input",
+            value: tags,
+            placeholder: t("memory.explorer.newTagsPlaceholder"),
+            "aria-label": t("memory.explorer.newTagsPlaceholder"),
+            onChange: (e) => setTags(e.target.value)
+          })
+        ),
+        h("div", { className: "mneme-improw" },
+          h("span", { className: "mneme-featnumlabel" }, t("memory.explorer.importance")),
+          h("div", { className: "mneme-staredit", role: "radiogroup", "aria-label": t("memory.explorer.detail.editImportance") },
+            [1, 2, 3, 4, 5].map((n) => h("button", {
+              key: n,
+              type: "button",
+              role: "radio",
+              "aria-checked": String(importance === n),
+              "aria-label": t("memory.explorer.detail.starLabel").replace("{n}", String(n)),
+              className: importance >= n ? "mneme-starbtn mneme-starbtn--on" : "mneme-starbtn",
+              onClick: () => setImportance(n)
+            }, h(StarGlyph, { size: 15, filled: importance >= n }))))
+        ),
+        err && h("div", { className: "mneme-featsubhint", style: { color: "var(--mneme-danger)", marginTop: 8 } }, err),
+        msg && h("div", { className: "mneme-saved", style: { marginTop: 8 } }, msg),
+        h("div", { className: "mneme-improw", style: { justifyContent: "flex-end" } },
+          h("button", { type: "button", className: "mneme-btn", disabled: busy, onClick: onClose }, t("memory.explorer.importCancel")),
+          h("button", { type: "button", className: "mneme-btn", disabled: busy, onClick: submit },
+            busy ? t("memory.explorer.newSaving") : t("memory.explorer.newConfirm"))
+        )
+      );
+    }
+
     function MemoryExplorer({ t }) {
       const [view, setView] = useState("memory"); // memory | entity | status | settings
       const [items, setItems] = useState([]); // loaded browse pages, chrono desc
@@ -4611,6 +4746,7 @@ window.__ModuleLoader__.load({
       const [pendingIds, setPendingIds] = useState(() => new Set());
       const [menuOpen, setMenuOpen] = useState(false);
       const [importOpen, setImportOpen] = useState(false);
+      const [createOpen, setCreateOpen] = useState(false);
       const itemRefs = useRef(new Map());
       const moreRef = useRef(null);
 
@@ -4960,9 +5096,11 @@ window.__ModuleLoader__.load({
                 "aria-label": t("memory.explorer.more"),
                 "aria-expanded": String(menuOpen),
                 title: t("memory.explorer.more"),
-                onClick: () => { setMenuOpen(!menuOpen); setImportOpen(false); }
+                onClick: () => { setMenuOpen(!menuOpen); setImportOpen(false); setCreateOpen(false); }
               }, "⋯"),
               menuOpen && h("div", { className: "mneme-menu", role: "menu" },
+                h("button", { type: "button", role: "menuitem", onClick: () => { setCreateOpen(true); setMenuOpen(false); } },
+                  t("memory.explorer.newMemory")),
                 h("button", { type: "button", role: "menuitem", onClick: () => { setMenuOpen(false); exportData("json"); } },
                   t("memory.explorer.exportJson")),
                 h("button", { type: "button", role: "menuitem", onClick: () => { setMenuOpen(false); exportData("markdown"); } },
@@ -4974,6 +5112,13 @@ window.__ModuleLoader__.load({
                 t,
                 onClose: () => setImportOpen(false),
                 onImported: () => setReloadKey((k) => k + 1)
+              }),
+              createOpen && h(CreateDialog, {
+                t,
+                onClose: () => setCreateOpen(false),
+                // 新建后既刷新列表也选中新行：并入既有条目时 action 是 merged，
+                // 返回的 id 就是被并入那一行——两种情况都该把它滚进视野。
+                onCreated: (d) => { setReloadKey((k) => k + 1); if (d && d.id) setSelectedId(d.id); }
               })
             )
           ),
