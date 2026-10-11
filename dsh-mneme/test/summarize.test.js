@@ -274,6 +274,43 @@ test("#239 窗口过短：零 LLM 预判拦下调用，留 skip 审计并消费�
   assert.equal(service.listLlmAudits().length, 1, "游标已消费：同一窗口不重复评估、不重复审计");
 });
 
+// #239 定标埋点：窗口字符数必须落进审计，否则下一级预判规则的阈值无从选起。
+// 第二条才是本改动的目的——预判开关关着（默认档位）时行为逐字节不变，但从这一刻
+// 起成功行开始留数，验收 4「默认配置下调用量可量化下降」才有账可对。
+test("#239 计量：window-too-small 的 skip 行带 distillChars 与阈值", async () => {
+  const { events, service } = setup({ summarizeMinWindowChars: 1000 });
+  const handler = events.find((e) => e.name === "session/event").fn;
+  const session = {
+    id: "s239-metric-skip",
+    requestHeader: () => ({ config: { provider: "deepseek", model: "deepseek-chat" } }),
+    events: [userMessage("好", 1), { seq: 2, type: "turn/end" }]
+  };
+  await handler(session, { seq: 2, type: "turn/end" });
+  const row = service.listLlmAudits()[0];
+  assert.equal(row.error_message, "window-too-small");
+  // 计的是**真正发给模型的转录文本**长度（含角色前缀：一条 1 字的「好」实测记 4），
+  // 与闸门比较的口径同一个数，定标才对得上。这里不锁字面量，锁语义：短于阈值才该 skip。
+  assert.ok(Number.isInteger(row.metadata?.distillChars) && row.metadata.distillChars > 0,
+    "skip 行必须带窗口字符数");
+  assert.equal(row.metadata.minWindowChars, 1000, "阈值随行落档，事后能复核是哪条闸门拦的");
+  assert.ok(row.metadata.distillChars < row.metadata.minWindowChars, "skip 的前提：窗口短于阈值");
+});
+
+test("#239 计量：预判开关关闭时成功行仍记录 distillChars", async () => {
+  const { events, service } = setup();
+  const handler = events.find((e) => e.name === "session/event").fn;
+  const session = {
+    id: "s239-metric-success",
+    requestHeader: () => ({ config: { provider: "deepseek", model: "deepseek-chat" } }),
+    events: [userMessage("今天决定把窗口字符数记进审计", 1), { seq: 2, type: "turn/end" }]
+  };
+  await handler(session, { seq: 2, type: "turn/end" });
+  const row = service.listLlmAudits()[0];
+  assert.equal(row.status, "success");
+  assert.ok(Number.isInteger(row.metadata?.distillChars) && row.metadata.distillChars > 0,
+    "默认档位下也要留数，否则验收 4 无从对账");
+});
+
 test("#239 窗口达到阈值时预判放行（不误杀）", async () => {
   const { events, calls } = setup({ summarizeMinWindowChars: 5 });
   const handler = events.find((e) => e.name === "session/event").fn;
