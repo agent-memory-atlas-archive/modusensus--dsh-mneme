@@ -1,3 +1,5 @@
+import { safeSlice } from "./safe-slice.js";
+
 // Session-scoped hot memory (v0.5.0 召回率优化 1.3): a short-term buffer of
 // the latest dialogue rounds, kept strictly apart from the long-term memory
 // store. The injector renders it ahead of the long-term recall block so the
@@ -43,4 +45,64 @@ export function createHotMemory({ maxRounds = 5, maxTokens = 2000 } = {}) {
     rounds: () => [...buffer],
     clear() { buffer.length = 0; }
   };
+}
+
+// Issue：rewind（surfaceOp replace）/compact 遮蔽过的事件仍留在 append-only 事件
+// 流里——热记忆若直接遍历原始流，被撤回的轮次会回流进 prompt（用户实测：一次
+// 撤回 3+ 条后模型仍能复述大部分内容）。宿主在 session.surface.nodes 维护
+// 「模型可见事件 seq」列表（dsh-rewind 插件即据此计算替换区间）；调用方把可见
+// 集合传入本函数，只统计可见事件，热记忆与模型看到的对话因此同源。visibleSeqs
+// 传 null 表示宿主未提供 surface（老版本 DSH），保持旧行为——宁可持续旧偏差，
+// 绝不误删仍可见的轮次。
+//
+// 配对规则与 inject.js 原实现一致：user/message（source.kind 缺省或 "user"）开启
+// 新一轮；下一条 assistant 起源的事件关闭该轮。tool/system 等携带正文的事件不得
+// 冒充模型回复；rewind 标记（source.kind = "dsh-rewind"）不是用户提问。
+export function roundsFromEvents(events, maxRounds, visibleSeqs = null) {
+  const rounds = [];
+  let pendingQuery = null;
+  const textOf = (event) => {
+    // user/message 的正文就在 data 上，而 assistant/message（以及 tool/result）的消息体
+    // 嵌在 data.message 下 —— DSH 侧由 @deepseek-ai/dsh-session 的
+    // assertMessageEventShape 一行写死：const message = type === "user/message" ? record : record?.["message"]。
+    // 只读 data.content 会让每一轮的 response 恒为空（Issue #129）。
+    // 这里用 ?? 兜底而不是直接改成 data.message.content：user 消息与旧的扁平形状都照旧可用。
+    const parts = event?.data?.content ?? event?.data?.message?.content;
+    if (!Array.isArray(parts)) return "";
+    // 只取正文 part（type === "text" 或字符串），跳过 reasoning（issue #162）：
+    // reasoning 里出现 Go template / Vue / Handlebars / 正则 / 日志原文的概率远高于
+    // 正文，把它带进 hot memory 会让 `{{...}}` 模板片段注入 prompt。旧的扁平形状
+    // （字符串 part）照旧取用，无 type 字段的兜底视为正文。
+    return parts
+      .map((p) => {
+        if (typeof p === "string") return p;
+        if (p?.type && p.type !== "text") return "";
+        return p?.text ?? "";
+      })
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+  };
+  for (const event of events) {
+    // surface 投影：不在「模型可见面」上的事件（被 rewind 撤回、被 compact 替换）
+    // 不参与配对。
+    if (visibleSeqs && !visibleSeqs.has(event?.seq)) continue;
+    const kind = event?.data?.source?.kind;
+    const isUser = event?.type === "user/message" && (kind === undefined || kind === "user");
+    if (isUser) {
+      if (pendingQuery) rounds.push({ query: pendingQuery, response: "" });
+      pendingQuery = safeSlice(textOf(event), 500);
+      continue;
+    }
+    // Only assistant-originated events close a round; tool/system events
+    // carrying text must not be mistaken for the model's reply.
+    const isAssistant = typeof event?.type === "string" && event.type.includes("assistant")
+      || kind === "assistant";
+    const body = isAssistant ? textOf(event) : "";
+    if (!body || !pendingQuery) continue;
+    rounds.push({ query: pendingQuery, response: safeSlice(body, 800) });
+    pendingQuery = null;
+  }
+  if (pendingQuery) rounds.push({ query: pendingQuery, response: "" });
+  return rounds.slice(-maxRounds);
 }

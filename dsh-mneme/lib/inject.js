@@ -1,9 +1,10 @@
 import { createScopeResolver } from "./scope.js";
-import { createHotMemory } from "./hot-memory.js";
+import { createHotMemory, roundsFromEvents } from "./hot-memory.js";
 import { STR, langOf } from "./lang.js";
 import { MEMORY_GUIDE_SECTION } from "./guide.js";
 import { adaptiveInjectBudget } from "./search/adaptive.js";
 import { injectChildEnabled } from "./config.js";
+import { safeSlice } from "./safe-slice.js";
 
 // Issue #179：注入预览的数据底座。systemPrompt 渲染是同步回调，面板只能事后
 // 拉取，所以在这里旁路缓存「最近一帧组装」——快照就是本次渲染用过的同一份
@@ -16,21 +17,19 @@ export function getInjectionSnapshot() {
   return injectionSnapshot;
 }
 
-// Issue #334：UTF-16 截断切开 emoji 代理对会留下孤立代理项（如 🔴 = D83D DD34
-// 在 800 处切，D83D 留下、DD34 被切走）。DSH 把它序列化成非法 UTF-8，DeepSeek
-// API 对每个请求回 400 INVALID_REQUEST——而且畸形文本随注入消息被永久写进会话
-// 历史，此后**每一轮**都带着它，表现为会话从某一轮起连续 400、换话题/重启都不
-// 恢复（会话级不可逆损坏）。防法是「少一个字符都行，绝不留半个」：尾字符是
-// 高位代理（0xD800–0xDBFF）说明它的低位搭档被切走了，把这个高位代理整个丢掉。
-// （反过来尾字符是低位代理不可能孤立——它的搭档必然紧邻在前、同在切点之内。）
-// ASCII-only 的文本零开销（length 相等直接短路）。
-function safeSlice(text, limit) {
-  const s = String(text);
-  if (s.length <= limit) return s;
-  let cut = s.slice(0, limit);
-  const tail = cut.charCodeAt(cut.length - 1);
-  if (tail >= 0xd800 && tail <= 0xdbff) cut = cut.slice(0, -1);
-  return cut;
+// 「模型可见事件 seq」集合：宿主在 session.surface.nodes 维护可见面——rewind 的
+// surfaceOp replace 与 compact 的隐藏替换都作用在这层（dsh-rewind 插件即据此计算
+// 替换区间）。拿不到（老版本宿主）返回 null，调用方退回「全量事件」的旧行为。
+// 读取必须在 try 内：`surface.nodes` 是宿主 getter，其 _assertProjections 在消息投影
+// 所属插件被移除时会 throw（dsh-session lib/types/surface.js）。抛出等同于「没有
+// 可见面」，绝不能让整块热记忆消失——那是比旧偏差更糟的退化。
+function visibleSeqsOf(session) {
+  try {
+    const nodes = session?.surface?.nodes;
+    return Array.isArray(nodes) ? new Set(nodes) : null;
+  } catch {
+    return null;
+  }
 }
 
 // Best-effort extraction of the current user's latest message text from the
@@ -46,8 +45,11 @@ function lastUserQuery(ctx) {
     // still have the .events property, so fall back to it.
     const events = session?.snapshotEvents?.() ?? session?.events;
     if (!Array.isArray(events) || events.length === 0) return "";
+    const visibleSeqs = visibleSeqsOf(session);
     for (let i = events.length - 1; i >= 0; i--) {
       const event = events[i];
+      // 被撤回/被压缩遮蔽的事件不算「最近一条用户消息」（与 extractRounds 同口径）。
+      if (visibleSeqs && !visibleSeqs.has(event?.seq)) continue;
       if (event?.type !== "user/message") continue;
       const kind = event.data?.source?.kind;
       if (kind !== undefined && kind !== "user") continue;
@@ -66,58 +68,20 @@ function lastUserQuery(ctx) {
 }
 
 // Hot-memory round extraction (v0.5.0 1.3): pairs each user/message with the
-// next assistant reply from the materialized session log. Tolerates shapes
-// where assistant events carry a different type tag — anything whose payload
-// has content parts and is not a user message counts as a reply. Best-effort:
-// returns [] on any failure, and the hot block simply does not render.
+// next assistant reply. The pairing lives in hot-memory.js (roundsFromEvents)
+// so it can be unit-tested directly; this adapter only resolves the session's
+// raw event log and the model-visible seq set (session.surface.nodes — see
+// visibleSeqsOf). Rewind-shadowed / compacted events are thereby excluded:
+// hot memory and the model see the same conversation. Best-effort: returns []
+// on any failure, and the hot block simply does not render.
 function extractRounds(ctx, maxRounds) {
   try {
     const session = ctx?.agent?.session;
+    // DSH ≥0.1.2-rc only exposes events via snapshotEvents(); older builds
+    // still have the .events property, so fall back to it.
     const events = session?.snapshotEvents?.() ?? session?.events;
     if (!Array.isArray(events) || events.length === 0) return [];
-    const rounds = [];
-    let pendingQuery = null;
-    const textOf = (event) => {
-      // user/message 的正文就在 data 上，而 assistant/message（以及 tool/result）的消息体
-      // 嵌在 data.message 下 —— DSH 侧由 @deepseek-ai/dsh-session 的
-      // assertMessageEventShape 一行写死：const message = type === "user/message" ? record : record?.["message"]。
-      // 只读 data.content 会让每一轮的 response 恒为空（Issue #129）。
-      // 这里用 ?? 兜底而不是直接改成 data.message.content：user 消息与旧的扁平形状都照旧可用。
-      const parts = event?.data?.content ?? event?.data?.message?.content;
-      if (!Array.isArray(parts)) return "";
-      // 只取正文 part（type === "text" 或字符串），跳过 reasoning（issue #162）：
-      // reasoning 里出现 Go template / Vue / Handlebars / 正则 / 日志原文的概率远高于
-      // 正文，把它带进 hot memory 会让 `{{...}}` 模板片段注入 prompt。旧的扁平形状
-      // （字符串 part）照旧取用，无 type 字段的兜底视为正文。
-      return parts
-        .map((p) => {
-          if (typeof p === "string") return p;
-          if (p?.type && p.type !== "text") return "";
-          return p?.text ?? "";
-        })
-        .filter(Boolean)
-        .join("\n")
-        .trim();
-    };
-    for (const event of events) {
-      const kind = event?.data?.source?.kind;
-      const isUser = event?.type === "user/message" && (kind === undefined || kind === "user");
-      if (isUser) {
-        if (pendingQuery) rounds.push({ query: pendingQuery, response: "" });
-        pendingQuery = safeSlice(textOf(event), 500);
-        continue;
-      }
-      // Only assistant-originated events close a round; tool/system events
-      // carrying text must not be mistaken for the model's reply.
-      const isAssistant = typeof event?.type === "string" && event.type.includes("assistant")
-        || kind === "assistant";
-      const body = isAssistant ? textOf(event) : "";
-      if (!body || !pendingQuery) continue;
-      rounds.push({ query: pendingQuery, response: safeSlice(body, 800) });
-      pendingQuery = null;
-    }
-    if (pendingQuery) rounds.push({ query: pendingQuery, response: "" });
-    return rounds.slice(-maxRounds);
+    return roundsFromEvents(events, maxRounds, visibleSeqsOf(session));
   } catch {
     return [];
   }
