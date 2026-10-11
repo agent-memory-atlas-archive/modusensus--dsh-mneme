@@ -1256,6 +1256,88 @@ test("conflict queue: expandable full text with decision metadata", () => {
     assert.ok(occurrences >= 2, `i18n key ${key} must exist in both zh and en (got ${occurrences})`);
   }
 });
+
+// #386 第 5 条：面板手动新增记忆。这一块最容易悄悄退化——菜单项被删掉、弹层被
+// 从树里摘掉、或者表单又长回 scope/sensitivity 输入框（那会绕开详情抽屉的「放宽
+// 可见性」二次确认），面板表面上看不出坏，只是入口没了。所以既锁「入口存在」，
+// 也锁「入口真的挂在树上」。
+test("panel can create a memory by hand: menu entry wired to the dialog", () => {
+  // 入口在「更多操作」菜单里，且菜单项真的调用 setCreateOpen(true)——只断言文案
+  // 存在的话，把 onClick 摘掉测试照样绿。
+  assert.ok(clientSource.includes('"memory.explorer.newMemory"'), "menu entry label must exist");
+  assert.ok(/role: "menuitem", onClick: \(\) => \{ setCreateOpen\(true\); setMenuOpen\(false\); \}/.test(clientSource),
+    "the menu item must actually open the create dialog");
+  assert.ok(clientSource.includes("const [createOpen, setCreateOpen] = useState(false)"),
+    "the dialog needs its own open state");
+  // 弹层必须挂在树上并接上回调：onCreated 同时刷新列表与选中新行（并入既有条目时
+  // 返回的 id 是被并入那一行，也该滚进视野）。
+  assert.ok(/createOpen && h\(CreateDialog, \{/.test(clientSource), "the dialog must be mounted conditionally");
+  assert.ok(/onCreated: \(d\) => \{ setReloadKey\(\(k\) => k \+ 1\); if \(d && d\.id\) setSelectedId\(d\.id\); \}/.test(clientSource),
+    "creating must refresh the list and select the resulting row");
+  // 打后端的路由是 /create，不是 standalone 的 /memories：面板与工具必须走同一条
+  // saveWithDedupe 路径，否则「同标题并入」的提示在面板上会失灵。
+  assert.ok(clientSource.includes('apiFetch("/api/dsh-mneme/create"'),
+    "the dialog must post to the panel create route");
+  assert.ok(/d\.action === "merged" \? t\("memory\.explorer\.newMerged"\) : t\("memory\.explorer\.newCreated"\)/.test(clientSource),
+    "merged and created are different facts and must be reported differently");
+  // 弹层源码切片：下面「表单里有什么 / 没有什么」的断言一律在这段上做。在整包上做
+  // 等于没锁——这些字段名在 bundle 里到处都是，`clientSource.includes("title")` 恒真。
+  const dialogStart = clientSource.indexOf("function CreateDialog");
+  const dialogEnd = clientSource.indexOf("function MemoryExplorer", dialogStart);
+  assert.ok(dialogStart >= 0 && dialogEnd > dialogStart, "CreateDialog must be findable in the bundle");
+  const dialogSource = clientSource.slice(dialogStart, dialogEnd);
+  // 表单字段与 memory_save 工具对齐，且锁的是**真实请求体写法**：多一个字段（比如
+  // scope/sensitivity）这段就匹配不上，少一个 trim 也匹配不上。锁裸字段名会恒真。
+  assert.match(dialogSource,
+    /JSON\.stringify\(\{\s*type,\s*title: title\.trim\(\),\s*content: content\.trim\(\),\s*importance,\s*tags: tags\.split\(","\)\.map\(\(s\) => s\.trim\(\)\)\.filter\(Boolean\)\s*\}\)/,
+    "the create request body must carry exactly type/title/content/importance/tags");
+  // 成功路径**不得**重置 busy：提示要停 900ms 才关窗，这期间按钮若重新可点，第二次
+  // 同 type+title 会落进同一行并把正文再追加一遍（service 走 appendContent），一次
+  // 误触就写坏一条记忆。所以全弹层只允许 catch 那条路重置 busy。
+  assert.equal(dialogSource.split("setBusy(false)").length - 1, 1,
+    "only the error path may reset busy; the success path must stay disabled until the dialog closes");
+  assert.match(dialogSource, /\.catch\(\(\) => \{ setBusy\(false\); setErr\(t\("memory\.explorer\.newFailed"\)\); \}\)/,
+    "the single busy reset must be the error path");
+  // 按钮文案同理：成功后 busy 仍为 true，若只看 busy，写入早就完成了按钮还写着「保存
+  // 中…」——既骗用户又和旁边那行「已新建」自相矛盾。msg 一置上就切回正常文案。
+  assert.match(dialogSource, /busy && !msg \? t\("memory\.explorer\.newSaving"\) : t\("memory\.explorer\.newConfirm"\)/,
+    "once the write succeeded the button must stop claiming it is still saving");
+  assert.equal(/newScope|sensitivity/.test(dialogSource), false,
+    "the create form must not offer scope/sensitivity: that path bypasses the widen-confirm guard");
+  // document 不在类型下拉里：铸造口唯一（registerDocument，#230），后端也会 400。
+  assert.equal(dialogSource.includes('"document"'), false,
+    "document rows are minted only via registerDocument and must not be offered here");
+  // 类型白名单与 src/tools.js 的 memory_save enum 逐字一致（缺一个就会有人点进去才被拒）。
+  for (const k of ["preference", "project", "decision", "history", "rejected_solution", "pitfall", "constraint"]) {
+    assert.ok(dialogSource.includes(`"${k}"`), `type option ${k} must be offered`);
+  }
+  // 前端空值拦截只是省一次往返，服务端校验才是权威——但两者都得在，否则空标题会
+  // 一路发出去再弹一个 400 给用户看。
+  assert.ok(dialogSource.includes('if (!title.trim()) { setErr(t("memory.explorer.newNoTitle")); return; }'),
+    "empty title must be caught before the round trip");
+  assert.ok(dialogSource.includes('if (!content.trim()) { setErr(t("memory.explorer.newNoContent")); return; }'),
+    "empty body must be caught before the round trip");
+  // 十四个新键必须中英成对（与上面那条全局锁同口径，这里列出名字便于定位）。
+  for (const key of [
+    "memory.explorer.newMemory",
+    "memory.explorer.newTitle",
+    "memory.explorer.newHint",
+    "memory.explorer.newType",
+    "memory.explorer.newTitlePlaceholder",
+    "memory.explorer.newContentPlaceholder",
+    "memory.explorer.newTagsPlaceholder",
+    "memory.explorer.newConfirm",
+    "memory.explorer.newSaving",
+    "memory.explorer.newCreated",
+    "memory.explorer.newMerged",
+    "memory.explorer.newFailed",
+    "memory.explorer.newNoTitle",
+    "memory.explorer.newNoContent"
+  ]) {
+    const occurrences = clientSource.split(`"${key}"`).length - 1;
+    assert.ok(occurrences >= 2, `i18n key ${key} must exist in both zh and en (got ${occurrences})`);
+  }
+});
 // 面板 bundle 在本文件里只被当**文本**读（上面的断言全是正则/字符串包含），
 // 而仓库的 CI 里没有任何一步**解析**它：于是重复声明这类语法错误能一路绿灯进
 // 主干，后果却是整个面板加载失败（__ModuleLoader__ 拿到的模块一执行就抛
