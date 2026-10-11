@@ -93,7 +93,10 @@ function parseBody(text) {
   }
 }
 
-export function createApi(ctx, service, settings, commands, embedder, semantic = null, apiToken = "", config = null) {
+// maintenance 是第 9 个位置参数，默认 null：既有调用点（测试里的 14 处）全是位置传参、
+// 不传它，必须继续工作——不传时 /maintenance/reclaim 回 503 maintenance-unavailable，
+// 而不是把「没接线」伪装成崩溃（#386 第 4 条）。
+export function createApi(ctx, service, settings, commands, embedder, semantic = null, apiToken = "", config = null, maintenance = null) {
   const disposers = [];
 
   // #182 注入状态探测：面板状态页的「极简模式下注入按宿主设计关闭」提示需要
@@ -682,6 +685,105 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
             });
           } catch (error) {
             ctx.logger?.warn?.(`[dsh-mneme] panel create failed: ${String(error)}`);
+            sendJson(res, 500, { error: "internal" });
+          }
+        });
+      } catch {
+        sendJson(res, 500, { error: "internal" });
+      }
+    }
+  });
+
+  // --- maintenance/reclaim（#386 第 4 条：面板有了回收入口）------------------
+  // 与 standalone 数据面的 POST /maintenance/reclaim 是同一能力的两张皮，口径必须
+  // 逐字一致（错误码字符串、默认值、报告形状）；改这里时那边一起改。
+  //
+  // 为什么 GET 也能跑：dry-run 是只读的（src/maintenance.js 里 dry-run 与执行同一条
+  // 代码路径，只是不落 UPDATE/VACUUM），面板 mount 时拿它渲染「现在能回收多少」。
+  //
+  // 为什么两法都要 requireAuth：这是不可逆内容丢弃的入口，不能有例外。
+  register({
+    kind: "exact",
+    path: "/api/dsh-mneme/maintenance/reclaim",
+    handler(req, res) {
+      try {
+        if (req.method === "GET") {
+          if (!requireAuth(req, res, apiToken)) return;
+          if (!maintenance) {
+            sendJson(res, 503, { error: "maintenance-unavailable" });
+            return;
+          }
+          // query 是字符串域：只收十进制整数字面量，缺省才落默认窗口。**不能用
+          // Number()**——它把 ""/[]/" " 都化成 0，而 0 在这里是「清掉全部快照」，
+          // 最坏解释绝不能从一个畸形输入静默拿到（POST 侧收 JSON 数字，口径不同）。
+          const raw = new URL(req.url, "http://localhost").searchParams.get("olderThanDays");
+          let olderThanDays;
+          if (raw === null) {
+            olderThanDays = undefined;
+          } else if (/^\d+$/.test(raw)) {
+            olderThanDays = Number(raw);
+          } else {
+            sendJson(res, 400, { error: "invalid-older-than-days" });
+            return;
+          }
+          try {
+            sendJson(res, 200, maintenance.reclaim({ olderThanDays, dryRun: true }));
+          } catch (error) {
+            ctx.logger?.warn?.(`[dsh-mneme] storage reclaim failed: ${String(error)}`);
+            sendJson(res, 500, { error: "internal" });
+          }
+          return;
+        }
+        if (req.method !== "POST") {
+          sendJson(res, 404, { error: "not-found" });
+          return;
+        }
+        if (!requireAuth(req, res, apiToken)) return;
+        return readBody(req).then((text) => {
+          // 不用 parseBody：它把坏 JSON 吞成 {}，而这里 invalid-json 与 invalid-body
+          // 是两个不同的错（前者是调用方发坏了，后者是发成了数组/null）。
+          let body;
+          try {
+            body = JSON.parse(text || "{}");
+          } catch {
+            sendJson(res, 400, { error: "invalid-json" });
+            return;
+          }
+          if (body === null || typeof body !== "object" || Array.isArray(body)) {
+            sendJson(res, 400, { error: "invalid-body" });
+            return;
+          }
+          if (!maintenance) {
+            sendJson(res, 503, { error: "maintenance-unavailable" });
+            return;
+          }
+          const dryRun = body.dryRun !== false;
+          const olderThanDays = body.olderThanDays === undefined || body.olderThanDays === null
+            ? undefined
+            : body.olderThanDays;
+          if (olderThanDays !== undefined && (!Number.isInteger(olderThanDays) || olderThanDays < 0)) {
+            sendJson(res, 400, { error: "invalid-older-than-days" });
+            return;
+          }
+          if (body.vacuum !== undefined && typeof body.vacuum !== "boolean") {
+            sendJson(res, 400, { error: "invalid-vacuum" });
+            return;
+          }
+          if (!dryRun && body.confirm !== true) {
+            // 拒执行，但把 dry-run 报告一并回给调用方：确认的依据就是这份数字。报告
+            // 必须描述**将要执行的那个动作**，所以 vacuum 原样带上——否则调用方看到
+            // 的是「不 VACUUM」的数字，却带着 vacuum 去执行。
+            sendJson(res, 400, {
+              error: "confirm-required",
+              hint: "先看 dry-run 报告，确认后带 {\"dryRun\":false,\"confirm\":true} 再发",
+              report: maintenance.reclaim({ olderThanDays, vacuum: body.vacuum === true, dryRun: true })
+            });
+            return;
+          }
+          try {
+            sendJson(res, 200, maintenance.reclaim({ olderThanDays, vacuum: body.vacuum === true, dryRun }));
+          } catch (error) {
+            ctx.logger?.warn?.(`[dsh-mneme] storage reclaim failed: ${String(error)}`);
             sendJson(res, 500, { error: "internal" });
           }
         });
@@ -1518,7 +1620,7 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
   });
 
   return {
-    routes: 33,
+    routes: 34,
     dispose: () => {
       for (const dispose of disposers) dispose();
     }
