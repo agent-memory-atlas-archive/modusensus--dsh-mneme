@@ -163,6 +163,10 @@ export async function extractEntities(memory, { store, config, callLLM, logger }
     if (config.entityExtractionModel) options.model = config.entityExtractionModel;
     const reasoning = config.entityExtractionReasoning;
     if (reasoning && reasoning !== "none") options.reasoningEffort = reasoning;
+    // #405: 审计行要能归因到具体记忆。extractor 只把 content 写进 prompt，id 这里顺
+    // options 交给 index.js 的 adapter（route 映射只认 provider/model，多余键不会进
+    // llm.stream）。拿不到 id 就不写这个键，adapter 侧照旧留空数组，不造虚账。
+    if (memory.id) options.memoryId = memory.id;
     const llmResponse = await callLLM(messages, options);
     
     if (!llmResponse) {

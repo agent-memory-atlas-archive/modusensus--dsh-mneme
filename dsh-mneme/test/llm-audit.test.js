@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Context } from "@deepseek-ai/cordis";
@@ -620,6 +620,97 @@ test("entity extraction writes no audit row when llmAudit.enabled === false", as
   assert.ok(text.includes("entities"), "turning the audit off must not break extraction");
   assert.equal(service.listLlmAudits().length, 0, "no audit rows when disabled");
   store.close();
+});
+
+// #405：实体抽取的审计行此前把失败原因压成一句常量、related_memory_ids 恒空，于是
+// 429 / 配额 / 鉴权 / 超时在库里长得一模一样（主库 735 条 entity_extract error 行全
+// 是「llm stream aborted or errored」），也查不出是哪条记忆没抽到实体。四条锁：原因
+// 落进 error_message（复用 dream 的 describeStreamFailure，全仓归一只此一份）、无
+// 细节时退回旧字面量、归属 id 传得进来且不凭空造、抛错路径同样带归属。
+test("#405: entity extraction audit records the stream failure cause, not a constant", async () => {
+  const store = createStore(":memory:");
+  const service = createService({ store, mirror: null, config: {} });
+  const streamEntityText = createEntityStreamAdapter({
+    llm: {
+      async *stream() {
+        yield {
+          type: "finish",
+          reason: { kind: "error", failure: { code: "rate_limited", message: "429 Too Many Requests", status: 429 } }
+        };
+      }
+    },
+    agentDefaultModel: { currentSelection: () => ({ provider: "mock", model: "mock-model" }) },
+    logger: { warn: () => {} },
+    service
+  });
+  const text = await streamEntityText(
+    [{ role: "user", content: [{ type: "text", text: "记忆内容" }] }],
+    { memoryId: "mem-1" }
+  );
+  assert.equal(text, undefined, "a failed stream yields no text");
+  const row = service.listLlmAudits({ source: "entityExtract" })[0];
+  assert.equal(row.status, "error");
+  assert.equal(row.error_message, "rate_limited: 429 Too Many Requests",
+    "code + message from chunk.reason.failure survive into the audit row");
+  assert.notEqual(row.error_message, "llm stream aborted or errored",
+    "the constant that made every provider failure look identical is gone");
+  assert.deepEqual(row.related_memory_ids, ["mem-1"],
+    "the row is attributable to the memory that was being extracted");
+  store.close();
+});
+
+test("#405: entity extraction audit keeps the legacy wording when the failure has no detail", async () => {
+  const store = createStore(":memory:");
+  const service = createService({ store, mirror: null, config: {} });
+  const streamEntityText = createEntityStreamAdapter({
+    llm: {
+      async *stream() {
+        // 老形态：只有 kind，既没有 failure 也没有 message（dsh-llm 早期版本、或
+        // 替身）。这时退回旧字面量——把 error_message 写成空串在库里比一句常量更
+        // 难查，那等于用另一种方式把原因丢掉。
+        yield { type: "finish", reason: { kind: "aborted" } };
+      }
+    },
+    agentDefaultModel: { currentSelection: () => ({ provider: "mock", model: "mock-model" }) },
+    logger: { warn: () => {} },
+    service
+  });
+  await streamEntityText([{ role: "user", content: [{ type: "text", text: "记忆内容" }] }], {});
+  const row = service.listLlmAudits({ source: "entityExtract" })[0];
+  assert.equal(row.error_message, "llm stream aborted or errored");
+  assert.deepEqual(row.related_memory_ids, [], "no memoryId → still empty, never fabricated");
+  store.close();
+});
+
+test("#405: entity extraction audit attributes a thrown stream error to the memory too", async () => {
+  const store = createStore(":memory:");
+  const service = createService({ store, mirror: null, config: {} });
+  const streamEntityText = createEntityStreamAdapter({
+    llm: {
+      async *stream() {
+        throw new Error("socket hang up");
+      }
+    },
+    agentDefaultModel: { currentSelection: () => ({ provider: "mock", model: "mock-model" }) },
+    logger: { warn: () => {} },
+    service
+  });
+  await streamEntityText([{ role: "user", content: [{ type: "text", text: "记忆内容" }] }], { memoryId: "mem-9" });
+  const row = service.listLlmAudits({ source: "entityExtract" })[0];
+  assert.equal(row.status, "error");
+  assert.equal(row.error_message, "socket hang up");
+  assert.deepEqual(row.related_memory_ids, ["mem-9"], "the throw path attributes too");
+  store.close();
+});
+
+test("#405: the failure-cause formatter stays a single implementation", async () => {
+  const indexSrc = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
+  const dreamSrc = readFileSync(new URL("../src/dream.js", import.meta.url), "utf8");
+  assert.match(indexSrc, /describeStreamFailure/, "index.js reuses dream.js's formatter");
+  // 有人在这里就地重写 code/message 拼接，就又多出一份口径——#411 的教训是「复制
+  // 粘贴漂移不是设计，是漂移」。锁死两端：归一逻辑只许在 dream.js 里存在一次。
+  assert.equal(indexSrc.match(/failure\.code/g), null, "index.js must not re-format the failure code itself");
+  assert.equal(dreamSrc.match(/function describeStreamFailure\(/g).length, 1, "exactly one definition");
 });
 
 // 启动期保留清理（Bug8）必须与写入侧读**同一份**配置。面板把 llmAudit.enabled 写进

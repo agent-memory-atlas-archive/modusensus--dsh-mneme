@@ -533,7 +533,9 @@ test("extractor passes provider/model/reasoningEffort through to callLLM options
   const config = { entityExtractionProvider: "openai", entityExtractionModel: "gpt-x", entityExtractionReasoning: "high" };
   const result = await extractEntities({ id: "m1", content: "Vite 是前端构建工具" }, { store, config, callLLM });
   assert.equal(result.ok, true);
-  assert.deepEqual(captured, { provider: "openai", model: "gpt-x", reasoningEffort: "high" });
+  // memoryId 是 #405 加的归属通道（审计行靠它记 related_memory_ids），与 #109 的
+  // provider/model/reasoningEffort 走同一条 options 缝；形状锁保持精确相等。
+  assert.deepEqual(captured, { provider: "openai", model: "gpt-x", reasoningEffort: "high", memoryId: "m1" });
   store.close();
 });
 
@@ -542,7 +544,16 @@ test("extractor omits empty provider/model and 'none' reasoning from options", a
   let captured = "unset";
   const callLLM = async (_m, options) => { captured = options; return JSON.stringify({ entities: [], relations: [] }); };
   await extractEntities({ id: "m2", content: "空文本" }, { store, config: {}, callLLM });
-  assert.deepEqual(captured, {}, "no provider/model/reasoning keys when unset");
+  assert.deepEqual(captured, { memoryId: "m2" }, "no provider/model/reasoning keys when unset");
+  store.close();
+});
+
+test("#405: extractor omits memoryId when the memory has no id (no fabricated attribution)", async () => {
+  const store = openStore();
+  let captured = "unset";
+  const callLLM = async (_m, options) => { captured = options; return JSON.stringify({ entities: [], relations: [] }); };
+  await extractEntities({ content: "无 id 的记忆" }, { store, config: {}, callLLM });
+  assert.deepEqual(captured, {}, "an id-less memory leaves the attribution channel empty");
   store.close();
 });
 
