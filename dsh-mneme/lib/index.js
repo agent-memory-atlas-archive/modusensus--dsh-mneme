@@ -14,7 +14,7 @@ import { createInjector } from "./inject.js";
 import { createPreInjectGate } from "./pre-inject-gate.js";
 import { createContinuityRescue } from "./continuity.js";
 import { createSummarizer } from "./summarize.js";
-import { createDreamScheduler } from "./dream.js";
+import { createDreamScheduler, describeStreamFailure } from "./dream.js";
 import { createSleepScheduler, runSleep } from "./dream/sleep.js";
 import { createApi } from "./api.js";
 import { createStandaloneApi } from "./api-standalone.js";
@@ -78,6 +78,11 @@ export function createEntityStreamAdapter({ llm, agentDefaultModel, logger, serv
       } catch { /* fall through to whatever route we already have */ }
     }
     const effort = options.reasoningEffort;
+    // #405: 审计行的 related_memory_ids 此前恒空、error_message 又被压成一句常量，
+    // 于是「哪条记忆没抽到实体、为什么」在库里查不出来（主库 735 条 error 行全是
+    // 同一句话）。id 由 extractor 顺 options 传下来——它只认 memory.content，不认
+    // id。口径同 write-admission:350：拿不到 id 就留空，绝不挂不存在的 id 造虚账。
+    const relatedMemoryIds = options.memoryId ? [options.memoryId] : [];
     // 没有解析出 provider/model 就没有可归属的模型——与 dream 的 resolveRoute
     // 无路由早退同口径，那种情况不写审计行。
     const modelId = route.provider && route.model ? `${route.provider}:${route.model}` : "";
@@ -89,7 +94,7 @@ export function createEntityStreamAdapter({ llm, agentDefaultModel, logger, serv
       const timestamp = new Date(startedAt).toISOString();
       // 记账是 best-effort：写审计行失败只 warn，绝不反噬抽取本身（CONTRIBUTING
       // 的 fail-safe 硬约定）。
-      const writeAudit = (status, errorMessage) => {
+      const writeAudit = (status, errorMessage, relatedMemoryIds = []) => {
         if (config?.llmAudit?.enabled === false || typeof service?.saveLlmAudit !== "function") return;
         // #372: modelId 为空 = 路由解析失败——此前整个 writeAudit 静默 return，
         // llm.stream 抛错也留不下任何行，正是 #108 要消灭的「零实体零日志」同款盲区。
@@ -111,7 +116,7 @@ export function createEntityStreamAdapter({ llm, agentDefaultModel, logger, serv
             duration_ms: Date.now() - startedAt,
             status,
             error_message: errorMessage,
-            related_memory_ids: []
+            related_memory_ids: relatedMemoryIds
           });
         } catch (auditError) {
           logger?.warn?.(`dsh-mneme: entity extraction llm audit write failed: ${String(auditError)}`);
@@ -136,7 +141,7 @@ export function createEntityStreamAdapter({ llm, agentDefaultModel, logger, serv
             if (Number.isFinite(o)) outputTokens = o;
           }
           if (chunk.type === "finish" && (chunk.reason?.kind === "error" || chunk.reason?.kind === "aborted")) {
-            writeAudit("error", "llm stream aborted or errored");
+            writeAudit("error", describeStreamFailure(chunk.reason) || "llm stream aborted or errored", relatedMemoryIds);
             return undefined;
           }
         }
@@ -144,7 +149,7 @@ export function createEntityStreamAdapter({ llm, agentDefaultModel, logger, serv
         return text;
       })().catch((err) => {
         logger?.warn?.(`[dsh-mneme] entity extraction llm stream failed: ${String(err)}`);
-        writeAudit("error", String(err?.message ?? err));
+        writeAudit("error", String(err?.message ?? err), relatedMemoryIds);
         return undefined;
       });
     };
