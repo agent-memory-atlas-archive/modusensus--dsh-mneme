@@ -5,6 +5,9 @@
 ## 🐛 修复
 
 - **实体抽取的失败原因不再塌缩成一句话，审计行补上它归属的那条记忆（issue #405）**：`src/index.js` 在流以 error/aborted 结束时写死 `writeAudit("error", "llm stream aborted or errored")`，`reason.failure{message,code,status,providerRetryAfterMs}` 一个字段没读——主库 `llm_audit_logs` 里 `operation_type='entity_extract'` 共 1464 行，其中 error 735 行全是这一句，429 / 配额 / 鉴权 / 超时在账本上长得一模一样，排障只能求报告人贴日志。现在改走仓里已有的 `describeStreamFailure()`（`src/dream.js`，`api.js`/`summarize.js`/`dream/sleep.js` 早就在用同一份），把 code/status/message 归一后落进 `error_message`；拿不到细节时退回原字面量，不制造新形状。同一行的 `related_memory_ids` 恒为 `[]`，审计行因此不知道这条失败属于哪条记忆——而该值本来就该从 `extractEntities(memory, …)` 的 options 里传下去，补一行 `if (memory.id) options.memoryId = memory.id;` 即可。**记账纪律照旧**：没有产生任何行就必须留空，挂一个不存在的 id 就是造虚账（`src/service.js` 的既有注释），所以取不到 id 时仍是 `[]`。**已知边界（本次刻意不动）**：`success` 仍然在流一结束就写，而 JSON 解析在其后的 `src/entities/extractor.js`——「流成功但输出畸形」必然记 success，这是结构决定的，不是这一刀能关的口子。5 条回归锁（真实 finish chunk 带 `reason.failure` / 无细节兜底 / 抛错路径 / 取不到 id 不造假 id / 防分叉静态锁——归一逻辑只许有一份）。
+## 🧪 测试
+
+- **ego 2-hop 用例不再拿墙钟当规格线，改钉确定性的遍历工作量（issue #409）**：原用例断言 `ms < 50` 并自称「spec §7」——那个 50ms 预算在 `docs/` 里找不到出处，而且它要抓的东西本身也不对：全量并行跑实测最坏 60.4ms，于是 CI 偶发翻车；真正的退化（把逐节点取邻接改成全图扫描）在 121 个节点上根本看不出区别。ego 路由的遍历工作量由 `limit` 卡死、与图规模无关，且请求内 `service.getRelations` 的唯一调用方就是这次遍历，所以现在数它的调用次数：小图（121 节点）上界 3×limit；再拿约 5× 大的图（641 节点）跑同一个查询，断言工作量不随图长——一条不含时钟的确定性锁，全图扫描型退化会立刻越界。墙钟只保留 250ms（≈4× 实测最坏值）的离群告警，不再是规格线。
 
 ## 🧹 工程
 

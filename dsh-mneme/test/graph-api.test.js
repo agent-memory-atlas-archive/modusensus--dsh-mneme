@@ -151,7 +151,7 @@ test("entity-attrs returns current valid attrs only", async () => {
   assert.equal(r2.statusCode, 400);
 });
 
-test("ego 2-hop over 100+ nodes stays under 50ms (spec §7)", async () => {
+test("ego 2-hop traversal work is bounded by limit, not by graph size (#409)", async () => {
   const { routes, service } = setup();
   // star-of-stars: hub → 20 spokes, each spoke → 5 leaves = 121 nodes, 120 edges
   const hub = service.createEntity({ name: "hub", type: "project" });
@@ -164,6 +164,13 @@ test("ego 2-hop over 100+ nodes stays under 50ms (spec §7)", async () => {
     }
   }
   const route = graphRoute(routes, "/api/dsh-mneme/semantic/graph/ego");
+  // #409：这条用例原先断言墙钟 < 50ms，而那个「spec §7」预算在仓库文档里找不到出处。
+  // 全量并行跑实测最坏 60.4ms，于是它偶发翻车。ego 路由真正要钉住的性质是「遍历工作量
+  // 由 limit 卡死、不随图规模增长」——那是个确定性事实：请求内 getRelations 的唯一调用方
+  // 就是这次遍历，所以计数即工作量。墙钟只保留一条离群告警（放到最后）。
+  const realGetRelations = service.getRelations.bind(service);
+  let lookups = 0;
+  service.getRelations = (id) => { lookups++; return realGetRelations(id); };
   const res = new FakeRes();
   const start = process.hrtime.bigint();
   await route.handler(req("/api/dsh-mneme/semantic/graph/ego?entity=hub&depth=2&limit=100"), res);
@@ -171,5 +178,32 @@ test("ego 2-hop over 100+ nodes stays under 50ms (spec §7)", async () => {
   const data = JSON.parse(res.body);
   assert.equal(data.nodes.length, 100, "limit caps the traversal");
   assert.ok(data.edges.length > 0);
-  assert.ok(ms < 50, `2-hop query took ${ms.toFixed(1)}ms, spec budget is 50ms`);
+  // 两趟（BFS + 边收集）各至多 limit 次，BFS 还会为「已满之后剩下的 frontier」多问几次，
+  // 所以上界留到 3×limit；数量级级别的退化会立刻越界。
+  assert.ok(lookups <= 300, `traversal work must be bounded by the limit, saw ${lookups} adjacency lookups`);
+
+  // 同一个查询打到约 13× 大的图上：limit 没变，该做的活就不该变。这一条不含时钟。
+  const big = setup();
+  const bigHub = big.service.createEntity({ name: "hub", type: "project" });
+  for (let i = 0; i < 40; i++) {
+    const spoke = big.service.createEntity({ name: `s-${i}`, type: "technology" });
+    big.service.saveRelation({ from_entity: bigHub.id, to_entity: spoke.id, relation_type: "uses" });
+    for (let j = 0; j < 15; j++) {
+      const leaf = big.service.createEntity({ name: `l-${i}-${j}`, type: "concept" });
+      big.service.saveRelation({ from_entity: spoke.id, to_entity: leaf.id, relation_type: "related_to" });
+    }
+  }
+  const bigReal = big.service.getRelations.bind(big.service);
+  let bigLookups = 0;
+  big.service.getRelations = (id) => { bigLookups++; return bigReal(id); };
+  const bigRes = new FakeRes();
+  await graphRoute(big.routes, "/api/dsh-mneme/semantic/graph/ego")
+    .handler(req("/api/dsh-mneme/semantic/graph/ego?entity=hub&depth=2&limit=100"), bigRes);
+  assert.equal(JSON.parse(bigRes.body).nodes.length, 100, "the same limit caps the bigger graph too");
+  assert.ok(bigLookups <= lookups + 100,
+    `${1 + 40 + 600} nodes cost ${bigLookups} lookups vs ${lookups} on 121 — work must track the limit, not the graph`);
+
+  // 墙钟只留一条离群告警，不再是规格线：它抓不到的那类退化已由上面的工作量断言确定性钉死，
+  // 250ms（≈4× 实测最坏值）只为兜住数量级级别的性能崩塌（#409）。
+  assert.ok(ms < 250, `2-hop query took ${ms.toFixed(1)}ms — the work bound above is the lock; 250ms is only an outlier guard`);
 });
