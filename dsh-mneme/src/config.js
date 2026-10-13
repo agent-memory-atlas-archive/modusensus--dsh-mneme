@@ -842,6 +842,19 @@ export const Config = z.object({
   // 打开才有意义（没有写入标注就无可过滤维度），但独立成键：可先开标注积累
   // 数据、观察 A2 加权质量后再切硬过滤。
   strictScope: z.boolean().default(false),
+
+  // --- v0.9.0 M.O.（Modus Operandi · 手法，beta）--------------------------
+  // 命名：M.O. = Modus Operandi，拉丁语「一个人一贯的做事方式」，缩写 M.O.；
+  // 也正是 org 词根 modus（modusensus）。界面主显示 M.O.，设置项 hint 第一句
+  // 给全名——缩写不靠注释解释，靠用户第一眼能看见全名。
+  // 这是客户端只读视图（做法图谱 + 对话行结算卡）的门控。API 的 effective 取值只认
+  // config 顶层/嵌套路径，schema 里没有这个键 → effective 静默少键 → 客户端读
+  // 不到就一个座位都不注册（#254 漏登记 NESTED_FLAG_PATHS 是同一个坑）。
+  // 默认关：beta 功能必须 opt-in，老用户行为逐字节不变。不进 LIGHT_MODE_OFF——
+  // 它只是只读视图、不引入任何重型后台路径，轻量档用户显式勾选仍然赢（预设
+  // 该关的是重型能力，不该替用户关掉一个纯 UI 入口）。
+  // 也走 feature_flags（FEATURE_FLAG_BOOLEANS 白名单），面板可启停=线上回滚开关。
+  actionPipelineEnabled: z.boolean().default(false)
 });
 
 // Fields forced to false by the light-mode preset. Everything not listed here
