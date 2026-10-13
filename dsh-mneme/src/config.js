@@ -828,10 +828,15 @@ export const Config = z.object({
 
   // --- scope: v0.8.0 A1 存储层（issue #17）--------------------------------
   // 总开关默认关：关闭时写入不标注 scope、去重维持 (type, title) 现状，行为
-  // 逐字节不变。开启后 memory_save 写入 agent_scope（session header 的
-  // agentPreset）与 workspace_scope（registry 反查 canonical path，header.cwd
-  // 兜底，取不到 NULL——解析绝不阻塞写入），去重键扩展为 (type, title,
-  // agent_scope, workspace_scope, sensitivity)。检索侧加权/过滤在 A2/A3 落地。
+  // 逐字节不变。开启后**两条写入路径都自动盖章**（*_scope_source='auto'）：
+  // ① 工具调用（tools.js：memory_save / memory_update，显式参数改标 'explicit'）
+  // ② 机器提炼（summarize.js：会话蒸馏；合并进既有行时不盖章，作用域属于那一行
+  //    原来被提炼出来的语境——v0.9.0 补，此前只有工具路径盖章，于是「项目记忆」
+  //    在库里几乎不存在）。
+  // 两路的值同源：agent 维取 session header 的 agentPreset，workspace 维取
+  // registry 反查的 canonical path（header.cwd 兜底，取不到 NULL——解析绝不阻塞
+  // 写入），去重键扩展为 (type, title, agent_scope, workspace_scope, sensitivity)。
+  // 检索侧加权/过滤在 A2/A3 落地。
   // 也走 feature_flags（FEATURE_FLAG_BOOLEANS 白名单），面板可启停=线上回滚开关。
   scopeEnabled: z.boolean().default(false),
   // strictScope（A3）：硬过滤模式。关闭=A2 软隔离（他 scope 降权保留可见，

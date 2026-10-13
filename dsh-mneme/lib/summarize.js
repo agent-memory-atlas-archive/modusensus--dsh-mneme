@@ -4,6 +4,8 @@ import { STR, langOf } from "./lang.js";
 // 重试一次不带 effort 字段）与 describeStreamFailure（流失败原因归一）——
 // 三条链路同一降级语义，不另造第二份实现。
 import { withEffortFallback, describeStreamFailure, EFFORT_REJECT_RE } from "./dream.js";
+// v0.9.0（M.O. 项目记忆）：蒸馏写入复用工具路径那把作用域解析器，见 createSummarizer。
+import { createScopeResolver } from "./scope.js";
 
 // 编码记忆蒸馏 prompt（codingRetrospect 开启时启用）：在通用记忆之外，额外提取
 // 三类编码专属记忆，专治重复踩坑 / 遗忘被否决方案 / 丢失工程约束。字段仍沿用
@@ -511,6 +513,15 @@ export function createSummarizer(ctx, service, config, deps = {}) {
   const setTimer = typeof deps.setTimeoutFn === "function" ? deps.setTimeoutFn : setTimeout;
   const clearTimer = typeof deps.clearTimeoutFn === "function" ? deps.clearTimeoutFn : clearTimeout;
 
+  // v0.9.0（M.O. 项目记忆）：蒸馏写入也要盖作用域章。此前只有 memory_save 那条工具
+  // 路径盖章（tools.js:173-193），而机器提炼是写入量的绝大多数——于是「项目记忆」
+  // 在库里根本不存在（全库带 scope 的行不足 3%，且带 scope 的全部来自工具路径）。
+  // 这里不另造口径：同一把解析器（scope.js:24 createScopeResolver）、同一把闸门
+  // （config.scopeEnabled === true）、同一对列（*_scope + *_scope_source='auto'），
+  // 与工具路径逐字对齐。解析器的入参形状是「工具 exec」（内部读 exec.agent.session），
+  // 蒸馏路径手里直接有会话对象，所以包一层壳喂进去——不改解析器的公共契约。
+  const resolveSessionScope = createScopeResolver({ ctx, config, logger: ctx.logger });
+
   const inFlight = new Map();
   // Issue #127：per-session 上一次实际开跑时刻（最小间隔闸门用）。与 inFlight
   // 同生命周期，dispose 时一并清空。
@@ -873,6 +884,13 @@ export function createSummarizer(ctx, service, config, deps = {}) {
       const dedupeMode = config.summarizeDedupeMode ?? "off";
       let deduped = 0;
       let dedupeMaxSim = 0;
+      // v0.9.0（M.O. 项目记忆）：一次窗口解析一次——同一蒸馏窗口里所有条目同属一个
+      // 工作区、一个 agent 身份，逐条解析是白花钱。解析不到就落 NULL（NULL = 未标注 =
+      // 全局可见），且解析器绝不抛错（scope.js 的硬约束：记忆写入不该被作用域拖挂）。
+      // 闸门与 tools.js:180 的 autoStamping 同一把：关着就一个字段都不加，老行为不变。
+      const writeScope = config?.scopeEnabled === true
+        ? resolveSessionScope({ agent: { session } })
+        : null;
       const writes = [];
       for (const entry of entries) {
         // Provenance: the summarizer runs on a real session (turn/end hook), so
@@ -917,6 +935,10 @@ export function createSummarizer(ctx, service, config, deps = {}) {
           const outcome = service.saveWithDedupe({
             ...entry,
             source,
+            // 合并进既有行时不盖章：那一行的作用域属于它原来被提炼出来的语境，
+            // 不该被本次会话改写（盖章是「新行出生时贴标签」，不是「路过就重贴」）。
+            ...(writeScope && !dup ? { agent_scope: writeScope.agent_scope, agent_scope_source: "auto" } : {}),
+            ...(writeScope && !dup ? { workspace_scope: writeScope.workspace_scope, workspace_scope_source: "auto" } : {}),
             ...(dup ? { _mergeInto: dup.memory.id } : {})
           });
           // created 与 merged 两条成功分支都返回 memory（含 id）；merged 时 id 是
