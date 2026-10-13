@@ -37,9 +37,34 @@ test("注入落账：终选集写一行 mode='inject'，candidates 为实际注�
   const row = injectRow(store);
   assert.ok(row, "注入应落一行审计");
   assert.equal(row.mode, "inject");
-  // recall_runs.query 是 NOT NULL（store.js:61）：注入无查询词，用空串而非 null
+  // recall_runs.query 是 NOT NULL（store.js:61）：调用方没给查询词时用空串而非 null
   assert.equal(row.query, "");
   assert.deepEqual(row.candidates.map((c) => c.id), selected.map((m) => m.id));
+  store.close();
+});
+
+// v0.9.0 P0-1：注入行此前恒写空串（实测 18,231/18,231 全空），把「当时想干什么」
+// 从审计里抹掉了 —— 而 inject.js 本来就带着 lastUserQuery 传进来。这两条锁住
+// 「传了要记下来」与「没传仍是空串」，同时确认下游 recallStats 按 mode 分账不受影响。
+test("注入落账：调用方给了查询词就记真值（不再恒空串）", () => {
+  const { store, service } = setup();
+  service.saveWithDedupe({ type: "decision", title: "甲", content: "内容甲", importance: 4 });
+  const selected = service.injectCandidates({ query: "夜航App 令牌桶怎么设计的", maxItems: 5 });
+  assert.ok(selected.length >= 1);
+  const row = injectRow(store);
+  assert.ok(row, "注入应落一行审计");
+  assert.equal(row.query, "夜航App 令牌桶怎么设计的");
+  // 下游安全：口径按 mode 分账，不看 query
+  const stats = service.recallStats({ windowDays: 30, exemptDays: 0 });
+  assert.equal(stats.injection.runs, 1);
+  store.close();
+});
+
+test("注入落账：查询词两侧空白按 trim 后入账", () => {
+  const { store, service } = setup();
+  service.saveWithDedupe({ type: "decision", title: "甲", content: "内容甲", importance: 4 });
+  service.injectCandidates({ query: "  终端  ", maxItems: 5 });
+  assert.equal(injectRow(store).query, "终端");
   store.close();
 });
 

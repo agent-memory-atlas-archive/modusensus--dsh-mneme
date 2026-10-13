@@ -257,6 +257,18 @@ export const apply = (ctx, config) => {
     }
   } catch { /* non-fatal */ }
 
+  // recall_runs 的滚动清理（v0.7.0 原设计，2026-10-14 找回）：与 llm_audit 同策略，
+  // 按 cfg.recallRetentionDays（默认 90 天）启动时清一次。读装配后的 cfg，理由与上面
+  // 两处一致 —— 写入侧取的是 cfg，清理侧若取 rawCfg，面板改的保留期就不生效。
+  // 这一对曾在 dd0ed78（v0.7.12 发布提交）里被整块弄丢，配置键与文档却一直留着，
+  // 实测本机 18,442 行只增不减。P0-1 开始把用户原话写进 query 之后，这条从「表膨胀」
+  // 升级为「原话无限期留存」，所以必须与 P0-1 同批交付。
+  // 保留期语义是「天」（函数内部乘 86400000），清理失败只 warn，绝不挡插件启动。
+  try {
+    const recallRetentionDays = Number.isInteger(cfg.recallRetentionDays) ? cfg.recallRetentionDays : 90;
+    store.purgeRecallRunsOlderThan(recallRetentionDays);
+  } catch { /* non-fatal */ }
+
   // 记忆语言（memory.language）：本实例逐层传入 inject / summarize / dream /
   // sleep / mirror，多实例（如 agent preset 内挂载）互不影响。
   const mirror = createMirror(memoryDir, langOf(cfg));

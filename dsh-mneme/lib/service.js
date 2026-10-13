@@ -1837,9 +1837,12 @@ export function createService({ store, mirror, config, onWrite, logger, document
     if ((config?.recallRecordDefault ?? true) && recallRecorder && injected.length > 0) {
       try {
         recallRecorder({
-          // recall_runs.query 是 NOT NULL（store.js:61）：注入是主动曝光、
-          // 没有查询词，用空串而非 null——SQLite 改列约束需重建表，不值得。
-          query: "",
+          // recall_runs.query 是 NOT NULL（store.js:61）：注入是主动曝光，
+          // 没有查询词时用空串而非 null——SQLite 改列约束需重建表，不值得。
+          // v0.9.0：调用方（inject.js:338 lastUserQuery）本来就带着本轮的
+          // 用户原话传进来，这里丢掉等于把「当时想干什么」从审计里抹掉
+          // （实测 18,231/18,231 注入行 query 全空）。有就记，真没有才空串。
+          query: q,
           mode: "inject",
           topK: maxItems,
           threshold: null,

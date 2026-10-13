@@ -1969,6 +1969,27 @@ export function createStore(path) {
   // --- recall evaluation trail (方案 B: separate from the production audit) -
 
   /**
+   * Rolling purge of the recall_runs production audit (v0.7.0): with recordRecall
+   * defaulting ON, the table would otherwise grow unboundedly on a busy store.
+   * Drop rows older than `days` (config.recallRetentionDays, default 90).
+   * created_at is an ISO TEXT string, so the ISO bound compares lexicographically.
+   * Returns the number of rows deleted (bookkeeping — never throws on empty).
+   *
+   * 2026-10-14 找回：这一对（本函数 + index.js 的启动调用）在 dd0ed78「release:
+   * v0.7.12 + 编码记忆(codingRetrospect)蒸馏/…（合并 #73 与 #74）」里被整块弄丢。
+   * 该提交不是 merge（单亲 cb5ec63），store.js 是从一个没有这段的版本重建的，
+   * 于是函数与调用一起蒸发，而配置键 recallRetentionDays、README.md 与
+   * docs/CONFIGURATION.md 的「recall_runs 滚动清理保留天数」一直留到今天。
+   * 实测后果：本机 recall_runs 18,442 行、跨度 2026-09-08 → 2026-10-13，
+   * 即从那一天起只增不减。这份审计里现在装的是用户原话，不是无信息的空串。
+   */
+  function purgeRecallRunsOlderThan(days) {
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+    const result = db.prepare("DELETE FROM recall_runs WHERE created_at < ?").run(cutoff);
+    return result.changes;
+  }
+
+  /**
    * Persist one retrieval-evaluation snapshot into recall_evals — the test/eval
    * sibling of recall_runs, deliberately stored apart so eval snapshots never
    * inflate the production recall audit. Like the other audit tables this is
@@ -3122,6 +3143,7 @@ export function createStore(path) {
     getRecallRun,
     listRecallRuns,
     listRecallRunsSince,
+    purgeRecallRunsOlderThan,
     saveRecallEval,
     getRecallEval,
     listRecallEvals,
