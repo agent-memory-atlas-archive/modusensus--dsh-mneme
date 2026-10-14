@@ -7,6 +7,7 @@ import { matchesPlatform } from "./runtime/closure.js";
 import { verifyPayload } from "./runtime/verify.js";
 import { TOOL_GUIDE, CONTINUITY_TOOL_RULE } from "./guide.js";
 import { injectChildEnabled } from "./config.js";
+import { lastUserQuery } from "./inject.js";
 
 const TEXT_OUTPUT = (text) => [{ type: "text", text }];
 // Per-registry tool-name registry: guards against duplicate registration on
@@ -381,6 +382,14 @@ export function createTools(ctx, service, config, embedder) {
         render: (_args, value) => TEXT_OUTPUT(`Updated memory ${value.memory.id}: ${value.memory.title}`)
       },
       async execute(args) {
+        // v0.9.0 M1-2：失败表的 query 是「当时到底想干什么」唯一的落点，而 service
+        // 层看不到会话（它只认 ctx.query，见 src/service.js 的 saveFailure 注释）。
+        // 工具层是唯一同时握着改写动作与本轮会话的入口：没给 reason 就退回当轮用户
+        // 原话，取法与注入侧共用同一份实现（src/inject.js 的 lastUserQuery），不复制
+        // 第二份。两边都取不到时仍然写 NULL——空串会假装「有意图」，NULL 才说实话。
+        const exec = arguments[1];
+        const reason = typeof args.reason === "string" ? args.reason.trim() : "";
+        const query = reason || lastUserQuery(exec) || undefined;
         const memory = service.update(args.id, {
           title: args.title,
           content: args.content,
@@ -389,10 +398,10 @@ export function createTools(ctx, service, config, embedder) {
           importance: args.importance,
           // 复核项 4（#170）：strictScope 下他 scope 的行按「不存在」处理（与 get 对齐），
           // 展开恒为 undefined，仅承担写入前校验。
-          ...(assertVisibleForTool(args.id, arguments[1])),
+          ...(assertVisibleForTool(args.id, exec)),
           ...(args.agent_scope !== undefined ? { agent_scope: args.agent_scope } : {}),
           ...(args.workspace_scope !== undefined ? { workspace_scope: args.workspace_scope } : {})
-        }, { query: args.reason });
+        }, { query });
         return { memory: { id: memory.id, title: memory.title, content: memory.content } };
       }
     }),
