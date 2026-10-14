@@ -331,3 +331,87 @@ test("#249 N3：存量库启动即建表（幂等迁移），重开后提案还�
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("#249 N3：边缘只认「真的落地」——start 与带错的 end 都不算", async () => {
+  const store = createStore(":memory:");
+  const ctx = mockCtx();
+  const rescue = createContinuityRescue(ctx, store);
+  const session = fakeSession("s1", [userEvent(1, "指令")]);
+  const step = () => ctx.fire("agent/pre-step", { agent: { session } }, async () => ({ kind: "enter", messages: [] }));
+
+  // 宿主的压缩插件在**每一步**都试一次压缩（pre-step 里的 compactIfNeeded），所以
+  // `compaction/start` 只在说「有人试过」。按「试过就救」记账，触发器就变成「每步一次」。
+  ctx.fire("session/event", session, { type: "compaction/start", seq: 3, data: { compactionId: "c1", turn: 1 } });
+  assert.deepEqual((await step()).messages, [], "试过压缩不算边缘——没有东西被折叠，就没有东西要抢救");
+
+  // 失败路也会发 end（同一份源码：失败路 append 带 error），所以带 error 的 end 同样不算。
+  // 本机实测：1,287 次 start / 1,287 次 end 全部带 error —— 按旧口径，这一整段每一步都在救。
+  ctx.fire("session/event", session, { type: "compaction/end", seq: 4, data: { compactionId: "c1", turn: 1, error: "422: dsh_compaction_refused" } });
+  assert.deepEqual((await step()).messages, [], "压缩失败 → 历史没被折叠 → 不抢救");
+  assert.equal(store.countContinuityProposals(), 0, "两半都不动作：提案也不该落");
+  rescue.dispose();
+});
+
+test("#249 N3：三种「真落地」都算边缘——summary / 无错 end / prune", async () => {
+  const LANDED = [
+    ["compaction/summary（宿主压缩成功才落）", { type: "compaction/summary", data: { compactionId: "c", turn: 1 } }],
+    ["compaction/end 不带 error（成功路）", { type: "compaction/end", data: { compactionId: "c", turn: 1 } }],
+    ["compaction/prune（表面真的变短）", { type: "compaction/prune", data: { shadowedRange: { start: 1, end: 1 }, shadowedSeqs: [1], shadowedTokenCount: 100 } }]
+  ];
+  for (const [label, event] of LANDED) {
+    const ctx = mockCtx();
+    const rescue = createContinuityRescue(ctx, createStore(":memory:"));
+    const session = fakeSession("s1", [userEvent(1, "指令")]);
+    ctx.fire("session/event", session, { ...event, seq: 9 });
+    const decision = await ctx.fire("agent/pre-step", { agent: { session } }, async () => ({ kind: "enter", messages: [] }));
+    assert.equal(decision.messages.length, 1, `${label} 是「历史真被折叠」的信号，要抢救`);
+    rescue.dispose();
+  }
+});
+
+test("#249 N3：失败尝试不产生注入洪流，真折叠才抢救（实测形状）", async () => {
+  const store = createStore(":memory:");
+  const ctx = mockCtx();
+  const rescue = createContinuityRescue(ctx, store);
+  const events = [userEvent(1, "把 N3 实现完")];
+  const nodes = [1];
+  const session = fakeSession("s1", events, nodes);
+  let seq = 100;
+  let injected = 0;
+  // 宿主把追加的消息落进会话（表面 + 日志）——判重按表面，这一步必须照实模拟，否则
+  // 「不变不重复」永远不生效，测出来的是判重缺席的样子。
+  const step = async () => {
+    const decision = await ctx.fire("agent/pre-step", { agent: { session } }, async () => ({ kind: "enter", messages: [] }));
+    for (const message of decision.messages) {
+      seq += 1;
+      events.push({ type: "user/message", seq, data: { content: message.content, source: message.source } });
+      nodes.push(seq);
+      injected += 1;
+    }
+    return decision;
+  };
+
+  // 实测里最常见的形状（本机 1,591 步 / 1,230 次尝试）：一步步试压缩、次次失败。
+  // 每步都推进一条 assistant/message，于是快照文本每步都不同——「不变不重复」挡不住它，
+  // 挡得住它的只有「这段历史到底有没有被折叠」这一个判断。改前口径在这里会注入 50 次。
+  for (let i = 0; i < 50; i += 1) {
+    seq += 1;
+    events.push(assistantEvent(seq, `第 ${i} 步的回复`));
+    seq += 1;
+    ctx.fire("session/event", session, { type: "compaction/start", seq, data: { compactionId: `c${i}`, turn: i } });
+    seq += 1;
+    ctx.fire("session/event", session, { type: "compaction/end", seq, data: { compactionId: `c${i}`, turn: i, error: "422: dsh_compaction_refused" } });
+    await step();
+  }
+  assert.equal(injected, 0, "50 次失败尝试 → 0 次注入（改前 50 次：每一步都救了一次没被折叠的历史）");
+
+  // 真的折叠了一次 → 恰好抢救一次。
+  seq += 1;
+  events.push(assistantEvent(seq, "接着写回归测试"));
+  seq += 1;
+  ctx.fire("session/event", session, { type: "compaction/prune", seq, data: { shadowedRange: { start: 1, end: 1 }, shadowedSeqs: [1], shadowedTokenCount: 100 } });
+  await step();
+  assert.equal(injected, 1, "表面真的变短了 → 抢救一次");
+  assert.equal(store.getContinuityProposal("s1", KIND).current_work, "把 N3 实现完", "落库那一半照常");
+  rescue.dispose();
+});

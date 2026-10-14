@@ -15,9 +15,11 @@ import { createUserMessage } from "@deepseek-ai/dsh-llm";
 //    也只用本地字符串比较；门控成本为零。
 // 4. **触发器就是宿主真的压缩**，不自定一套阈值。宿主在 `agent/pre-step`（压力）与
 //    `agent/request-error`（溢出）两处触发压缩，我们只订阅压缩事件
-//    （`compaction/start|summary|end`，都在 @deepseek-ai/dsh-session 的事件白名单里
+//    （`compaction/*` 一族，都在 @deepseek-ai/dsh-session 的事件白名单里
 //     `lib/types/known-event-types.js:31-34`）。自定阈值会与宿主口径漂移，还多一份没
 //    人校准的参数；「压缩边缘」本来就有宿主自己下的定义。
+//    **但发过压缩事件不等于这段历史真的被折叠了** —— 压缩插件在每一步都会试一次，
+//    失败时没有任何东西需要抢救。记账口径见 isCompactionEdge。
 //
 // 落点顺序（为什么 pre-step 里挂得住）：宿主的压缩插件在它自己的 pre-step 监听器里先
 // `await compactIfNeeded(...)` 再 `return next()`，所以我们的监听器拿到 `next()` 结果
@@ -38,7 +40,34 @@ export const CONTINUITY_NOTICE_MAX = 900;
 /** 边缘表的兜底上限：只留序号、且有界——压缩完就没有下一次 pre-step 的会话不走消费路径。 */
 const MAX_TRACKED_EDGES = 50;
 
-const EDGE_EVENT_TYPES = new Set(["compaction/start", "compaction/summary", "compaction/end"]);
+/**
+ * 什么算「一个真的边缘」= 这段历史**真的被折叠了**。
+ *
+ * 这跟「有人发过压缩事件」不是同一个问题。压缩插件在**每一步**都会试一次压缩
+ * （`agent/pre-step` 里的 `compactIfNeeded`），所以 `compaction/start` 只在说
+ * 「有人试过」；尝试失败时没有任何东西需要抢救。按「试过就救」记账会得到一个
+ * **每步都触发**的触发器 —— 实测（2026-10-14，本机两个长会话、12,000+ 事件，
+ * 代理层把 dsh 原生压缩 100% 拒掉）：
+ *
+ *   · 按 `start|summary|end` 记账：1,287 次置位 / 359 次注入（4c28eaaa：2,895 / 625）
+ *   · 按「真落地」记账：  39 次置位 /  32 次注入（4c28eaaa：  161 /  74）→ 降 91% / 88%
+ *
+ * 三种「真落地」：
+ * - `compaction/summary`：宿主压缩成功才落（dsh-compaction-basic 的
+ *   `commitCompactionBody`，与成功路同步提交；失败路不落）。
+ * - `compaction/prune`：宿主把旧事件折叠出表面（dsh-compaction-tool-result-pruner），
+ *   是「表面真的变短了」最直接的证据。
+ * - `compaction/end`：**成败两条路都发**（同一份源码：失败路
+ *   `append("compaction/end", { ...lifecycle, error: errorChain(error) })`），
+ *   所以只有**不带 error** 的那条才算落地。
+ */
+function isCompactionEdge(event) {
+  const type = event?.type;
+  if (type === "compaction/summary" || type === "compaction/prune") return true;
+  if (type !== "compaction/end") return false;
+  const error = event?.data?.error;
+  return error === undefined || error === null || error === "";
+}
 
 // 与 summarize.js 的 collectMessages 同一个口径：只取公开文本块，reasoning 私有推理
 // 不进快照（快照可能被宿主重建进摘要）。刻意副本而不是导出——那边是会话蒸馏的内部
@@ -148,21 +177,21 @@ function noticeAlreadyInSurface(session, text) {
  * 保持"挂上就是开"的单一口径。
  */
 export function createContinuityRescue(ctx, store) {
-  // 待处理的边缘：sessionId → 压缩事件序号。压缩事件到达时置位，下一次 pre-step 消费后
+  // 待处理的边缘：sessionId → 压缩事件序号。**真落地**的压缩事件到达时置位，下一次 pre-step 消费后
   // 删除（同一个边缘绝不注入第二次）。只留序号、不留 Session：插件在宿主进程里只 apply
   // 一次、服务所有会话，握着 Session 就是握着它的全量日志不放——压缩完就收工、不再有
   // pre-step 是常见路径，这些条目永远走不到消费路径上。
   const edge = new Map();
 
   const unsubscribe = ctx.on("session/event", (session, event) => {
-    if (!EDGE_EVENT_TYPES.has(event?.type)) return;
+    if (!isCompactionEdge(event)) return;
     if (!session?.id) return;
     if (!edge.has(session.id) && edge.size >= MAX_TRACKED_EDGES) {
       // 兜底淘汰最旧的（Map 是插入序）：这里漏掉最坏也只少一次注入，不会无界增长。
       edge.delete(edge.keys().next().value);
     }
-    // 同一轮压缩会依次落 start/summary/end，后到的覆盖前一个：留着最后一个（更有
-    // 信息——summary 带摘要事件 seq），序号即触发证据。
+    // 同一轮可能出现多条落地事件（prune 与 end 并存），后到的覆盖前一个：留着最后一个，
+    // 序号即触发证据。
     edge.set(session.id, typeof event.seq === "number" ? event.seq : null);
   });
 
