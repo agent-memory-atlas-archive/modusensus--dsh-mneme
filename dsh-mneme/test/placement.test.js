@@ -22,7 +22,7 @@ assert.equal(findProfileScopeSegment("/a/b/profiles/x"), "x", "returns the scope
 // 负例：默认落点与普通数据目录
 for (const dir of [
   "/home/user/.dsh/memory", // 默认值（issue：默认本身在 profiles 之外）
-  "C:\\Users\\石晴\\AppData\\Local\\memory", // Windows 普通目录
+  "C:\\Users\\u\\AppData\\Local\\memory", // Windows 普通目录
   "/srv/data/memory", // issue 验收用例：…/data/memory/
   "/srv/data/profiles", // profiles 是最后一段 = 没有作用域目录，不算命中
   "/srv/data/myprofiles/demo", // 子串不算：段必须整段等于 profiles

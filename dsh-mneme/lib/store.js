@@ -1980,8 +1980,11 @@ export function createStore(path) {
    * 该提交不是 merge（单亲 cb5ec63），store.js 是从一个没有这段的版本重建的，
    * 于是函数与调用一起蒸发，而配置键 recallRetentionDays、README.md 与
    * docs/CONFIGURATION.md 的「recall_runs 滚动清理保留天数」一直留到今天。
-   * 实测后果：本机 recall_runs 18,442 行、跨度 2026-09-08 → 2026-10-13，
-   * 即从那一天起只增不减。这份审计里现在装的是用户原话，不是无信息的空串。
+   * 实测后果（2026-10-14 快照）：本机 recall_runs 18,442 行、跨度 2026-09-08 →
+   * 2026-10-13，即从那一天起只增不减。注意这张表是**活的、只增的**：同一个 10-13
+   * 当天 14:43Z 是 18,442 行、20:47Z 已是 20,029 行，几小时就差一千五——所以任何
+   * 行数只在测它的那一刻成立，引用时必须带时刻，否则日后对不上会被误读成出了错。
+   * 这份审计里现在装的是用户原话，不是无信息的空串。
    */
   function purgeRecallRunsOlderThan(days) {
     const cutoff = new Date(Date.now() - days * 86400000).toISOString();

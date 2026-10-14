@@ -189,10 +189,16 @@ export const apply = (ctx, config) => {
 
   const store = createStore(join(memoryDir, "memory.db"));
   // Prune reflection failure rows older than 90 days on boot (best-effort, so
-  // the failure table never grows unbounded).
+  // the failure table never grows unbounded). "Best-effort" means the cleanup
+  // may fail without blocking boot — not that it may fail invisibly: a purge
+  // that dies quietly is exactly how the recall_runs sibling was lost for
+  // months, so every catch in this boot-time retention family reports through
+  // ctx.logger.warn (this one, llm_audit, distill_records, recall_runs).
   try {
     store.deleteOldFailures(new Date(Date.now() - 90 * 86400000).toISOString());
-  } catch { /* non-fatal */ }
+  } catch (err) {
+    ctx.logger?.warn?.(`[dsh-mneme] failure-table retention purge failed: ${String(err)}`);
+  }
 
   // User-configurable settings (profile, rules, panel mode, standalone API
   // token) share the same SQLite file in dedicated tables, isolated from
@@ -241,7 +247,9 @@ export const apply = (ctx, config) => {
       const retentionMs = Number.isInteger(cfg.llmAudit?.retentionDays) ? cfg.llmAudit.retentionDays : 90;
       store.deleteOldLlmAudits(new Date(Date.now() - retentionMs * 86400000).toISOString());
     }
-  } catch { /* non-fatal */ }
+  } catch (err) {
+    ctx.logger?.warn?.(`[dsh-mneme] llm_audit retention purge failed: ${String(err)}`);
+  }
 
   // #399 的启动期裁剪：与上面同款（读装配后的 cfg，理由同上——面板写的保留期必须
   // 与写入侧取到同一个值）。不同的一点：蒸馏原文留存默认关，而「默认关」在写入侧
@@ -255,19 +263,27 @@ export const apply = (ctx, config) => {
         : 90;
       store.clearDistillRecords(new Date(Date.now() - retentionMs * 86400000).toISOString());
     }
-  } catch { /* non-fatal */ }
+  } catch (err) {
+    ctx.logger?.warn?.(`[dsh-mneme] distill_records retention purge failed: ${String(err)}`);
+  }
 
   // recall_runs 的滚动清理（v0.7.0 原设计，2026-10-14 找回）：与 llm_audit 同策略，
   // 按 cfg.recallRetentionDays（默认 90 天）启动时清一次。读装配后的 cfg，理由与上面
   // 两处一致 —— 写入侧取的是 cfg，清理侧若取 rawCfg，面板改的保留期就不生效。
   // 这一对曾在 dd0ed78（v0.7.12 发布提交）里被整块弄丢，配置键与文档却一直留着，
-  // 实测本机 18,442 行只增不减。P0-1 开始把用户原话写进 query 之后，这条从「表膨胀」
+  // 实测 2026-10-13 那天从 16,041 涨到 20,510 行（一天四千余行，只增不减；
+  // 单给一个静态行数会随表腐坏，故带日期的区间才是可核对的说法）。P0-1 开始把用户原话写进 query 之后，这条从「表膨胀」
   // 升级为「原话无限期留存」，所以必须与 P0-1 同批交付。
   // 保留期语义是「天」（函数内部乘 86400000），清理失败只 warn，绝不挡插件启动。
   try {
     const recallRetentionDays = Number.isInteger(cfg.recallRetentionDays) ? cfg.recallRetentionDays : 90;
     store.purgeRecallRunsOlderThan(recallRetentionDays);
-  } catch { /* non-fatal */ }
+  } catch (err) {
+    // 这里必须真的出声。这一对当初是**静默**蒸发的：函数与调用一起没了、没人发现，
+    // 表就这么涨到两万余行。清理再失败一次而仍然不出声，同样的回归照样看不见——
+    // 「只 warn」不是修辞，是这族清理唯一的事后线索。
+    ctx.logger?.warn?.(`[dsh-mneme] recall_runs retention purge failed: ${String(err)}`);
+  }
 
   // 记忆语言（memory.language）：本实例逐层传入 inject / summarize / dream /
   // sleep / mirror，多实例（如 agent preset 内挂载）互不影响。

@@ -7,8 +7,8 @@ import { createStore } from "../src/store.js";
 
 // 2026-10-14 找回：recall_runs 的滚动清理（函数 + 启动调用）在 dd0ed78「release:
 // v0.7.12」里被整块弄丢，而配置键 recallRetentionDays、README.md 与
-// docs/CONFIGURATION.md 一直宣称它有保留期 —— 于是本机那张表涨到 18,442 行、
-// 跨度 2026-09-08 → 2026-10-13，只增不减，没人发现。
+// docs/CONFIGURATION.md 一直宣称它有保留期 —— 于是本机那张表只增不减，没人发现
+// （2026-10-13 当天实测就从 16,041 涨到 20,510 行）。
 //
 // 这组测试故意分两半，因为**弄丢的正是「两半都在」这件事**：
 //   1. 行为锁：函数真的删对行、边界正确、空表不炸；
@@ -76,10 +76,16 @@ test("接线锁：index.js 启动块真的调 purgeRecallRunsOlderThan，且读�
     "启动期必须真的调用清理——这对曾在 dd0ed78 里双双蒸发");
   assert.match(index, /cfg\.recallRetentionDays/,
     "必须读装配后的 cfg（面板改保留期才生效），不能读 rawCfg");
-  assert.match(index, /catch \{ \/\* non-fatal \*\/ \}/,
-    "清理失败不许挡插件启动");
+  // 失败必须真的出声。这一对当初就是**无声**蒸发的：函数与调用一起没了、没人发现，
+  // 表涨到两万余行。清理再失败一次若仍然静默，同一类回归照样看不见——所以这里
+  // 两个方向都锁：接住（catch(err)，不 rethrow、不挡启动）与出声（真调 logger.warn）。
+  // 只锁「不挡启动」会放过静默吞，只锁「出声」会放过把异常抛出去挡启动。
+  const at = index.indexOf("store.purgeRecallRunsOlderThan(recallRetentionDays)");
+  assert.ok(at > 0, "启动期必须真的调用清理——这对曾在 dd0ed78 里双双蒸发");
+  const tail = index.slice(at, at + 600);
+  assert.match(tail, /catch \(err\) \{/, "清理失败要接住，不许挡插件启动");
+  assert.match(tail, /ctx\.logger\?\.warn\?\.\(/, "清理失败要 warn 出声，静默吞等于把回归再藏一次");
   // 就近确认它落在同一族启动清理之间：失败表 → llm_audit → distill → recall_runs
-  const at = index.indexOf("store.purgeRecallRunsOlderThan");
   const llm = index.indexOf("store.deleteOldLlmAudits");
   const distill = index.indexOf("store.clearDistillRecords");
   assert.ok(llm > 0 && distill > 0 && at > llm, "recall_runs 清理应排在 llm_audit 之后");
@@ -91,6 +97,28 @@ test("接线锁：store.js 导出 purgeRecallRunsOlderThan（函数存在但没�
   assert.match(store, /function purgeRecallRunsOlderThan\(days\)/);
   assert.match(store, /^\s*purgeRecallRunsOlderThan,\s*$/m, "必须在 createStore 的返回对象里导出");
   assert.match(store, /DELETE FROM recall_runs WHERE created_at < \?/);
+});
+
+// 启动期清理是**一族的四个兄弟**：失败表 / llm_audit / distill_records / recall_runs。
+// 上面那条只锁了 recall_runs 一个，但四个的注释互相引用（llm_audit 那条原文写着
+// 「失败只 warn，与失败表清理同款」），而 2026-10-14 实测前三个全是
+// `catch { /* non-fatal */ }` —— 静默吞，与注释宣称的相反。recall_runs 那一对当初
+// 就是无声蒸发的，所以这一族必须一起锁：只要有一个偷偷退回静默吞，这条就红。
+test("接线锁：四个启动期清理都必须出声（catch(err) + logger.warn，不许静默吞）", () => {
+  const index = srcText("index.js");
+  const family = [
+    ["失败表", "store.deleteOldFailures("],
+    ["llm_audit", "store.deleteOldLlmAudits("],
+    ["distill_records", "store.clearDistillRecords("],
+    ["recall_runs", "store.purgeRecallRunsOlderThan(recallRetentionDays)"]
+  ];
+  for (const [label, call] of family) {
+    const at = index.indexOf(call);
+    assert.ok(at > 0, `${label} 的启动期清理调用必须在（弄丢过一次的就是这一族）`);
+    const tail = index.slice(at, at + 700);
+    assert.match(tail, /catch \(err\) \{/, `${label} 清理失败要接住，不许挡插件启动`);
+    assert.match(tail, /ctx\.logger\?\.warn\?\.\(/, `${label} 清理失败要 warn 出声，静默吞等于把回归再藏一次`);
+  }
 });
 
 test("接线锁：配置键与文档对外宣称的保留期一致（键还在、默认 90 天）", () => {

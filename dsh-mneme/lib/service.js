@@ -1841,7 +1841,9 @@ export function createService({ store, mirror, config, onWrite, logger, document
           // 没有查询词时用空串而非 null——SQLite 改列约束需重建表，不值得。
           // v0.9.0：调用方（inject.js:338 lastUserQuery）本来就带着本轮的
           // 用户原话传进来，这里丢掉等于把「当时想干什么」从审计里抹掉
-          // （实测 18,231/18,231 注入行 query 全空）。有就记，真没有才空串。
+          // （2026-10-13 快照：18,231/18,231 注入行 query 全空，全空比例
+          // 100%——这个比率才是要记的，绝对行数随表长，引用要带时刻）。
+          // 有就记，真没有才空串。
           query: q,
           mode: "inject",
           topK: maxItems,
