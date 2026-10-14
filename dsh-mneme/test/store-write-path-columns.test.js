@@ -27,12 +27,16 @@ test("#430: recentContents mirrors the all() prefix it replaced", () => {
   for (let i = 0; i < 25; i += 1) {
     store.save({ type: "project", title: `t${i}`, content: `c${i}`, importance: 3 });
   }
-  // 旧写法：all().slice(0, 20).map((m) => m.content ?? "")。同一条 updated_at 下
-  // 顺序未定义，所以按集合比，不按逐位比。
+  // 旧写法：all().slice(0, 20).map((m) => m.content ?? "")。集合锁与逐位锁都要：
+  // 一旦把 ORDER BY 丢掉（或反向），只要 LIMIT 不低于表行数，取到的行一个不少、
+  // 只是顺序全反过来，集合锁抓不到这类回归（变异检验证实，见 PR 讨论）。
+  // 逐位比较在此安全：store.js 的 per-instance 单调时间戳守卫保证同一实例内
+  // updated_at 严格递增，故这几行的先后关系是确定的。
   const expected = store.all().slice(0, 20).map((m) => m.content ?? "");
   const actual = store.recentContents(20);
   assert.equal(actual.length, 20);
-  assert.deepEqual([...actual].sort(), [...expected].sort(), "same 20 contents as the old prefix");
+  assert.deepEqual(actual, expected, "same 20 contents in the same order as the old prefix");
+  assert.deepEqual([...actual].sort(), [...expected].sort(), "same 20 contents as the old prefix (order-agnostic backstop)");
   assert.equal(store.recentContents().length, 20, "default limit is 20");
   assert.equal(store.recentContents(3).length, 3);
   // sanitizePage 口径：0 / 负数 / 非整数落回默认值，而不是 SQLite 里 LIMIT 无界
