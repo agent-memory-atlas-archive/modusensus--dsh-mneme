@@ -18,9 +18,14 @@ import { anchorSeeds, normalizePath, cascadeDepths, HOP_QUOTA } from "./graph/an
 // 的 recall_runs `auto` 模式里被按需检索过 328 次：不是垃圾数据，只是进不了注入池。
 // 收编后候选池 1362 → 1713（+25.8%），按 top_k=5 粗算约多占 1 席；重要度闸门对
 // history 一视同仁（见 injectCandidates 的 importance >= threshold），低于闸门照旧出局。
-// pattern 一并收编：它只由手工写入（实测 40 条全 source=manual），却已被 dreamMergeGuard
-// 列为长保留受保护类型（docs/CONFIGURATION.md）——巩固层当资产护住、注入面一次不给看，
-// 是同一条口径的两头不一致。
+// pattern 一并收编：它一度被当成「只由手工写入（实测 40 条全 source=manual）」——那个
+// 判据是错的。机器一直在 mint：2026-10-14 按 dream_runs 的 patterns.applied 逐轮求和，
+// 得 144，与表内 pattern 行数 144 相等（72 轮 sleep 里 48 轮 ok，auto 轮 0），来源是
+// src/dream/sleep.js 的 phasePatterns；当时的 source=manual 只是 saveWithDedupe 没拿到
+// source 时的兜底值，不是「人写的」的意思（M1-4 起 mint 会带 source=sleep/dream）。
+// 但它确实已被 dreamMergeGuard 列为长保留受保护类型（docs/CONFIGURATION.md）——巩固层
+// 当资产护住、注入面一次不给看，是同一条口径的两头不一致。这一点与作者是谁无关，
+// 收编的结论不变，错的只是当初用来支持它的那句前提。
 const INJECT_TYPES = new Set(["preference", "project", "decision", "summary", "rejected_solution", "pitfall", "constraint", "history", "pattern"]);
 
 // document 摘要行（#230）：仅 documentMemoryEnabled 开启时进注入候选。独立
@@ -1950,6 +1955,9 @@ export function createService({ store, mirror, config, onWrite, logger, document
         setArchived: (mid, v) => archiveMemory(mid, v),
         transaction: (fn) => transaction(fn)
       };
+      // M1-4：不传 mintSource——本路径由人在面板上点确认，即便日后有人在这里加
+      // create，落 saveWithDedupe 的 manual 兜底恰好就是对的语义（人触发的写入）。
+      // 这是刻意的，不是漏传。
       const { committed, failures } = applyDecisions(
         [{ action: "conflict", winner: winnerId, loser: loserId, reason: row.reason ?? "" }],
         applyService,

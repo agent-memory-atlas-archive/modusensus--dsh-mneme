@@ -147,9 +147,11 @@ test("#369: 低于重要度闸门的 history 不得例外放行", () => {
   assert.ok(!titles.includes("打开过一次终端"), "history 不是 summary/preference，闸门照样生效");
 });
 
-// pattern 只由手工写入，却已被 dreamMergeGuard 列为长保留受保护类型——巩固层当资产
-// 护住、注入面一次不给看是同一条口径的两头不一致。这条锁它进池。
-test("#369: 手写的 pattern 进注入候选池", () => {
+// pattern 早已被 dreamMergeGuard 列为长保留受保护类型，却一度被当成「只由手工写入」
+// （那个判据是错的，实际是 sleep 的 phasePatterns 在 mint——见 src/service.js 的
+// INJECT_TYPES 注释）。巩固层当资产护住、注入面一次不给看是同一条口径的两头
+// 不一致，与作者是谁无关。这条锁它进池。
+test("#369: pattern 进注入候选池（与作者是谁无关）", () => {
   const { service } = setup();
   service.saveWithDedupe({ type: "pattern", title: "重复字符串先抽共用模块", content: "多处重复的截断逻辑先收拢成共用模块，再改调用方", importance: 5 });
   const titles = service.injectCandidates({ maxItems: 5 }).map((m) => m.title);

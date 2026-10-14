@@ -381,7 +381,11 @@ async function phaseConflicts(ctx, service, config, logger, runId, semantic = nu
     allowedActions: actionSet === "full" ? null : LEGACY_ACTIONS
   });
   if (!ok) return { status: "failed", error: `invalid decisions: ${errors.join("; ")}`, skipped };
-  const { applied, failures, conflicts } = applyDecisions(decisions, service, logger, snapshot, config);
+  // M1-4：同 phasePatterns——本相位的 create 也落 source=sleep（默认档的
+  // LEGACY_ACTIONS 含 create，理论上可 mint）。
+  const { applied, failures, conflicts } = applyDecisions(
+    decisions, service, logger, snapshot, { ...config, mintSource: "sleep" }
+  );
   // Issue #126 review（Copilot）：事务内 service.update 会跳过 scheduleEmbed（txDepth>0），
   // 而 sleep 路径此前没有 dream 那样的 post-apply 索引维护——differentiate 的差异注记与
   // supersede 的归档都反映不到缓存向量，"注记进 embedding 防再判重复"就是空承诺。
@@ -525,7 +529,11 @@ async function phasePatterns(ctx, service, config, logger, runId, signal = null)
     maxCreatePerRun: maxPatterns
   });
   if (!ok) return { status: "failed", error: `invalid decisions: ${errors.join("; ")}` };
-  const { applied, failures, conflicts } = applyDecisions(decisions, service, logger, snapshot, config);
+  // M1-4：本相位的 create 落 source=sleep。来源从管道给而非从决策对象取——见
+  // applyDecisions 的 @param config。
+  const { applied, failures, conflicts } = applyDecisions(
+    decisions, service, logger, snapshot, { ...config, mintSource: "sleep" }
+  );
   return {
     status: applied > 0 ? "ok" : "noop",
     scanned: memories.length,
