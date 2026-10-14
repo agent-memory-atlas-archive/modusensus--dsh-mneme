@@ -112,7 +112,7 @@ export async function createServeRuntime({
     }
   }
 
-  // index.js:294-309:检索回执落 recall_runs(searchMemories 的 recordRecall 默认开,
+  // index.js 的 setRecallRecorder（2026-10-14 在 :339-350）：检索回执落 recall_runs(searchMemories 的 recordRecall 默认开,
   // 第三方检索统计因此不缺数)。best-effort:回执写失败绝不影响检索本身。
   service.setRecallRecorder((recall) => {
     try {

@@ -83,7 +83,7 @@ test("serve: save → search 走通;token 持久化 kv;二次启动复用同一 
   // token 持久化在 kv external_api(与 DSH 面板/CLI 共用同一凭证通道)
   assert.equal(rt.settings.getExternalApi().token, rt.api.token);
 
-  // 检索回执:recorder 已接(index.js:294-309 同款),recall_runs 不缺数 —— #363 回帖
+  // 检索回执:recorder 已接(index.js 的 setRecallRecorder,2026-10-14 在 :339-350),recall_runs 不缺数 —— #363 回帖
   // 向 bridge 承诺过「第三方检索的复用统计不受影响」,这条就是该承诺的回归锁。
   const recallRows = rt.store.db.prepare("SELECT COUNT(*) AS n FROM recall_runs").get();
   assert.ok(recallRows.n >= 1, "recall_runs should record the search above");
