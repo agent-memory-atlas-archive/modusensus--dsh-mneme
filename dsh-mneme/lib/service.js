@@ -2538,11 +2538,31 @@ export function createService({ store, mirror, config, onWrite, logger, document
       // Async-initializing embedder: poll `ready` until it flips, then flush.
       if ("ready" in emb && embedReadyTimer === null) {
         let attempts = 0;
+        let readyReadFailed = false;
+        // 读 `ready` 必须先兜住异常再算天花板，否则天花板形同不存在：`ready` 是
+        // getter（embedding.js 的 OpenAI embedder 直接读库），getter 一抛错，整条
+        // `||` 的求值当场中断，右侧的 `attempts >= EMBED_READY_POLL_LIMIT` 永远轮
+        // 不到 —— stopEmbedReadyPolling() 不执行，定时器就活过 3s 上限，并以未捕获
+        // 异常的形式每 100ms 抛一次。实测（2026-10-14）：卸载路径 store.close() 之后
+        // 每次读 ready 都抛 "database is not open"，5s 内读 46 次，天花板 31 被直接
+        // 打穿，宿主事件循环因此永不排空。读不出来按「没就绪」处理，但上限照算。
+        const readReady = () => {
+          try {
+            return emb.ready === true;
+          } catch (err) {
+            if (!readyReadFailed) {
+              readyReadFailed = true; // 只报一次，别让 3s 上限变成 30 条刷屏
+              logger?.warn?.("embedder ready probe failed, treating it as not-ready:", err);
+            }
+            return false;
+          }
+        };
         embedReadyTimer = setInterval(() => {
           attempts++;
-          if (emb.ready === true || attempts >= EMBED_READY_POLL_LIMIT) {
+          const ready = readReady();
+          if (ready || attempts >= EMBED_READY_POLL_LIMIT) {
             stopEmbedReadyPolling();
-            if (emb.ready === true) flushEmbedPending();
+            if (ready) flushEmbedPending();
             else embedPending = []; // init never landed: drop the queue
           }
         }, EMBED_READY_POLL_MS);

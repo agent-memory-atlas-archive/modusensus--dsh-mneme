@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { DatabaseSync } from "node:sqlite";
+import { Context } from "@deepseek-ai/cordis";
+import * as mneme from "../src/index.js";
 import { createStore } from "../src/store.js";
 import { createService } from "../src/service.js";
 import { createSummarizer, parseSummaryJson, parsePeakSpec, isInPeakWindow, nextOffPeakAt } from "../src/summarize.js";
@@ -1636,4 +1639,119 @@ test("issue#399: enabled=false (the default) writes nothing at all", async () =>
   assert.equal(countRows(store, "SELECT count(*) AS c FROM distill_records"), 0);
   assert.equal(countRows(store, "SELECT count(*) AS c FROM memory_provenance"), 0);
   assert.equal(store.count(), 2, "记忆写入照旧");
+});
+// ── M1-3：开关从「设置面」一路走到「盘上有行」 ──────────────────────────────
+//
+// 上面 #399 那五条锁的是 summarize.js 内部的行为，它们把 config 直接递给
+// createSummarizer。真实链路上，config 不来自测试也不来自 bundle：它由 index.js
+// 在**启动时**把 kv（feature_flags，面板 PUT /api/dsh-mneme/features 写的就是它）
+// 合并进 cfg 得到，再交给 createSummarizer。中间两环——设置面写入与启动期
+// 合并——一条测试都没覆盖过，而它们正是「distill_records 行数开始增长」这条
+// 验收判据的唯一通路：开关没写进 kv，或者写进了但装配时没被读出来，盘上就永远
+// 是 0 行，而 summarize.js 内部的五条锁照样全绿。
+//
+// 所以这两条不在 createSummarizer 层造 config，而是起一个最小宿主（真实 cordis
+// Context + 六个服务位），让 ctx.plugin(mneme, …) 走完 index.js 的装配：
+//   ① kv 写开 → 装配 → 派发 turn/end → 原文与溯源链接都落盘；
+//   ② 同一个装配但 kv 一个键都不写（默认态）→ 两表 0 行，记忆写入照旧。
+// 第二条守的是反面：装配默认不许把 opt-in 的开关私自打开。
+
+/** M1-3 的最小宿主：六个服务位按 webServer-optional.test.js 的形状提供。 */
+function minimalHost() {
+  const ctx = new Context();
+  ctx.provide("tools", { register() { return () => {}; } });
+  ctx.provide("commands", { register() { return () => {}; } });
+  ctx.provide("systemPrompt", { context() { return () => {}; } });
+  ctx.provide("agentDefaultModel", { currentSelection() { return { provider: "mock", model: "mock" }; } });
+  ctx.provide("llm", {
+    async *stream() {
+      yield { type: "block-start", block: { type: "text" } };
+      yield {
+        type: "text-delta",
+        delta: JSON.stringify([
+          { type: "decision", title: "选型", content: "确定用 node:sqlite", importance: 4 },
+          { type: "preference", title: "语言", content: "用户喜欢中文交流", importance: 5 }
+        ])
+      };
+      yield { type: "block-end", block: { type: "text" } };
+      yield { type: "finish", kind: "ok" };
+    }
+  });
+  ctx.provide("webServer", { register() { return () => {}; } });
+  return ctx;
+}
+
+/** 盘上的三张表：装配前后各查一次，才知道行是谁写的。 */
+function readTables(dbPath) {
+  const db = new DatabaseSync(dbPath);
+  const count = (table) => db.prepare(`SELECT count(*) AS c FROM ${table}`).get().c;
+  const out = {
+    records: count("distill_records"),
+    provenance: count("memory_provenance"),
+    memories: count("memories")
+  };
+  out.rows = db.prepare("SELECT session_id, seq, role, text FROM distill_records ORDER BY seq").all();
+  db.close();
+  return out;
+}
+
+/** 装配 + 派发 turn/end + 拆掉装配（不给宿主留开着的手柄）。 */
+async function bootAndDistill(config, session) {
+  const ctx = minimalHost();
+  const fiber = ctx.plugin(mneme, config);
+  await fiber;
+  // ctx.parallel 会等所有监听器跑完；summarize.js 的监听器 return 了这次写入的
+  // promise（summarize.js 的 session/event 订阅处明写「Return the summarization
+  // promise so awaiters observe the writes」），所以并行派发完就是写完了。
+  await ctx.parallel("session/event", session, { seq: 2, type: "turn/end" });
+  await fiber.dispose();
+}
+
+test("M1-3: distill records grow from the settings face all the way to disk", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mneme-m1-3-on-"));
+  const dbPath = join(dir, "memory.db");
+  try {
+    // 第一环：用产品自己的设置面写 kv，等价于面板 PUT /api/dsh-mneme/features。
+    const seed = createStore(dbPath);
+    const merged = createSettings(seed.db).setFeatureFlags({ "distillRecords.enabled": true });
+    assert.equal(merged["distillRecords.enabled"], true, "开关必须先真的落进 kv");
+    assert.equal(readTables(dbPath).records, 0, "开之前盘上一行都没有");
+    seed.close();
+
+    // 第二环 + 第三环：装配时 bundle 说关、kv 说开，合并取 kv；然后真跑一次蒸馏。
+    await bootAndDistill(
+      { memoryDir: dir, distillRecords: { enabled: false }, distillRateLimitIntervalMs: 0 },
+      recordsSession("s-m1-3-on", [userMessage("M1-3：这句话该落进 distill_records", 1), { seq: 2, type: "turn/end" }])
+    );
+
+    const after = readTables(dbPath);
+    assert.equal(after.records, 1, "装配读过 kv 之后，原文必须真的落盘");
+    assert.equal(after.rows[0].session_id, "s-m1-3-on");
+    assert.equal(after.rows[0].seq, 1);
+    assert.equal(after.rows[0].role, "user");
+    assert.match(after.rows[0].text, /该落进 distill_records/, "落盘的是公开正文原文");
+    assert.equal(after.memories, 2, "记忆照常写入，留存是叠加不是替换");
+    assert.equal(after.provenance, 2, "每条新记忆各落一条回指链接");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("M1-3: the same assembly writes nothing when the flag was never set", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mneme-m1-3-off-"));
+  const dbPath = join(dir, "memory.db");
+  try {
+    // 连 createStore 都不预先起：一个全新的库就是「从没碰过设置面」的真实形态。
+    await bootAndDistill(
+      { memoryDir: dir, distillRateLimitIntervalMs: 0 },
+      recordsSession("s-m1-3-off", [userMessage("默认态：不该有原文落盘", 1), { seq: 2, type: "turn/end" }])
+    );
+
+    const after = readTables(dbPath);
+    assert.equal(after.records, 0, "opt-in 的开关不许被装配私自打开");
+    assert.equal(after.provenance, 0);
+    assert.equal(after.memories, 2, "关的只是留存，蒸馏本身照常");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
