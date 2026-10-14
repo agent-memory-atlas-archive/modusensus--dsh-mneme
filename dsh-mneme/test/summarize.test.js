@@ -1642,7 +1642,8 @@ test("issue#399: enabled=false (the default) writes nothing at all", async () =>
 // ——全库带 scope 的行不足 3%，且全部来自 memory_save 那条工具路径。这组用例钉住
 // 「蒸馏写入也盖章」这件事：值取 session.header（agentPreset + cwd），闸门与工具路径
 // 同一把（scopeEnabled），来源一律 'auto'（auto 不构成硬墙，只吃软加权，见
-// test/scope-strict.test.js:41-54）。
+// test/scope-strict.test.js 的 "auto and legacy rows are NOT hard walls" 用例，
+// 2026-10-13 在 :41-54）。
 function scopedSession(id, header) {
   const session = {
     id,
