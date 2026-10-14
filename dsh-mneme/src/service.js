@@ -1837,7 +1837,8 @@ export function createService({ store, mirror, config, onWrite, logger, document
     if ((config?.recallRecordDefault ?? true) && recallRecorder && injected.length > 0) {
       try {
         recallRecorder({
-          // recall_runs.query 是 NOT NULL（store.js:61）：注入是主动曝光，
+          // recall_runs.query 是 NOT NULL（store.js 的 recall_runs 建表语句，
+          // 2026-10-14 在 :75）—— 注入是主动曝光，
           // 没有查询词时用空串而非 null——SQLite 改列约束需重建表，不值得。
           // v0.9.0：调用方（inject.js:338 lastUserQuery）本来就带着本轮的
           // 用户原话传进来，这里丢掉等于把「当时想干什么」从审计里抹掉

@@ -37,7 +37,8 @@ test("注入落账：终选集写一行 mode='inject'，candidates 为实际注�
   const row = injectRow(store);
   assert.ok(row, "注入应落一行审计");
   assert.equal(row.mode, "inject");
-  // recall_runs.query 是 NOT NULL（store.js:61）：调用方没给查询词时用空串而非 null
+  // recall_runs.query 是 NOT NULL（store.js 的 recall_runs 建表语句，2026-10-14 在 :75）：
+  // 调用方没给查询词时用空串而非 null
   assert.equal(row.query, "");
   assert.deepEqual(row.candidates.map((c) => c.id), selected.map((m) => m.id));
   store.close();
