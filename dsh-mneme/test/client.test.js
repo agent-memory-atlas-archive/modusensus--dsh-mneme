@@ -1606,3 +1606,58 @@ test("client bundle parses: 面板产物必须是合法 JS（无重复声明等�
   const result = spawnSync(process.execPath, ["--check", join(root, "lib/client.js")], { encoding: "utf8" });
   assert.equal(result.status, 0, `lib/client.js 解析失败：\n${result.stderr || result.stdout}`);
 });
+
+// #399 的两个留存键（distillRecords.enabled / retentionDays）此前只有后端
+// 白名单与 docs/CONFIGURATION.md 的「面板可启停」，面板里根本没有这一行——
+// 文档承诺了一个够不着的开关。补上 UI 之后，这条锁住四件容易被「简化」掉的事：
+//   ① 两个键真的进了渲染清单（enabled 在组里、retentionDays 在数值清单里）；
+//   ② 数值项的草稿必须从 effective 初始化——漏掉这一句，行会永远显示空值，
+//      用户以为配置丢了（#191 的睡眠路由键踩过同一个坑，见 :738 那条注释）；
+//   ③ 天数行必须由父开关门控（关着不留存，改天数没有意义）；
+//   ④ 非整数在本地就被挡下并把草稿退回生效值——留着非法文本会让人以为改成功了。
+test("distill retention switches are reachable from the panel (#399)", () => {
+  // 认「组里有没有」不要用 `"key"]` 这种子串——`eff["distillRecords.enabled"]`
+  // 也长这样，把组里那一项删掉它照样命中（变异验证 M4 实测：删项后仍全绿）。
+  // 必须把 core 组的 items 数组抠出来单独看。
+  const coreGroup = clientSource.match(/key: "group\.core", items: \[([\s\S]*?)\]/);
+  assert.ok(coreGroup, "the core group must be declared");
+  assert.ok(
+    coreGroup[1].includes('"distillRecords.enabled"'),
+    "distillRecords.enabled must be an item of the core group, not merely referenced elsewhere"
+  );
+  assert.ok(
+    /const FEATURE_NUMBERS = \["distillRecords\.retentionDays"\]/.test(clientSource),
+    "retentionDays must be in the numeric key list"
+  );
+  assert.ok(
+    /for \(const key of FEATURE_NUMBERS\) numDraft\[key\] = String\(e\[key\] \?\? ""\);/.test(clientSource)
+      && /setNums\(numDraft\);/.test(clientSource),
+    "the numeric draft must be seeded from effective on mount, or the row always renders empty"
+  );
+  assert.ok(
+    /const distillSub = eff\["distillRecords\.enabled"\] && h\("div", \{ className: "mneme-featsub" \},\s*\n\s*numRow\("distillRecords\.retentionDays"\)/.test(clientSource),
+    "the retention-days row must be gated on the parent switch and live in its sub-block"
+  );
+  // 定义了不等于接线了：把 distillSub 从组尾子块里摘掉，上面每条断言照样全绿
+  // （变异验证 M7 实测）。子块是在 items.map 之后按组尾追加的，所以必须确认
+  // 它真的出现在那一个渲染点上。
+  const coreTail = clientSource.match(/g\.key === "group\.core" && h\(react\.Fragment, null, ([^)]*)\)/);
+  assert.ok(coreTail, "the core group must append its sub-blocks at the group tail");
+  assert.ok(
+    /\bdistillSub\b/.test(coreTail[1]),
+    "distillSub must be rendered at the core group tail, not merely declared above"
+  );
+  assert.ok(
+    /if \(!\/\^\\d\+\$\/\.test\(raw\)\) \{\s*\n\s*setNums\(\(c\) => \(\{ \.\.\.c, \[key\]: String\(eff\[key\] \?\? ""\) \}\)\);\s*\n\s*return;\s*\n\s*\}/.test(clientSource),
+    "a non-integer draft must be rejected locally and reverted to the effective value"
+  );
+  for (const key of [
+    "memory.features.distillRecords.enabled",
+    "memory.features.distillRecords.enabled.hint",
+    "memory.features.distillRecords.retentionDays",
+    "memory.features.distillRecords.retentionDays.hint"
+  ]) {
+    const occurrences = clientSource.split(`"${key}"`).length - 1;
+    assert.ok(occurrences >= 2, `i18n key ${key} must exist in both zh and en (got ${occurrences})`);
+  }
+});
