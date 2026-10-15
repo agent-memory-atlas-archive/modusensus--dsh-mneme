@@ -680,7 +680,11 @@ test("GET /api/dsh-mneme/features returns empty overrides and effective config d
   // #135 成本审计派生新增 dreamMaxMergePerRun（单轮 merge 决策上限））
   // issue #399 新增 distillRecords.enabled/distillRecords.retentionDays（蒸馏原文留存 +
   // 溯源：开关与保留期都在嵌套对象里，两个都进 NESTED_FLAG_PATHS））
-  assert.equal(Object.keys(data.effective).length, 59 + 3 + 2 + 1 + 2 + 2 + 2 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 3 + 2 + 2 + 1 + 1 + 1 + 1 + 2 + 1 + 2);
+  // v0.9.0 新增 actionPipelineEnabled（M.O. beta 门控；顶层扁平键，
+  // 走 configFlagValue 默认分支，不需要 NESTED_FLAG_PATHS 条目）。
+  // 计数锁钉的是「白名单键 ↔ config schema 成对」：schema 加了键而漏了白名单
+  // （或反过来）时，effective 会静默少键/多键，面板读不到也报不出来。
+  assert.equal(Object.keys(data.effective).length, 59 + 3 + 2 + 1 + 2 + 2 + 2 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 3 + 2 + 2 + 1 + 1 + 1 + 1 + 2 + 1 + 2 + 1);
   assert.equal(data.effective.dreamSkipInvalid, true);
   assert.equal(data.effective.allowCrossTypeMerge, false);
   assert.equal(data.effective.dreamMergeGuard, true);
@@ -714,6 +718,9 @@ test("GET /api/dsh-mneme/features returns empty overrides and effective config d
   // 保留期默认 90 天（与 llmAudit.retentionDays 同款）。
   assert.equal(data.effective["distillRecords.enabled"], false);
   assert.equal(data.effective["distillRecords.retentionDays"], 90);
+  // v0.9.0：M.O. beta 门控默认关——客户端 GET /features 必须能读到这个键
+  // （读不到就静默不注册任何座位），且默认值必须是 false（beta opt-in）。
+  assert.equal(data.effective.actionPipelineEnabled, false);
   // 新增字符串 / URL / 枚举键
   assert.equal(data.effective.localEmbedModel, "Xenova/bge-small-zh-v1.5");
   assert.equal(data.effective.ollamaBaseUrl, "http://localhost:11434");
@@ -746,14 +753,16 @@ test("PUT /api/dsh-mneme/features round-trips, overrides effective and persists"
   const { routes, settings } = setup(undefined, "", FLAGS_CFG);
   const route = routes.find((r) => r.path === "/api/dsh-mneme/features");
   const res = new FakeRes();
-  await route.handler(req("/api/dsh-mneme/features", "PUT", { autoDream: false, distillMaxChars: 48000 }), res);
+  await route.handler(req("/api/dsh-mneme/features", "PUT", { autoDream: false, distillMaxChars: 48000, actionPipelineEnabled: true }), res);
   assert.equal(res.statusCode, 200);
   const data = JSON.parse(res.body);
-  assert.deepEqual(data.overrides, { autoDream: false, distillMaxChars: 48000 });
+  assert.deepEqual(data.overrides, { autoDream: false, distillMaxChars: 48000, actionPipelineEnabled: true });
   assert.equal(data.effective.autoDream, false, "override wins over config default");
   assert.equal(data.effective.distillMaxChars, 48000);
+  // v0.9.0：默认关的键也能被 PUT 打开并读回（beta 功能的启用路径）。
+  assert.equal(data.effective.actionPipelineEnabled, true, "override flips the beta gate on");
   assert.equal(data.effective.autoInject, true, "keys not in the patch still report config");
-  assert.deepEqual(settings.getFeatureFlags(), { autoDream: false, distillMaxChars: 48000 });
+  assert.deepEqual(settings.getFeatureFlags(), { autoDream: false, distillMaxChars: 48000, actionPipelineEnabled: true });
 });
 
 test("PUT /api/dsh-mneme/features round-trips nested, string, url and enum keys", async () => {

@@ -1637,3 +1637,60 @@ test("issue#399: enabled=false (the default) writes nothing at all", async () =>
   assert.equal(countRows(store, "SELECT count(*) AS c FROM memory_provenance"), 0);
   assert.equal(store.count(), 2, "记忆写入照旧");
 });
+
+// v0.9.0（M.O. 项目记忆）：机器提炼是写入量的绝大多数，而它此前一个作用域字段都不带
+// ——全库带 scope 的行不足 3%，且全部来自 memory_save 那条工具路径。这组用例钉住
+// 「蒸馏写入也盖章」这件事：值取 session.header（agentPreset + cwd），闸门与工具路径
+// 同一把（scopeEnabled），来源一律 'auto'（auto 不构成硬墙，只吃软加权，见
+// test/scope-strict.test.js 的 "auto and legacy rows are NOT hard walls" 用例，
+// 2026-10-13 在 :41-54）。
+function scopedSession(id, header) {
+  const session = {
+    id,
+    requestHeader: () => ({ config: { provider: "deepseek", model: "deepseek-chat" } }),
+    events: [userMessage("继续"), { seq: 2, type: "turn/end" }]
+  };
+  if (header !== undefined) session.header = header;
+  return session;
+}
+
+test("v0.9.0: scopeEnabled 开时蒸馏写入盖 auto 章（agent=agentPreset、workspace=header.cwd）", async () => {
+  const { events, store } = setup({ scopeEnabled: true });
+  const session = scopedSession("mo-scope", { agentPreset: "amarre", cwd: "C:\\work\\dsh-mneme" });
+  await eventHandler(events)(session, { seq: 2, type: "turn/end" });
+
+  const rows = store.list({ limit: null });
+  assert.equal(rows.length, 2, "两个条目都落库");
+  for (const row of rows) {
+    assert.equal(row.agent_scope, "amarre", "agent 维取自 session.header.agentPreset");
+    assert.equal(row.agent_scope_source, "auto", "来源必须标 auto：显式声明才会构成硬过滤");
+    assert.equal(row.workspace_scope, "C:\\work\\dsh-mneme", "workspace 维取自 session.header.cwd");
+    assert.equal(row.workspace_scope_source, "auto");
+  }
+});
+
+test("v0.9.0: 解析不出身份时照样标 auto、值落 NULL（与「从未标注」可区分）", async () => {
+  const { events, store } = setup({ scopeEnabled: true });
+  // 无 header、无 workspaceRegistry（mock ctx 只有 on/llm）：正是老会话/测试环境的形状。
+  await eventHandler(events)(scopedSession("mo-scope-anon"), { seq: 2, type: "turn/end" });
+
+  for (const row of store.list({ limit: null })) {
+    assert.equal(row.agent_scope, undefined);
+    assert.equal(row.workspace_scope, undefined);
+    // 关键区别：*_source='auto' 说明「自动标注跑过但没解析出值」，NULL 值才等于全局可见。
+    assert.equal(row.agent_scope_source, "auto");
+    assert.equal(row.workspace_scope_source, "auto");
+  }
+});
+
+test("v0.9.0: scopeEnabled 关时蒸馏写入一个 scope 字段都不加（老行为不变）", async () => {
+  const { events, store } = setup({});
+  await eventHandler(events)(scopedSession("mo-scope-off", { agentPreset: "amarre", cwd: "C:\\work\\dsh-mneme" }), { seq: 2, type: "turn/end" });
+
+  for (const row of store.list({ limit: null })) {
+    assert.equal(row.agent_scope, undefined);
+    assert.equal(row.agent_scope_source, undefined);
+    assert.equal(row.workspace_scope, undefined);
+    assert.equal(row.workspace_scope_source, undefined);
+  }
+});

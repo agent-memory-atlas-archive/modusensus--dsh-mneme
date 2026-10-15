@@ -4,6 +4,8 @@ import { STR, langOf } from "./lang.js";
 // 重试一次不带 effort 字段）与 describeStreamFailure（流失败原因归一）——
 // 三条链路同一降级语义，不另造第二份实现。
 import { withEffortFallback, describeStreamFailure, EFFORT_REJECT_RE } from "./dream.js";
+// v0.9.0（M.O. 项目记忆）：蒸馏写入复用工具路径那把作用域解析器，见 createSummarizer。
+import { createScopeResolver } from "./scope.js";
 
 // 编码记忆蒸馏 prompt（codingRetrospect 开启时启用）：在通用记忆之外，额外提取
 // 三类编码专属记忆，专治重复踩坑 / 遗忘被否决方案 / 丢失工程约束。字段仍沿用
@@ -511,6 +513,16 @@ export function createSummarizer(ctx, service, config, deps = {}) {
   const setTimer = typeof deps.setTimeoutFn === "function" ? deps.setTimeoutFn : setTimeout;
   const clearTimer = typeof deps.clearTimeoutFn === "function" ? deps.clearTimeoutFn : clearTimeout;
 
+  // v0.9.0（M.O. 项目记忆）：蒸馏写入也要盖作用域章。此前只有 memory_save 那条工具
+  // 路径盖章（tools.js 的 memory_save 里 resolveSessionScope 到 workspaceLabel 那一段，
+  // 2026-10-13 在 :173-193），而机器提炼是写入量的绝大多数——于是「项目记忆」
+  // 在库里根本不存在（全库带 scope 的行不足 3%，且带 scope 的全部来自工具路径）。
+  // 这里不另造口径：同一把解析器（scope.js 的 createScopeResolver，2026-10-13 在 :24）、同一把闸门
+  // （config.scopeEnabled === true）、同一对列（*_scope + *_scope_source='auto'），
+  // 与工具路径逐字对齐。解析器的入参形状是「工具 exec」（内部读 exec.agent.session），
+  // 蒸馏路径手里直接有会话对象，所以包一层壳喂进去——不改解析器的公共契约。
+  const resolveSessionScope = createScopeResolver({ ctx, config, logger: ctx.logger });
+
   const inFlight = new Map();
   // Issue #127：per-session 上一次实际开跑时刻（最小间隔闸门用）。与 inFlight
   // 同生命周期，dispose 时一并清空。
@@ -873,6 +885,13 @@ export function createSummarizer(ctx, service, config, deps = {}) {
       const dedupeMode = config.summarizeDedupeMode ?? "off";
       let deduped = 0;
       let dedupeMaxSim = 0;
+      // v0.9.0（M.O. 项目记忆）：一次窗口解析一次——同一蒸馏窗口里所有条目同属一个
+      // 工作区、一个 agent 身份，逐条解析是白花钱。解析不到就落 NULL（NULL = 未标注 =
+      // 全局可见），且解析器绝不抛错（scope.js 的硬约束：记忆写入不该被作用域拖挂）。
+      // 闸门与 tools.js 的 autoStamping（2026-10-13 在 :180）同一把：关着就一个字段都不加，老行为不变。
+      const writeScope = config?.scopeEnabled === true
+        ? resolveSessionScope({ agent: { session } })
+        : null;
       const writes = [];
       for (const entry of entries) {
         // Provenance: the summarizer runs on a real session (turn/end hook), so
@@ -917,6 +936,18 @@ export function createSummarizer(ctx, service, config, deps = {}) {
           const outcome = service.saveWithDedupe({
             ...entry,
             source,
+            // 合并进既有行时不盖章，但这件事由 saveWithDedupe 的合并分支自己保证
+            // （它只认 explicit 来源升级，从不采纳这里传的 auto 字段）——调用方不能
+            // 靠「省略字段」来表达这个意图，因为省略会反向把合并也挡掉：
+            // findSessionDuplicate 只按 type+source+时间窗找候选，不看 scope；找到
+            // 候选后由 saveWithDedupe 的 scopeMatches 门决定并或不并。这里一省略，
+            // 新条目的 scope 就是 null，与已盖过章的候选不等，门必拒 → 回落新建，
+            // 而那一行同样是新行、同样该带章，却没有章可带。实测两轮蒸馏正是如此：
+            // 第二轮命中第一轮、门拒后新建，留下同题两行一行 auto 一行 NULL——
+            // 作用域隔离没做成，重复倒留下了。传字段、让合并分支按自己的口径处理，
+            // 才是「不重贴」与「新行必贴」两个要求的唯一相容解。
+            ...(writeScope ? { agent_scope: writeScope.agent_scope, agent_scope_source: "auto" } : {}),
+            ...(writeScope ? { workspace_scope: writeScope.workspace_scope, workspace_scope_source: "auto" } : {}),
             ...(dup ? { _mergeInto: dup.memory.id } : {})
           });
           // created 与 merged 两条成功分支都返回 memory（含 id）；merged 时 id 是

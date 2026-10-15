@@ -469,6 +469,48 @@ window.__ModuleLoader__.load({
         "memory.features.heatEnabled.hint": "像遗忘曲线一样给记忆降温：越久没用到排得越靠后，不占注入名额",
         "memory.features.documentMemoryEnabled": "document 型记忆",
         "memory.features.documentMemoryEnabled.hint": "Agent 写的长文档只在记忆里放一张「摘要卡」：正文仍由 Agent 保管、按需读取，注入时只带摘要，不占上下文",
+        // --- v0.9.0 M.O.（Modus Operandi · 手法，beta）---
+        // M.O. = Modus Operandi，拉丁语「一个人一贯的做事方式」；也是 org 词根
+        // modus（modusensus）。界面主显示 M.O.，设置项 hint 第一句给全名。
+        "memory.actions.beta": "beta",
+        "memory.actions.notice": "提炼结果是候选，可能有错、过时、会被推翻。",
+        "memory.actions.title": "M.O. · 手法",
+        "memory.actions.open": "打开 M.O.",
+        "memory.actions.viewFull": "完整视图",
+        "memory.actions.openPane": "在右栏打开完整视图",
+        "memory.actions.announce.open": "M.O. 面板已打开",
+        "memory.actions.announce.close": "M.O. 面板已关闭",
+        "memory.actions.close": "关闭",
+        "memory.actions.candidates": "候选 {n} 条",
+        "memory.actions.runs": "最近运行",
+        "memory.actions.runOf": "运行 {n}",
+        "memory.actions.run.ok": "成功",
+        "memory.actions.run.failed": "失败",
+        "memory.actions.run.refuted": "被推翻",
+        "memory.actions.state.candidate": "候选",
+        "memory.actions.state.trusted": "可信",
+        "memory.actions.state.stale": "过时",
+        "memory.actions.state.refuted": "被推翻",
+        "memory.actions.gate.has": "有闸门证据",
+        "memory.actions.gate.none": "还没闸门",
+        "memory.actions.legend.states": "状态",
+        "memory.actions.detail.situation": "情形",
+        "memory.actions.detail.action": "动作",
+        "memory.actions.detail.why": "为什么",
+        "memory.actions.detail.cf": "反事实",
+        "memory.actions.detail.noCf": "该节点还没有反事实记录",
+        "memory.actions.detail.source": "来源记忆",
+        "memory.actions.credit": "复用",
+        "memory.actions.creditValue": "{n} 次 · 上次 {d} 天前",
+        "memory.actions.dep": "依赖",
+        "memory.actions.empty.title": "还没有可展示的做法",
+        "memory.actions.empty.body": "做法被复用第二次才算类型，第一次只是实例——同一路径被走通两次后，这里才会长出第一批节点。",
+        "memory.actions.settle.title": "本次运行",
+        "memory.actions.settle.line": "「{title}」",
+        "memory.actions.settle.used": "本次复用 {n} 条做法（勾选为被用上）",
+        "memory.actions.settle.refutedWarn": "本次路径里有已被推翻的节点，结果仅供参考",
+        "memory.features.actionPipelineEnabled": "M.O.（beta）",
+        "memory.features.actionPipelineEnabled.hint": "Modus Operandi（手法）：把真实会话里反复走通的「做法」连成一张只读图谱——会话头图标、右栏完整视图、每次运行的结算卡。重启 DSH 后生效",
         "memory.features.resilientModelDownload": "模型下载断点续传",
         "memory.features.resilientModelDownload.hint": "模型下载中断后从断点续传并自动重试；关闭则回到一次性下载",
         "memory.features.searchSemanticDedup": "语义去重",
@@ -1013,6 +1055,46 @@ window.__ModuleLoader__.load({
         "memory.features.heatEnabled.hint": "Cool memories down like a forgetting curve: the longer unused, the lower they rank — they stop taking injection slots",
         "memory.features.documentMemoryEnabled": "Document memory",
         "memory.features.documentMemoryEnabled.hint": "Long agent-authored documents are stored as a \"summary card\" only: the full text stays agent-owned and is read on demand, so injection carries the summary without filling the context",
+        // --- v0.9.0 M.O. / Modus Operandi (beta) ---
+        "memory.actions.beta": "Beta",
+        "memory.actions.notice": "Extracted steps are candidates: they may be wrong, outdated, or refuted.",
+        "memory.actions.title": "Modus Operandi",
+        "memory.actions.open": "Open Modus Operandi",
+        "memory.actions.viewFull": "Full view",
+        "memory.actions.openPane": "Open full view in sidebar",
+        "memory.actions.announce.open": "Modus Operandi panel opened",
+        "memory.actions.announce.close": "Modus Operandi panel closed",
+        "memory.actions.close": "Close",
+        "memory.actions.candidates": "{n} candidates",
+        "memory.actions.runs": "Recent runs",
+        "memory.actions.runOf": "Run {n}",
+        "memory.actions.run.ok": "ok",
+        "memory.actions.run.failed": "failed",
+        "memory.actions.run.refuted": "refuted",
+        "memory.actions.state.candidate": "candidate",
+        "memory.actions.state.trusted": "trusted",
+        "memory.actions.state.stale": "stale",
+        "memory.actions.state.refuted": "refuted",
+        "memory.actions.gate.has": "has counterfactual",
+        "memory.actions.gate.none": "no gate yet",
+        "memory.actions.legend.states": "States",
+        "memory.actions.detail.situation": "Situation",
+        "memory.actions.detail.action": "Action",
+        "memory.actions.detail.why": "Why",
+        "memory.actions.detail.cf": "Counterfactual",
+        "memory.actions.detail.noCf": "No counterfactual recorded yet",
+        "memory.actions.detail.source": "Source memories",
+        "memory.actions.credit": "Reuse",
+        "memory.actions.creditValue": "{n} uses · last {d}d ago",
+        "memory.actions.dep": "depends on",
+        "memory.actions.empty.title": "No practices to show yet",
+        "memory.actions.empty.body": "A practice becomes a type on its second reuse — the first run is just an instance. Nodes appear here once the same path has been walked twice.",
+        "memory.actions.settle.title": "This run",
+        "memory.actions.settle.line": "\"{title}\"",
+        "memory.actions.settle.used": "Reused {n} steps this run (checked = actually used)",
+        "memory.actions.settle.refutedWarn": "This path contains refuted steps; take the result with caution",
+        "memory.features.actionPipelineEnabled": "M.O. (beta)",
+        "memory.features.actionPipelineEnabled.hint": "Modus Operandi: the ways of working that actually got walked through in real sessions, drawn as a read-only graph — session-header icon, full sidebar view, and a per-run settlement card. Takes effect after restarting DSH",
         "memory.features.resilientModelDownload": "Resumable model downloads",
         "memory.features.resilientModelDownload.hint": "Resume model downloads from where they stopped and retry automatically; off = one-shot downloads",
         "memory.features.searchSemanticDedup": "Semantic dedup",
@@ -1897,7 +1979,115 @@ window.__ModuleLoader__.load({
       ".mneme-maintwarnhead{font-size:13px;line-height:19px;font-weight:600;color:var(--mneme-danger)}",
       ".mneme-maintresult{margin-top:12px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l1)}",
       ".mneme-maintresulthead{font-size:13px;line-height:19px;font-weight:600;color:var(--mneme-ok)}",
-      ".mneme-mainterr{margin-top:10px;font-size:12px;line-height:17px;color:var(--mneme-danger)}"
+      ".mneme-mainterr{margin-top:10px;font-size:12px;line-height:17px;color:var(--mneme-danger)}",
+      // --- v0.9.0 M.O.（beta）---------------------------------------------
+      // 语义色层第二份：浮层面板（portal 到 body）、右栏 pane、退化 sheet、
+      // 对话行结算卡都不在原四个渲染根之下。contrast.test.js 对原四根选择器
+      // 做精确匹配锁，所以这里另起一条规则、取值逐字相同，且必须排在其后
+      // （测试按首次出现抓取 --mneme-* 定义）。引用的宿主 token 全部在
+      // test/contrast.test.js 的 HOST_TOKENS 快照里，不许新增名字。
+      ".mneme-pipe,.mneme-pipeview,.mneme-pipe-settle,.mneme-pipe-root{" +
+        "--mneme-fg-dim:color-mix(in srgb,var(--dsw-alias-label-primary) 60%,transparent);" +
+        "--mneme-graphic-dim:color-mix(in srgb,var(--dsw-alias-label-primary) 50%,transparent);" +
+        "--mneme-accent:color-mix(in srgb,var(--dsw-alias-state-business-primary) 85%,var(--dsw-alias-label-primary));" +
+        "--mneme-danger:color-mix(in srgb,var(--dsw-alias-state-error-primary) 80%,var(--dsw-alias-label-primary));" +
+        "--mneme-warn:color-mix(in srgb,var(--dsw-static-amber-600,#dd8629) 65%,var(--dsw-alias-label-primary));" +
+        "--mneme-ok:color-mix(in srgb,var(--dsw-static-green-500,#22c55e) 65%,var(--dsw-alias-label-primary))" +
+      "}",
+      // 会话头 trigger：与 Agent Teams 同规格（28px 行高、12px 字号），
+      // 页头窄容器下文字标签隐藏、降级纯图标。
+      ".mneme-pipe-root{position:relative;display:inline-flex}",
+      ".mneme-pipe-trigger{min-height:28px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:5px;padding:3px 7px;font-family:inherit;font-size:12px;display:inline-flex}",
+      ".mneme-pipe-trigger:hover{background:var(--dsw-alias-interactive-bg-hover)}",
+      ".mneme-pipe-trigger:focus-visible{color:var(--dsw-alias-label-primary);outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}",
+      ".mneme-pipe-triggerLabel{white-space:nowrap}",
+      "@container (width<=480px){.mneme-pipe-triggerLabel{display:none}}",
+      ".mneme-pipe-dot{flex:none;min-width:14px;height:14px;border-radius:7px;padding:0 3px;background:color-mix(in srgb,var(--mneme-warn) 14%,transparent);color:var(--dsw-alias-label-primary);font-size:10px;line-height:14px;font-weight:600;font-variant-numeric:tabular-nums;text-align:center}",
+      // 浮层面板：几何抄 Agent Teams（min(500px,100vw-32px) / 12px 圆角 /
+      // fixed 定位由 useAnchoredPosition 给出）。阴影用中性 rgba：宿主的
+      // elevation token 不在面板 token 快照白名单里，不能引用。
+      ".mneme-pipe-panel{z-index:100;box-sizing:border-box;width:min(500px,100vw - 32px);max-height:min(680px,100vh - 32px);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;flex-direction:column;padding:0;display:flex;position:fixed;overflow:hidden;background:var(--dsw-alias-bg-layer-1);box-shadow:0 8px 28px rgba(0,0,0,0.28);color:var(--dsw-alias-label-primary)}",
+      ".mneme-pipe-head{flex:none;display:flex;align-items:center;gap:8px;padding:10px 12px 8px 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}",
+      ".mneme-pipe-title{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);display:inline-flex;align-items:center;gap:6px;min-width:0}",
+      ".mneme-pipe-beta{flex:none;font-size:11px;line-height:16px;font-weight:600;color:var(--mneme-warn);border:1px solid color-mix(in srgb,var(--mneme-warn) 55%,transparent);border-radius:6px;padding:0 6px}",
+      // 内测免责：界面常驻一行，「候选」是可见状态词不是 tooltip。
+      ".mneme-pipe-notice{flex:none;display:flex;gap:6px;align-items:flex-start;padding:7px 14px 0;font-size:12px;line-height:17px;color:var(--mneme-fg-dim)}",
+      ".mneme-pipe-scope{flex:none;font-size:11px;line-height:16px;color:var(--mneme-fg-dim)}",
+      // 运行档位：一次运行一个芯片；失败/被推翻的运行照常列出（留痕）。
+      ".mneme-pipe-runs{flex:none;display:flex;gap:6px;flex-wrap:wrap;padding:6px 14px 2px}",
+      ".mneme-pipe-run{border:1px solid var(--dsw-alias-border-l2);background:0 0;border-radius:8px;cursor:pointer;color:var(--mneme-fg-dim);font-family:inherit;font-size:12px;line-height:16px;padding:2px 8px;display:inline-flex;gap:6px;align-items:center}",
+      ".mneme-pipe-run:hover{background:var(--dsw-alias-interactive-bg-hover)}",
+      ".mneme-pipe-run:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}",
+      ".mneme-pipe-run.mneme-on{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 10%,transparent)}",
+      ".mneme-pipe-runDot{flex:none;width:8px;height:8px;border-radius:4px}",
+      ".mneme-pipe-runDot--ok{background:var(--mneme-ok)}",
+      ".mneme-pipe-runDot--failed{background:var(--mneme-warn)}",
+      ".mneme-pipe-runDot--refuted{background:var(--mneme-danger)}",
+      // 图：宽态 SVG 分层 DAG（trace viewer 读法），窄态整块换成竖排列表。
+      ".mneme-pipe-graph{flex:1;min-height:0;overflow:auto;padding:4px 8px 2px}",
+      ".mneme-pipe-svg{display:block;width:100%;height:auto}",
+      ".mneme-pipe-edge{stroke:var(--mneme-graphic-dim);fill:none;stroke-width:1.5}",
+      ".mneme-pipe-edgeOn{stroke:var(--mneme-accent);fill:none;stroke-width:2.5}",
+      ".mneme-pipe-edgeFail{stroke:var(--mneme-danger);fill:none;stroke-width:2;stroke-dasharray:5 3}",
+      // 节点形状按 kind 区分（step 矩形 / gate 菱形 / branch 圆角 / artifact 胶囊），
+      // 状态走描边+填充：refuted 是全篇核心信号，双份危险色最扎眼。
+      ".mneme-pipe-node{fill:var(--dsw-alias-bg-layer-2);stroke:var(--mneme-graphic-dim);stroke-width:1.2}",
+      ".mneme-pipe-node--trusted{stroke:var(--mneme-ok);stroke-width:1.6}",
+      ".mneme-pipe-node--candidate{stroke:var(--mneme-graphic-dim)}",
+      ".mneme-pipe-node--stale{stroke:var(--dsw-alias-border-l2);stroke-dasharray:3 2;fill:var(--dsw-alias-bg-base)}",
+      ".mneme-pipe-node--refuted{stroke:var(--mneme-danger);stroke-width:2;fill:color-mix(in srgb,var(--mneme-danger) 10%,transparent)}",
+      ".mneme-pipe-node--onpath{stroke:var(--dsw-alias-state-business-primary);stroke-width:2}",
+      ".mneme-pipe-nodeT{fill:var(--dsw-alias-label-primary);font-size:11px;font-weight:600}",
+      ".mneme-pipe-nodeS{fill:var(--mneme-fg-dim);font-size:9.5px}",
+      ".mneme-pipe-nodeK{fill:var(--mneme-fg-dim);font-size:9px}",
+      // 图例：四个状态 + 闸门有无（counterfactual null = 空心圈「还没闸门」）。
+      ".mneme-pipe-legend{flex:none;display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:2px 14px 8px;font-size:11px;line-height:16px;color:var(--mneme-fg-dim)}",
+      ".mneme-pipe-pill{flex:none;border-radius:6px;padding:0 6px;font-size:11px;line-height:18px;font-weight:600;border:1px solid transparent}",
+      ".mneme-pipe-pill--candidate{color:var(--mneme-fg-dim);border-color:var(--dsw-alias-border-l2)}",
+      ".mneme-pipe-pill--trusted{color:var(--mneme-ok);border-color:color-mix(in srgb,var(--mneme-ok) 45%,transparent)}",
+      ".mneme-pipe-pill--stale{color:var(--mneme-fg-dim);border-color:var(--dsw-alias-border-l2);border-style:dashed}",
+      ".mneme-pipe-pill--refuted{color:var(--mneme-danger);border-color:color-mix(in srgb,var(--mneme-danger) 55%,transparent);background:color-mix(in srgb,var(--mneme-danger) 10%,transparent)}",
+      ".mneme-pipe-gate{flex:none;width:10px;height:10px;border-radius:5px;border:1.5px solid var(--mneme-graphic-dim)}",
+      ".mneme-pipe-gate--has{border-color:var(--mneme-ok);background:var(--mneme-ok)}",
+      // 节点详情（宽态点选展开 / 窄态 details 手风琴共用）。
+      ".mneme-pipe-detail{flex:none;border-top:1px solid var(--dsw-alias-border-l1);padding:8px 14px 10px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);max-height:180px;overflow:auto}",
+      ".mneme-pipe-detailTitle{font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary);margin-bottom:2px}",
+      ".mneme-pipe-dt{font-weight:600;color:var(--mneme-fg-dim)}",
+      ".mneme-pipe-cf{margin-top:4px;padding:4px 8px;border-radius:8px;background:color-mix(in srgb,var(--mneme-ok) 10%,transparent);color:var(--dsw-alias-label-secondary)}",
+      ".mneme-pipe-cf--none{background:0 0;border:1px dashed var(--dsw-alias-border-l2);color:var(--mneme-fg-dim)}",
+      // 窄态（better-sidebar ~500px / 浮层内）：节点竖排列表化，边收成
+      // 左侧轨道线 + 「依赖」芯片——换布局，不是缩放。
+      ".mneme-pipe-list{flex:1;min-height:0;overflow:auto;padding:4px 12px 8px}",
+      ".mneme-pipe-item{position:relative;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2);padding:8px 10px 8px 30px;margin:0 0 10px}",
+      ".mneme-pipe-item::before{content:\"\";position:absolute;left:13px;top:-10px;height:10px;border-left:2px solid var(--mneme-graphic-dim)}",
+      ".mneme-pipe-item:first-child::before{display:none}",
+      ".mneme-pipe-itemDot{position:absolute;left:8px;top:12px;width:10px;height:10px;border-radius:5px;border:2px solid var(--mneme-graphic-dim);background:var(--dsw-alias-bg-layer-2)}",
+      ".mneme-pipe-itemDot--trusted{border-color:var(--mneme-ok)}",
+      ".mneme-pipe-itemDot--stale{border-style:dashed;border-color:var(--dsw-alias-border-l2)}",
+      ".mneme-pipe-itemDot--refuted{border-color:var(--mneme-danger);background:var(--mneme-danger)}",
+      ".mneme-pipe-itemDot--onpath{border-color:var(--dsw-alias-state-business-primary)}",
+      ".mneme-pipe-itemName{font-size:13px;font-weight:600;line-height:18px;color:var(--dsw-alias-label-primary)}",
+      ".mneme-pipe-itemName--refuted{color:var(--mneme-danger)}",
+      ".mneme-pipe-itemMeta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:2px;font-size:11px;line-height:16px;color:var(--mneme-fg-dim)}",
+      ".mneme-pipe-dep{font-size:11px;color:var(--mneme-fg-dim)}",
+      ".mneme-pipe-item summary{cursor:pointer;list-style:none}",
+      ".mneme-pipe-item summary::-webkit-details-marker{display:none}",
+      ".mneme-pipe-itemBody{margin-top:6px;padding-top:6px;border-top:1px solid var(--dsw-alias-border-l1);font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}",
+      // 对话行结算卡（turnTail）：死数据，跟这次运行绑死。
+      ".mneme-pipe-settle{border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2);padding:8px 10px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);margin:4px 0;max-width:620px}",
+      ".mneme-pipe-settleHead{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px}",
+      ".mneme-pipe-settleTitle{font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary);display:inline-flex;align-items:center;gap:6px}",
+      ".mneme-pipe-steps{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin:2px 0}",
+      ".mneme-pipe-stepChip{border:1px solid var(--dsw-alias-border-l2);border-radius:7px;padding:0 7px;font-size:11px;line-height:18px;color:var(--mneme-fg-dim);display:inline-flex;gap:4px;align-items:center}",
+      ".mneme-pipe-stepChip--used{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 55%,transparent);color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 10%,transparent)}",
+      ".mneme-pipe-stepArrow{color:var(--mneme-fg-dim);font-size:11px}",
+      // 老宿主退化：居中 sheet（形态沿用记忆库 overlay 的背板 + 居中面板）。
+      ".mneme-pipe-sheet{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;width:min(860px,calc(100vw - 48px));max-height:calc(100vh - 96px);border-radius:14px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,0.3)}",
+      ".mneme-pipe-sheetbar{flex:none;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l2)}",
+      ".mneme-pipe-sheetbody{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column}",
+      // 空态/加载/错误共用文案块。
+      ".mneme-pipe-empty{flex:none;padding:18px 14px;text-align:center;font-size:13px;line-height:20px;color:var(--mneme-fg-dim)}",
+      ".mneme-pipe-emptyTitle{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);margin-bottom:4px}"
     ].join("\n");
     if (typeof document !== "undefined" && document.querySelector(`style[data-plugin-css="${CSS_TAG}"]`) === null) {
       const tag = document.createElement("style");
@@ -2455,7 +2645,9 @@ window.__ModuleLoader__.load({
     const FEATURE_CHILDREN = { autoInject: ["injectGuidanceEnabled", "continuityRescueEnabled"] };
     const FEATURE_GROUPS = [
       { key: "group.core", items: ["autoInject", "autoSummarize", "hotMemoryEnabled", "injectTimePrefix", "memoryQualityFilter.enabled", "llmAudit.enabled", "writeAdmission.enabled", "writeAdmission.enforce", "preInjectGate.enabled", "preInjectGate.enforce", "sensitiveScanEnabled"] },
-      { key: "group.enhance", items: ["entityExtractionEnabled", "codingRetrospect", "rerankEnabled", "resilientModelDownload", "searchSemanticDedup", "bm25SearchEnabled", "heatEnabled", "documentMemoryEnabled"] },
+      // v0.9.0 M.O.（beta）：开关挂在 enhance 组。它不是行为开关而是
+      // 座位闸门——关=一个座位都不注册（见 apply 内的 M.O. 块）。
+      { key: "group.enhance", items: ["entityExtractionEnabled", "codingRetrospect", "rerankEnabled", "resilientModelDownload", "searchSemanticDedup", "bm25SearchEnabled", "heatEnabled", "documentMemoryEnabled", "actionPipelineEnabled"] },
       { key: "group.dream", items: ["autoDream", "sleepModeEnabled"] },
       // v0.8.0 A4（issue #17）：作用域隔离组——标注总开关 + 严格硬过滤。
       { key: "group.scope", items: ["scopeEnabled", "strictScope"] }
@@ -6278,6 +6470,804 @@ window.__ModuleLoader__.load({
         ), host);
     }
 
+    // ---------------------------------------------------------------------
+    // v0.9.0 M.O.（beta，只读）
+    // 定性：trace viewer 不是编辑画布——节点=步骤、边=依赖、一次运行=一条
+    // 被高亮走过的路径。本版数据全部是 §4 mneme.pipeline/v1 形状的假数据，
+    // 服务端管线落地前先验证形态与交互。
+    // ---------------------------------------------------------------------
+    const PIPELINE_ACTIONS_TAB_ID = "dsh-mneme:actions";
+    const PIPELINE_ACTIONS_TAB_KIND = "mneme-actions";
+
+    // 节点状态四值，refuted 是全篇核心信号（最扎眼）。
+    const PIPELINE_STATES = ["candidate", "trusted", "stale", "refuted"];
+
+    // 假数据：一次「召回排障」做法，覆盖所有状态与运行结果。
+    const PIPELINE_MOCK = {
+      pipeline: {
+        id: "pl-recall-triage",
+        title: "召回排障",
+        scope: "global",
+        scopeLabel: "全局",
+        status: "active",
+        updatedAt: "2026-10-13T02:40:00.000Z"
+      },
+      nodes: [
+        {
+          id: "n1", kind: "step", title: "复现召回为空",
+          situation: "用户问了一个库里应该有答案的问题，检索却空手而归",
+          action: "先用原话重试检索，记录 query 与命中的记忆条目数",
+          why: "先把「检索坏了」和「库里没有」分开，不猜",
+          state: "trusted",
+          credit: { uses: 4, refuted: 0, lastUsedAt: "2026-10-12T09:10:00.000Z" },
+          counterfactual: { contrast: "不重试直接改配置，3 次里 2 次只是查询太长被截断", evidence: 2 },
+          source: { memoryIds: ["m-901", "m-877"], originSession: "s-338" }
+        },
+        {
+          id: "n2", kind: "step", title: "检查 BM25 分词",
+          situation: "重试仍为空",
+          action: "看分词后 query 是否被切碎（大小写/连字符/空格）",
+          why: "分词是检索第一跳，坏了后面全白做",
+          state: "trusted",
+          credit: { uses: 3, refuted: 0, lastUsedAt: "2026-10-11T18:00:00.000Z" },
+          counterfactual: { contrast: "跳过分词检查直接重建索引，慢且没修到点子上", evidence: 1 },
+          source: { memoryIds: ["m-855"], originSession: "s-312" }
+        },
+        {
+          id: "n3", kind: "gate", title: "换查询粒度重试",
+          situation: "分词正常但仍空",
+          action: "整句 → 关键词 → 逐词，三档各试一次",
+          why: "粒度不对是最常见的假阴性",
+          state: "trusted",
+          credit: { uses: 5, refuted: 1, lastUsedAt: "2026-10-12T20:30:00.000Z" },
+          counterfactual: { contrast: "只试整句，5 次里 3 次漏检", evidence: 2 },
+          source: { memoryIds: ["m-902"], originSession: "s-338" }
+        },
+        {
+          id: "n4", kind: "step", title: "检查向量索引年龄",
+          situation: "粒度三档都空",
+          action: "对比 vector-index 的最后构建时间与最近写入时间",
+          why: "索引落后于写入是静默丢召回的头号原因",
+          state: "candidate",
+          credit: { uses: 1, refuted: 0, lastUsedAt: "2026-10-12T20:30:00.000Z" },
+          counterfactual: { contrast: "还没攒够对照——只跑过一次", evidence: 0 },
+          source: { memoryIds: ["m-910"], originSession: "s-341" }
+        },
+        {
+          id: "n5", kind: "branch", title: "回滚 embedding 版本",
+          situation: "索引明显落后且重建失败",
+          action: "退回上一个可用的 embedding 模型版本重建",
+          why: "先恢复服务，再排查升级问题",
+          state: "stale",
+          credit: { uses: 2, refuted: 0, lastUsedAt: "2026-08-02T11:00:00.000Z" },
+          counterfactual: { contrast: "硬等新版修复，一次等了三天", evidence: 1 },
+          source: { memoryIds: ["m-402"], originSession: "s-150" }
+        },
+        {
+          id: "n6", kind: "artifact", title: "召回计数对照",
+          situation: "任何一步修复后",
+          action: "从 recall_runs 取修复前后 Top-N 命中率对比",
+          why: "让修复可验证，不靠感觉",
+          state: "trusted",
+          credit: { uses: 6, refuted: 0, lastUsedAt: "2026-10-12T20:30:00.000Z" },
+          counterfactual: { contrast: "不对照就宣布修复，两次被同一个 query 打脸", evidence: 2 },
+          source: { memoryIds: ["m-880", "m-901"], originSession: "s-338" }
+        },
+        {
+          id: "n7", kind: "step", title: "关闭 adaptive 阈值",
+          situation: "召回率偏低",
+          action: "直接把 adaptive 阈值关掉换固定值",
+          why: "（已被推翻）当时以为是阈值太紧",
+          state: "refuted",
+          credit: { uses: 1, refuted: 1, lastUsedAt: "2026-10-10T08:00:00.000Z" },
+          counterfactual: { contrast: "对照实验显示关掉后召回率反而下降 12%，问题在索引年龄", evidence: 3 },
+          source: { memoryIds: ["m-895"], originSession: "s-330" }
+        },
+        {
+          id: "n8", kind: "gate", title: "确认识别字段",
+          situation: "检索命中但内容不对",
+          action: "打开命中的记忆条目核对 scope 与类型",
+          why: "经常是 scope 隔离挡住了，不是检索问题",
+          state: "candidate",
+          credit: { uses: 0, refuted: 0, lastUsedAt: null },
+          counterfactual: null,
+          source: { memoryIds: ["m-912"], originSession: "s-342" }
+        }
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", kind: "control", label: "" },
+        { id: "e2", from: "n1", to: "n4", kind: "control", label: "" },
+        { id: "e3", from: "n1", to: "n6", kind: "data", label: "" },
+        { id: "e4", from: "n2", to: "n3", kind: "control", label: "" },
+        { id: "e5", from: "n4", to: "n5", kind: "control", label: "重建失败" },
+        { id: "e6", from: "n4", to: "n7", kind: "control", label: "误判" },
+        { id: "e7", from: "n3", to: "n8", kind: "control", label: "" },
+        { id: "e8", from: "n6", to: "n3", kind: "data", label: "仍偏低" }
+      ],
+      runs: [
+        {
+          id: "r1", at: "2026-10-12T20:30:00.000Z", outcome: "ok",
+          path: ["n1", "n2", "n3", "n6", "n8"],
+          usedNodeIds: ["n2", "n3", "n6"]
+        },
+        {
+          id: "r2", at: "2026-10-10T08:00:00.000Z", outcome: "refuted",
+          path: ["n1", "n4", "n7"],
+          usedNodeIds: ["n4"]
+        },
+        {
+          id: "r3", at: "2026-10-12T09:10:00.000Z", outcome: "failed",
+          path: ["n1", "n4", "n5"],
+          usedNodeIds: []
+        }
+      ]
+    };
+
+    // DAG 分层布局：Kahn 最长路分层（层数 = 到该节点最长边数），
+    // 防环——正常分层算完后如果还有节点没落位（说明有环），
+    // 按输入顺序塞进最后一层，绝不死循环。节点数少，几十行够用。
+    function layoutDag(nodes, edges) {
+      const byId = {};
+      for (const n of nodes) byId[n.id] = n;
+      const indeg = {};
+      const out = {};
+      for (const n of nodes) { indeg[n.id] = 0; out[n.id] = []; }
+      for (const e of edges) {
+        if (!byId[e.from] || !byId[e.to] || e.from === e.to) continue;
+        out[e.from].push(e.to);
+        indeg[e.to] += 1;
+      }
+      const layer = {};
+      const queue = nodes.filter((n) => indeg[n.id] === 0).map((n) => n.id);
+      const remaining = {};
+      for (const n of nodes) remaining[n.id] = indeg[n.id];
+      while (queue.length) {
+        const id = queue.shift();
+        for (const to of out[id]) {
+          layer[to] = Math.max(layer[to] || 0, (layer[id] || 0) + 1);
+          remaining[to] -= 1;
+          if (remaining[to] === 0) queue.push(to);
+        }
+      }
+      const maxLayer = nodes.reduce((m, n) => Math.max(m, layer[n.id] || 0), 0);
+      const leftovers = nodes.filter((n) => remaining[n.id] > 0);
+      for (const n of leftovers) layer[n.id] = maxLayer + 1; // 环兜底
+      const layers = [];
+      for (const n of nodes) {
+        const L = layer[n.id] || 0;
+        (layers[L] = layers[L] || []).push(n.id);
+      }
+      return { layer, layers: layers.map((l) => l || []) };
+    }
+
+    function pipeFmtWhen(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return "";
+      const p = (x) => String(x).padStart(2, "0");
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+    function pipeClip(s, n) {
+      const str = String(s || "");
+      return str.length > n ? str.slice(0, n - 1) + "…" : str;
+    }
+    function pipeDaysAgo(iso) {
+      if (!iso) return null;
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return null;
+      return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
+    }
+
+    // 运行档位：一次运行一个芯片；失败/被推翻的运行照常列出（留痕）。
+    function PipelineRunChips(props) {
+      const { t, runs, selectedRunId, onSelectRun } = props;
+      return h("div", { className: "mneme-pipe-runs", role: "group", "aria-label": t("memory.actions.runs") },
+        h("span", { className: "mneme-pipe-scope" }, t("memory.actions.runs")),
+        (runs || []).map((r, i) => h("button", {
+          key: r.id || i,
+          type: "button",
+          className: "mneme-pipe-run" + (r.id === selectedRunId ? " mneme-on" : ""),
+          onClick: () => onSelectRun && onSelectRun(r.id),
+          title: t("memory.actions.run." + (r.outcome || "ok"))
+        },
+          h("span", { className: "mneme-pipe-runDot mneme-pipe-runDot--" + (r.outcome || "ok"), "aria-hidden": "true" }),
+          t("memory.actions.runOf").replace("{n}", String(i + 1)) + " · " + pipeFmtWhen(r.at)
+        ))
+      );
+    }
+
+    // 宽态 DAG：竖排分层 SVG，一次运行 = 一条高亮路径（trace viewer 读法）。
+    function PipelineGraphSvg(props) {
+      const { t, data, run, selectedNodeId, onSelectNode } = props;
+      const nodes = data.nodes || [];
+      const edges = data.edges || [];
+      const pathSet = {};
+      const edgeState = {};
+      if (run && Array.isArray(run.path)) {
+        for (const id of run.path) pathSet[id] = true;
+        for (let i = 0; i + 1 < run.path.length; i++) {
+          const a = run.path[i];
+          const b = run.path[i + 1];
+          const isLast = i + 2 === run.path.length;
+          edgeState[a + ">" + b] = run.outcome === "failed" && isLast ? "fail" : "on";
+        }
+      }
+      const usedSet = {};
+      if (run && Array.isArray(run.usedNodeIds)) {
+        for (const id of run.usedNodeIds) usedSet[id] = true;
+      }
+      const NW = 150, NH = 42, GX = 30, GY = 66, PAD = 12;
+      const { layer, layers } = layoutDag(nodes, edges);
+      const pos = {};
+      let maxCols = 1;
+      layers.forEach((col, L) => {
+        maxCols = Math.max(maxCols, col.length);
+        col.forEach((id, i) => {
+          pos[id] = { x: PAD + i * (NW + GX), y: PAD + L * (NH + GY) };
+        });
+      });
+      const W = PAD * 2 + maxCols * NW + (maxCols - 1) * GX;
+      const Hh = PAD * 2 + layers.length * NH + (layers.length - 1) * GY;
+      const KIND_RX = { step: 8, gate: 4, branch: 16, artifact: 21 };
+      return h("svg", {
+        className: "mneme-pipe-svg",
+        viewBox: `0 0 ${W} ${Hh}`,
+        width: W,
+        height: Hh,
+        role: "img",
+        "aria-label": t("memory.actions.title")
+      },
+        edges.map((e) => {
+          const a = pos[e.from];
+          const b = pos[e.to];
+          if (!a || !b) return null;
+          const x1 = a.x + NW / 2, y1 = a.y + NH, x2 = b.x + NW / 2, y2 = b.y;
+          const st = edgeState[e.from + ">" + e.to];
+          const cls = st === "fail" ? "mneme-pipe-edgeFail" : st === "on" ? "mneme-pipe-edgeOn" : "mneme-pipe-edge";
+          return h("path", {
+            key: e.id || (e.from + ">" + e.to),
+            className: cls,
+            d: `M ${x1} ${y1} C ${x1} ${y1 + 26}, ${x2} ${y2 - 26}, ${x2} ${y2}`
+          }, e.label ? h("title", null, e.label) : null);
+        }),
+        nodes.map((n) => {
+          const p = pos[n.id];
+          if (!p) return null;
+          const rx = KIND_RX[n.kind] != null ? KIND_RX[n.kind] : 8;
+          const on = !!(run && pathSet[n.id]);
+          const cls = "mneme-pipe-node mneme-pipe-node--" + (n.state || "candidate") + (usedSet[n.id] ? " mneme-pipe-node--onpath" : "");
+          return h("g", {
+            key: n.id,
+            onClick: () => onSelectNode && onSelectNode(n.id),
+            style: { cursor: "pointer" }
+          },
+            h("rect", {
+              className: cls,
+              x: p.x, y: p.y, width: NW, height: NH, rx
+            }),
+            // 反事实标记：空心圈 = 还没闸门（counterfactual 为 null），
+            // 实心圈 = 有对照证据。做在右上角，一眼区分。
+            h("circle", {
+              cx: p.x + NW - 11, cy: p.y + 11, r: 4,
+              fill: n.counterfactual ? "var(--mneme-ok)" : "none",
+              stroke: n.counterfactual ? "var(--mneme-ok)" : "var(--mneme-graphic-dim)",
+              "stroke-width": 1.5
+            }, h("title", null, n.counterfactual ? t("memory.actions.gate.has") : t("memory.actions.gate.none"))),
+            h("text", {
+              className: "mneme-pipe-nodeT",
+              x: p.x + NW / 2, y: p.y + 19, textAnchor: "middle"
+            }, pipeClip(n.title, 11)),
+            h("text", {
+              className: "mneme-pipe-nodeS",
+              x: p.x + NW / 2, y: p.y + 33, textAnchor: "middle"
+            }, t("memory.actions.state." + (n.state || "candidate"))),
+            h("title", null, n.situation || n.title)
+          );
+        })
+      );
+    }
+
+    // 图例：四个状态一眼分清 + 闸门有无。「被推翻」最扎眼是全篇核心信号。
+    function PipelineLegend(props) {
+      const { t } = props;
+      return h("div", { className: "mneme-pipe-legend" },
+        t("memory.actions.legend.states"),
+        PIPELINE_STATES.map((s) => h("span", { key: s, className: "mneme-pipe-pill mneme-pipe-pill--" + s }, t("memory.actions.state." + s))),
+        h("span", { className: "mneme-pipe-gate", "aria-hidden": "true" }),
+        t("memory.actions.gate.none"),
+        h("span", { className: "mneme-pipe-gate mneme-pipe-gate--has", "aria-hidden": "true" }),
+        t("memory.actions.gate.has")
+      );
+    }
+
+    // 节点详情：情形 / 动作 / 为什么 / 反事实（有无两种形态）/ 复用 / 来源。
+    function PipelineNodeDetail(props) {
+      const { t, node } = props;
+      if (!node) return null;
+      const credit = node.credit || {};
+      const days = pipeDaysAgo(credit.lastUsedAt);
+      const rows = [
+        ["memory.actions.detail.situation", node.situation],
+        ["memory.actions.detail.action", node.action],
+        ["memory.actions.detail.why", node.why]
+      ].filter(([, v]) => v);
+      return h("div", { className: "mneme-pipe-detail", role: "region", "aria-label": node.title },
+        h("div", { className: "mneme-pipe-detailTitle" },
+          h("span", { className: "mneme-pipe-pill mneme-pipe-pill--" + (node.state || "candidate") }, t("memory.actions.state." + (node.state || "candidate"))),
+          " " + node.title
+        ),
+        rows.map(([k, v]) => h("div", { key: k },
+          h("span", { className: "mneme-pipe-dt" }, t(k) + "："), v
+        )),
+        node.counterfactual
+          ? h("div", { className: "mneme-pipe-cf" },
+              h("span", { className: "mneme-pipe-dt" }, t("memory.actions.detail.cf") + "："),
+              node.counterfactual.contrast || "")
+          : h("div", { className: "mneme-pipe-cf mneme-pipe-cf--none" }, t("memory.actions.detail.noCf")),
+        h("div", null,
+          h("span", { className: "mneme-pipe-dt" }, t("memory.actions.credit") + "："),
+          t("memory.actions.creditValue")
+            .replace("{n}", String(credit.uses != null ? credit.uses : 0))
+            .replace("{d}", days == null ? "—" : String(days))
+        ),
+        node.source && (node.source.memoryIds || []).length
+          ? h("div", null,
+              h("span", { className: "mneme-pipe-dt" }, t("memory.actions.detail.source") + "："),
+              (node.source.memoryIds || []).join("、"))
+          : null
+      );
+    }
+
+    // 窄态（浮层 / better-sidebar ~500px）：竖排列表——换布局，不是缩放。
+    // 边收成左侧轨道线 + 「依赖」芯片；details 手风琴承载详情。
+    function PipelineList(props) {
+      const { t, data, run, selectedNodeId, onSelectNode } = props;
+      const nodes = data.nodes || [];
+      const edges = data.edges || [];
+      const usedSet = {};
+      if (run && Array.isArray(run.usedNodeIds)) for (const id of run.usedNodeIds) usedSet[id] = true;
+      const onPath = {};
+      if (run && Array.isArray(run.path)) for (const id of run.path) onPath[id] = true;
+      const deps = {};
+      for (const e of edges) (deps[e.to] = deps[e.to] || []).push(e.from);
+      const { layers } = layoutDag(nodes, edges);
+      const flat = [];
+      layers.forEach((col) => col.forEach((id) => {
+        const n = nodes.find((x) => x.id === id);
+        if (n) flat.push(n);
+      }));
+      return h("div", { className: "mneme-pipe-list" },
+        flat.map((n) => h("details", {
+          key: n.id,
+          className: "mneme-pipe-item",
+          open: selectedNodeId === n.id || undefined,
+          onToggle: (ev) => { if (ev.target && ev.target.open) onSelectNode && onSelectNode(n.id); }
+        },
+          h("summary", null,
+            h("span", {
+              className: "mneme-pipe-itemDot mneme-pipe-itemDot--" + (n.state || "candidate") +
+                (onPath[n.id] ? " mneme-pipe-itemDot--onpath" : ""),
+              "aria-hidden": "true"
+            }),
+            h("span", { className: "mneme-pipe-itemName" + (n.state === "refuted" ? " mneme-pipe-itemName--refuted" : "") }, n.title),
+            h("span", { className: "mneme-pipe-itemMeta" },
+              h("span", { className: "mneme-pipe-pill mneme-pipe-pill--" + (n.state || "candidate") }, t("memory.actions.state." + (n.state || "candidate"))),
+              (deps[n.id] || []).length ? h("span", { className: "mneme-pipe-dep" }, t("memory.actions.dep") + " " + deps[n.id].join(" ")) : null,
+              n.counterfactual ? null : h("span", { className: "mneme-pipe-dep" }, t("memory.actions.gate.none"))
+            )
+          ),
+          h("div", { className: "mneme-pipe-itemBody" },
+            n.situation ? h("div", null, h("span", { className: "mneme-pipe-dt" }, t("memory.actions.detail.situation") + "："), n.situation) : null,
+            n.action ? h("div", null, h("span", { className: "mneme-pipe-dt" }, t("memory.actions.detail.action") + "："), n.action) : null,
+            n.why ? h("div", null, h("span", { className: "mneme-pipe-dt" }, t("memory.actions.detail.why") + "："), n.why) : null,
+            n.counterfactual
+              ? h("div", { className: "mneme-pipe-cf" }, h("span", { className: "mneme-pipe-dt" }, t("memory.actions.detail.cf") + "："), n.counterfactual.contrast || "")
+              : h("div", { className: "mneme-pipe-cf mneme-pipe-cf--none" }, t("memory.actions.detail.noCf"))
+          )
+        ))
+      );
+    }
+
+    // 主视图：宽态 SVG 图 ↔ 窄态列表按容器宽切换（640px 阈值，ResizeObserver）。
+    // 根挂 .mneme-pipeview 拿语义色变量层。
+    function PipelineView(props) {
+      const { t, data } = props;
+      const nodes = (data && data.nodes) || [];
+      const runs = (data && data.runs) || [];
+      const [selectedRunId, setSelectedRunId] = react.useState(runs.length ? runs[0].id : null);
+      const [selectedNodeId, setSelectedNodeId] = react.useState(null);
+      const rootRef = react.useRef(null);
+      const [narrow, setNarrow] = react.useState(false);
+      react.useEffect(() => {
+        const el = rootRef.current;
+        if (!el || typeof ResizeObserver !== "function") return;
+        const ro = new ResizeObserver((entries) => {
+          const w = entries && entries[0] ? entries[0].contentRect.width : 0;
+          setNarrow(w > 0 && w < 640);
+        });
+        ro.observe(el);
+        return () => ro.disconnect();
+      }, []);
+      const run = runs.find((r) => r.id === selectedRunId) || null;
+      const selectedNode = selectedNodeId ? nodes.find((n) => n.id === selectedNodeId) : null;
+      if (!nodes.length) {
+        return h("div", { className: "mneme-pipeview" },
+          h("div", { className: "mneme-pipe-empty" },
+            h("div", { className: "mneme-pipe-emptyTitle" }, t("memory.actions.empty.title")),
+            t("memory.actions.empty.body")
+          ),
+          h("div", { className: "mneme-pipe-notice" }, t("memory.actions.notice"))
+        );
+      }
+      return h("div", { className: "mneme-pipeview", ref: rootRef, style: { display: "flex", flexDirection: "column", flex: "1", minHeight: "0" } },
+        h(PipelineRunChips, { t, runs, selectedRunId, onSelectRun: setSelectedRunId }),
+        narrow
+          ? h(PipelineList, { t, data, run, selectedNodeId, onSelectNode: setSelectedNodeId })
+          : h("div", { className: "mneme-pipe-graph" },
+              h(PipelineGraphSvg, { t, data, run, selectedNodeId, onSelectNode: setSelectedNodeId })
+            ),
+        h(PipelineLegend, { t }),
+        selectedNode ? h(PipelineNodeDetail, { t, node: selectedNode }) : null,
+        h("div", { className: "mneme-pipe-notice" }, t("memory.actions.notice"))
+      );
+    }
+
+    // 流水线标记：两个步骤块 + 依赖连线 + 状态点；开合状态用右上角
+    // 实心/空心点区分（会话头图标要反映浮层开合）。
+    function PipelineMark(props) {
+      const { size = 16, open } = props || {};
+      return h("svg", { width: size, height: size, viewBox: "0 0 16 16", "aria-hidden": "true", focusable: "false" },
+        h("path", { d: "M2.5 3h4.2v4.2H2.5z M9.3 8.8h4.2V13H9.3z", fill: "none", stroke: "currentColor", "stroke-width": 1.4 }),
+        h("path", { d: "M6.7 5.1h4v3.7", fill: "none", stroke: "currentColor", "stroke-width": 1.2 }),
+        h("circle", {
+          cx: 13.2, cy: 2.8, r: 1.9,
+          fill: open ? "currentColor" : "none",
+          stroke: "currentColor", "stroke-width": 1.2
+        })
+      );
+    }
+
+    // 会话头入口：悬停 150ms 开 / 移开 120ms 关 / 点击固定 / Escape 关 /
+    // 点击外部关（交互规格与 Agent Teams 浮层一致）。浮层锚 trigger、
+    // portal 到 body。老宿主没有右栏服务时补一个「完整视图」按钮退回
+    // 居中 sheet（形态沿用记忆库 overlay 的背板 + 居中面板）。
+    function PipelineHeaderEntry(props) {
+      const { t, hasPane, openPane } = props;
+      const [open, setOpen] = useState(false);
+      const [sheetOpen, setSheetOpen] = useState(false);
+      const openRef = useRef(false);
+      const pinnedRef = useRef(false);
+      const hoverTimer = useRef(null);
+      const rootRef = useRef(null);
+      const anchorRef = useRef(null);
+      const panelRef = useRef(null);
+      const labelRef = useRef(null);
+      const sheetRef = useRef(null);
+
+      const changeOpen = (next) => {
+        const was = openRef.current;
+        const wasPinned = pinnedRef.current;
+        openRef.current = next;
+        setOpen(next);
+        if (!next) pinnedRef.current = false;
+        // announce 只挂「用户明确动作」的开合（点击固定 / Esc / 点外关）；
+        // 悬停开合是瞬态，播报反而刷屏——与 §5 无障碍约束对齐。
+        if (next && !was && wasPinned) announce(t("memory.actions.announce.open"));
+        if (!next && was && wasPinned) announce(t("memory.actions.announce.close"));
+      };
+      const cancelHoverChange = () => {
+        if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = null; }
+      };
+      const scheduleHoverOpen = () => {
+        if (pinnedRef.current || openRef.current) return;
+        // 窄容器下文字标签被 @container 隐藏（图标态）→ 不弹浮层，点击才开。
+        if (labelRef.current && labelRef.current.offsetWidth === 0) return;
+        cancelHoverChange();
+        hoverTimer.current = setTimeout(() => {
+          hoverTimer.current = null;
+          openRef.current = true;
+          setOpen(true);
+        }, 150);
+      };
+      const scheduleHoverClose = () => {
+        if (pinnedRef.current) return;
+        cancelHoverChange();
+        hoverTimer.current = setTimeout(() => {
+          hoverTimer.current = null;
+          openRef.current = false;
+          setOpen(false);
+        }, 120);
+      };
+
+      // 钩子顺序稳定：useAnchoredPosition 的存在性是模块常量条件，两次
+      // 判断在所有渲染中走同一分支，不违反 hook 规则。
+      const positioned = primitives && typeof primitives.useAnchoredPosition === "function"
+        ? primitives.useAnchoredPosition({ open, anchorRef, panelRef, gap: 5, margin: 16 })
+        : null;
+      const panelStyle = positioned
+        ? { ...positioned }
+        : { position: "fixed", left: 0, top: 0, visibility: "hidden" };
+
+      if (primitives && typeof primitives.useDismissOnOutsidePointer === "function") {
+        primitives.useDismissOnOutsidePointer(rootRef, open, changeOpen, panelRef);
+      }
+      useEffect(() => {
+        if (primitives && typeof primitives.useDismissOnOutsidePointer === "function") return;
+        if (!open) return;
+        const onDown = (ev) => {
+          const panel = panelRef.current;
+          const root = rootRef.current;
+          if (panel && panel.contains(ev.target)) return;
+          if (root && root.contains(ev.target)) return;
+          changeOpen(false);
+        };
+        document.addEventListener("pointerdown", onDown, true);
+        return () => document.removeEventListener("pointerdown", onDown, true);
+      }, [open]);
+      useEffect(() => () => cancelHoverChange(), []);
+
+      // 居中 sheet 是「宿主没有右栏服务」时的唯一完整入口，键盘用户必须能进能出。
+      // 它 portal 到 body，焦点默认留在原 trigger 上，而挂在 sheet 元素上的
+      // onKeyDown 既因没有 tabIndex 不被聚焦、也收不到外部键盘事件——Escape 于是
+      // 不生效，只剩 Tab 摸到关闭按钮一条路。做法与 MemoryOverlay 一致：打开时把
+      // 焦点移进 sheet，Escape 在 window 上收，关掉再把焦点还给 trigger。
+      useEffect(() => {
+        if (!sheetOpen) return undefined;
+        if (sheetRef.current) sheetRef.current.focus();
+        const onKey = (ev) => {
+          if (ev.key !== "Escape") return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          setSheetOpen(false);
+          if (anchorRef.current) anchorRef.current.focus();
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+      }, [sheetOpen]);
+
+      const closeAll = () => {
+        changeOpen(false);
+        if (anchorRef.current) anchorRef.current.focus();
+      };
+      const onTriggerClick = () => {
+        if (!openRef.current) {
+          pinnedRef.current = true;
+          changeOpen(true);
+          setTimeout(() => { if (panelRef.current) panelRef.current.focus(); }, 0);
+        } else if (pinnedRef.current) {
+          changeOpen(false);
+        } else {
+          pinnedRef.current = true;
+          if (panelRef.current) panelRef.current.focus();
+        }
+      };
+      const candidates = PIPELINE_MOCK.nodes.filter((n) => n.state === "candidate").length;
+
+      const panel = (open && reactDom && typeof document !== "undefined")
+        ? reactDom.createPortal(
+            h("div", {
+              ref: panelRef,
+              // 注意：client.test.js 锁死全文件不得出现 role:"dialog"
+              // （v0.7.15 清退 dialog 面的纪律），浮层只带 aria-label。
+              "aria-label": t("memory.actions.title"),
+              tabIndex: -1,
+              className: "mneme-pipe mneme-pipe-panel",
+              style: panelStyle,
+              onMouseEnter: cancelHoverChange,
+              onMouseLeave: scheduleHoverClose,
+              onKeyDown: (ev) => { if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); closeAll(); } }
+            },
+              h("div", { className: "mneme-pipe-head" },
+                h("span", { className: "mneme-pipe-title" }, t("memory.actions.title")),
+                h("span", { className: "mneme-pipe-beta" }, t("memory.actions.beta")),
+                h("span", { className: "mneme-pipe-scope" }, PIPELINE_MOCK.pipeline.scopeLabel),
+                h("button", {
+                  type: "button",
+                  className: "mneme-pipe-run",
+                  // 有右栏服务：openTab(kind) 打开原生右栏 tab（页面类型无
+                  // patterns，按 kind 打开）并收起浮层；打不开或老宿主
+                  // （无 sidebarRight）退回本插件的居中 sheet——形态沿用
+                  // 记忆库 overlay 的背板 + 居中面板。
+                  onClick: () => {
+                    if (openPane && openPane()) { changeOpen(false); return; }
+                    changeOpen(false);
+                    setSheetOpen(true);
+                  }
+                }, hasPane && openPane ? t("memory.actions.openPane") : t("memory.actions.viewFull"))
+              ),
+              h("div", { className: "mneme-pipe-notice" }, t("memory.actions.notice")),
+              h(PipelineView, { t, data: PIPELINE_MOCK })
+            ),
+            document.body
+          )
+        : null;
+
+      const sheet = (sheetOpen && reactDom && typeof document !== "undefined")
+        ? reactDom.createPortal(
+            h("div", {
+              className: "mneme-backdrop",
+              onClick: (ev) => { if (ev.target === ev.currentTarget) setSheetOpen(false); }
+            },
+              h("div", {
+                ref: sheetRef,
+                tabIndex: -1,
+                className: "mneme-pipe mneme-pipe-sheet",
+                "aria-label": t("memory.actions.title"),
+                onKeyDown: (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); setSheetOpen(false); } }
+              },
+                h("div", { className: "mneme-pipe-sheetbar" },
+                  h("span", { className: "mneme-pipe-title" }, t("memory.actions.title")),
+                  h("span", { className: "mneme-pipe-beta" }, t("memory.actions.beta")),
+                  h("span", { className: "mneme-pipe-scope" }, PIPELINE_MOCK.pipeline.scopeLabel),
+                  h("button", { type: "button", className: "mneme-pipe-run", onClick: () => setSheetOpen(false) }, t("memory.actions.close"))
+                ),
+                h("div", { className: "mneme-pipe-sheetbody" }, h(PipelineView, { t, data: PIPELINE_MOCK }))
+              )
+            ),
+            document.body
+          )
+        : null;
+
+      return h("div", {
+        className: "mneme-pipe-root",
+        ref: rootRef,
+        onMouseEnter: scheduleHoverOpen,
+        onMouseLeave: scheduleHoverClose
+      },
+        h("button", {
+          type: "button",
+          ref: anchorRef,
+          className: "mneme-pipe-trigger",
+          "aria-haspopup": "true",
+          "aria-expanded": open ? "true" : "false",
+          title: t("memory.actions.open"),
+          onClick: onTriggerClick,
+          onKeyDown: (ev) => { if (ev.key === "Escape" && open) { ev.preventDefault(); ev.stopPropagation(); closeAll(); } }
+        },
+          h(PipelineMark, { open }),
+          h("span", { ref: labelRef, className: "mneme-pipe-triggerLabel" }, t("memory.actions.title")),
+          candidates > 0 ? h("span", {
+            className: "mneme-pipe-dot",
+            title: t("memory.actions.candidates").replace("{n}", String(candidates))
+          }, String(candidates)) : null
+        ),
+        panel,
+        sheet
+      );
+    }
+
+    // 对话行结算卡（turnTail）：死的落款——「这次跑哪条被用上了」。
+    // 与会话头浮层共用同一份假数据；卡上勾选 = usedNodeIds（真正被复用），
+    // 其余 path 节点只是被走过。
+    function TurnRunCard(props) {
+      const { t } = props;
+      const data = PIPELINE_MOCK;
+      const run = (data.runs || []).find((r) => r.id === "r1") || (data.runs || [])[0];
+      if (!run) return null;
+      const used = run.usedNodeIds || [];
+      const refutedUsed = used.some((id) => {
+        const n = (data.nodes || []).find((x) => x.id === id);
+        return n && n.state === "refuted";
+      });
+      return h("div", { className: "mneme-pipe mneme-pipe-settle" },
+        h("div", { className: "mneme-pipe-settleHead" },
+          h("span", { className: "mneme-pipe-settleTitle" },
+            h(PipelineMark, { size: 13 }),
+            t("memory.actions.settle.title")
+          ),
+          h("span", { className: "mneme-pipe-beta" }, t("memory.actions.beta")),
+          h("span", { className: "mneme-pipe-scope" },
+            t("memory.actions.settle.line").replace("{title}", data.pipeline.title) + " · " + pipeFmtWhen(run.at))
+        ),
+        h("div", { className: "mneme-pipe-steps" },
+          (run.path || []).map((id, i) => {
+            const n = (data.nodes || []).find((x) => x.id === id);
+            if (!n) return null;
+            const isUsed = used.includes(id);
+            return h(react.Fragment, { key: id + ":" + i },
+              i > 0 ? h("span", { className: "mneme-pipe-stepArrow", "aria-hidden": "true" }, "→") : null,
+              h("span", {
+                className: "mneme-pipe-stepChip" + (isUsed ? " mneme-pipe-stepChip--used" : ""),
+                title: n.title
+              },
+                (isUsed ? "✓ " : "") + pipeClip(n.title, 12)
+              )
+            );
+          })
+        ),
+        h("div", { className: "mneme-pipe-scope" },
+          t("memory.actions.settle.used").replace("{n}", String(used.length))
+        ),
+        refutedUsed ? h("div", { className: "mneme-pipe-scope" }, t("memory.actions.settle.refutedWarn")) : null
+      );
+    }
+
+    // 座位注册（仅在旗标开启后被调用）：会话头入口、对话行结算卡、
+    // 右栏类型与正文。⚠️ 服务名 sidebarRight 与注册服务名 sidebarRightTabs
+    // 是两个不同的名字——类型/引导挂 sidebarRightTabs，打开走
+    // ctx.get("sidebarRight").openTab。无右栏服务时不注册 pane（浮层 +
+    // 居中 sheet 退化已在 PipelineHeaderEntry 内）。
+    function registerPipelineSeats(ctx, t) {
+      let hasPane = false;
+      try {
+        const sb = typeof ctx.get === "function" ? ctx.get("sidebarRight") : null;
+        hasPane = !!(sb && typeof sb.openTab === "function");
+      } catch { hasPane = false; }
+      // 右栏打开：页面类型（无 patterns）按 kind 打开——openTab(kind)。
+      // 服务半可用 / kind 未注册抛错时返回 false，调用方退化到居中 sheet。
+      const openPane = () => {
+        try {
+          const sb = typeof ctx.get === "function" ? ctx.get("sidebarRight") : null;
+          if (sb && typeof sb.openTab === "function") {
+            sb.openTab(PIPELINE_ACTIONS_TAB_KIND);
+            return true;
+          }
+        } catch (err) {
+          console.warn("[dsh-mneme] sidebarRight.openTab failed, falling back to sheet:", err);
+        }
+        return false;
+      };
+
+      // 会话头入口：.actions 座位（.corner 被原生侧栏展开键占用，别用）。
+      ctx.slots.inject("conversation.session.header.actions", () => {
+        return ctx.slots.register({
+          name: "conversation.session.header.actions",
+          id: "dsh-mneme:pipeline",
+          order: 30
+        }, (props) => h(PipelineHeaderEntry, { t, hasPane, openPane }));
+      });
+
+      // 对话行结算卡：回答「这次跑哪条被用上了」。
+      ctx.slots.inject("conversation.chat.turnTail", () => {
+        return ctx.slots.register({
+          name: "conversation.chat.turnTail",
+          id: "dsh-mneme:pipeline:settle",
+          kind: "list",
+          scope: "session"
+        }, (props) => h(TurnRunCard, { t }));
+      });
+
+      try {
+        const tabs = typeof ctx.get === "function" ? ctx.get("sidebarRightTabs") : null;
+        if (tabs && typeof tabs.register === "function") {
+          tabs.register({
+            id: PIPELINE_ACTIONS_TAB_ID,
+            kind: PIPELINE_ACTIONS_TAB_KIND,
+            title: () => t("memory.actions.title"),
+            guide: [{
+              id: "dsh-mneme:pipeline:guide",
+              order: 10,
+              title: () => t("memory.actions.title"),
+              description: () => t("memory.actions.notice"),
+              icon: (size) => h(PipelineMark, { size, open: false })
+            }]
+          });
+          // 正文/标题都是按键座位：key = 类型 id，宿主按当前 tab 取。
+          ctx.slots.inject("sidebar.right.pane.tab", () => {
+            return ctx.slots.register({
+              name: "sidebar.right.pane.tab",
+              key: PIPELINE_ACTIONS_TAB_ID
+            }, () => h("div", {
+              className: "mneme-pipe",
+              style: { height: "100%", display: "flex", flexDirection: "column", minHeight: "0" }
+            }, h(PipelineView, { t, data: PIPELINE_MOCK })));
+          });
+          ctx.slots.inject("sidebar.right.pane.tab.title", () => {
+            return ctx.slots.register({
+              name: "sidebar.right.pane.tab.title",
+              key: PIPELINE_ACTIONS_TAB_ID
+            }, () => t("memory.actions.title"));
+          });
+        }
+      } catch (err) {
+        console.warn("[dsh-mneme] action pipeline sidebar registration failed:", err);
+      }
+
+      if (!hasPane) {
+        console.info("[dsh-mneme] action pipeline: no sidebarRight service, pane tab skipped (floating panel + sheet fallback active)");
+      }
+    }
+
     function apply(ctx) {
       const t = ctx.locale.bind(NS);
       ctx.effect(() => ctx.locale.register(NS, dictionaries), "dsh-mneme: dictionaries");
@@ -6349,6 +7339,26 @@ window.__ModuleLoader__.load({
         }
         return () => { dead = true; };
       }, "dsh-mneme: better-sidebar mount");
+
+      // --- v0.9.0 M.O.（beta）：旗标门控 ---
+      // actionPipelineEnabled 关闭（默认）时一个座位都不注册——座位闸门
+      // 在注册层而不是样式层（不是 display:none）。features 拉取失败时
+      // 保持关闭（fail-closed），不猜。
+      ctx.effect(() => {
+        let dead = false;
+        apiFetch("/api/dsh-mneme/features")
+          .then((res) => { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
+          .then((j) => {
+            if (dead) return;
+            const eff = (j && j.effective) || {};
+            if (!eff.actionPipelineEnabled) return;
+            registerPipelineSeats(ctx, t);
+          })
+          .catch((err) => {
+            console.warn("[dsh-mneme] features fetch failed, action pipeline stays off:", err);
+          });
+        return () => { dead = true; };
+      }, "dsh-mneme: action-pipeline gate");
     }
 
     exports.apply = apply;
