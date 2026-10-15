@@ -140,7 +140,13 @@ const FEATURE_FLAG_BOOLEANS = [
   // 落盘（distill_records）并给记忆挂窗口链接（memory_provenance）；默认关。
   // 点号键平铺存、合并时展开回 distillRecords 对象（同 llmAudit.enabled）。
   // retentionDays 是 int，走下面的 INT_RANGES 表，不进开关白名单。
-  "distillRecords.enabled"
+  "distillRecords.enabled",
+  // v0.9.0：M.O.（Modus Operandi · 手法，beta）客户端视图开关。客户端读 /features
+  // 的 effective
+  // 决定是否注册座位（会话头图标 / 浮层 / 右栏 / 对话行卡片），服务端只负责把
+  // 这个键稳定暴露出来——键若不在 effective 里，客户端静默少键、一个座位都不注册。
+  // 默认关（beta、opt-in）；顶层扁平键，因此不需要 NESTED_FLAG_PATHS 条目。
+  "actionPipelineEnabled"
 ];
 // 整数开关的闭区间，与 config.js 里 z.natural().min().max() 对齐。
 const FEATURE_FLAG_INT_RANGES = {

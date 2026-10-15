@@ -48,9 +48,17 @@ export function createScopeResolver({ ctx, config, logger } = {}) {
       header = null;
     }
 
+    // header 字段的读取要各自护住：session.header 本身取得回来，不代表它的字段
+    // 取得回来——宿主可以给出会抛错的 accessor（sessionOf / sessionKeyOf 就是为
+    // 同一类宿主写的）。漏在这里的异常会穿出解析器，把调用方的整段写入拖挂：
+    // 蒸馏路径上是一个窗口的记忆与游标一起丢，工具路径上是一次 memory_save 直接失败。
     let agentScope = null;
-    const preset = header?.agentPreset;
-    if (typeof preset === "string" && preset.trim()) agentScope = preset.trim();
+    try {
+      const preset = header?.agentPreset;
+      if (typeof preset === "string" && preset.trim()) agentScope = preset.trim();
+    } catch (e) {
+      warnOnce(`[dsh-mneme] session header agentPreset lookup failed: ${String(e)}`);
+    }
 
     // workspace：registry 反查优先（成员资格 = id 命中 + header canonical cwd
     // 校验过，path 已 realpath 归一），失败回退 header.cwd，再失败留 NULL。
@@ -70,8 +78,12 @@ export function createScopeResolver({ ctx, config, logger } = {}) {
       );
     }
     if (!workspaceScope) {
-      const cwd = header?.cwd;
-      if (typeof cwd === "string" && cwd.trim()) workspaceScope = cwd.trim();
+      try {
+        const cwd = header?.cwd;
+        if (typeof cwd === "string" && cwd.trim()) workspaceScope = cwd.trim();
+      } catch (e) {
+        warnOnce(`[dsh-mneme] session header cwd lookup failed: ${String(e)}`);
+      }
     }
 
     return { agent_scope: agentScope, workspace_scope: workspaceScope };
