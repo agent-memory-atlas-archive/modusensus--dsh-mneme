@@ -23,7 +23,7 @@
  */
 import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, join, basename } from "node:path";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { validatePipeline, RISK_LEVELS } from "./pipeline.js";
 
@@ -179,13 +179,20 @@ export function decideDetour({ risk = "R0", actions = [], crossesGate = false } 
 
 /**
  * 项目根 → 稳定的短键。**不把绝对路径写进文件名**（那里面是本机用户名），
- * 但又要同一个项目每次算到同一个键，所以取「basename + 路径哈希前 8 位」。
+ * 但又要同一个项目每次算到同一个键，所以取「目录名 + 路径哈希前 8 位」。
  */
 export function projectKey(projectRoot) {
   const root = String(projectRoot || "").trim();
   if (root === "") return null;
   const hash = createHash("sha256").update(root).digest("hex").slice(0, 8);
-  const name = (basename(root) || "project").replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 32);
+  // 两种分隔符都要认，**不能借 path.basename()**：它跟着运行平台走，posix 上
+  // `\` 不是分隔符，一条 Windows 路径会被整条当成文件名——清洗后用户名的残片
+  // 就进了目录名（Linux CI 实抓：C--Users-someone-Desktop-dsh-mne）。
+  // Windows 腿对这条**结构性看不见**（win32.basename 两种分隔符都认），所以回归锁
+  // 只在 ubuntu 矩阵腿上有杀伤力，别因为它在 Windows 上绿就以为它没用。
+  const name = (root.split(/[\\/]/).filter((s) => s !== "").pop() || "project")
+    .replace(/[^A-Za-z0-9._-]/g, "-")
+    .slice(0, 32);
   return `${name}-${hash}`;
 }
 

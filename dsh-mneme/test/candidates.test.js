@@ -154,6 +154,27 @@ test("项目键稳定、不含绝对路径（文件名里不能有本机用户�
   assert.equal(projectKey(null), null);
 });
 
+test("项目键对两种分隔符一视同仁：Windows 路径不得退化成整条路径", () => {
+  // 回归锁，指向一个**只在 posix 上现形**的缺陷：原实现借 path.basename() 取目录名，
+  // 它跟着运行平台走——Linux 上 `C:\Users\someone\Desktop\dsh-mneme` 整条被当成
+  // 文件名，清洗后 C--Users-someone-Desktop-dsh-mne，用户名的残片进了目录名。
+  // 这正是 PR #439 里 ubuntu 四腿全红、windows 两腿全绿的那条。
+  //
+  // **这条锁在 Windows 上是绿的，且永远抓不住回退**：win32.basename 两种分隔符都认，
+  // 旧实现在本机结果就是对的。它的杀伤力只在 ubuntu 矩阵腿上——别删了它以为没事。
+  const nameOf = (key) => key.replace(/-[0-9a-f]{8}$/, "");
+  const bs = projectKey("C:\\Users\\someone\\Desktop\\dsh-mneme");
+  const fwd = projectKey("C:/Users/someone/Desktop/dsh-mneme");
+  const trail = projectKey("C:\\Users\\someone\\Desktop\\dsh-mneme\\");
+  assert.equal(nameOf(bs), "dsh-mneme", "反斜杠路径要取到目录名");
+  assert.equal(nameOf(fwd), "dsh-mneme", "正斜杠路径要取到目录名");
+  assert.equal(nameOf(trail), "dsh-mneme", "尾随分隔符不改变结果");
+  assert.equal(bs.includes("someone"), false, "用户名不得进目录名");
+  assert.equal(bs.includes("-Users-"), false, "整条路径不得被清洗成目录名");
+  assert.match(bs, /^[A-Za-z0-9._-]+$/, "目录名只许出现安全字符");
+});
+
+
 test("候选的家在 memoryDir 下、按项目分桶；拿不到项目根就没有家", () => {
   const dir = candidateDir({ memoryDir: "~/.dsh/memory", projectRoot: "C:\\x\\y" });
   assert.ok(dir && dir.includes("candidates"), "落在 candidates/ 下");
