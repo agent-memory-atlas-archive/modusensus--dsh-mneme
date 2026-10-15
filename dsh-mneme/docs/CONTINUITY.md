@@ -31,9 +31,24 @@ Next Step / Critical Context 等），**系统提示段里的东西不进这次�
 
 ## 3. 触发
 
-**不自定阈值**，就是订阅宿主真的压缩：`compaction/start` / `compaction/summary` /
-`compaction/end`（都在宿主的事件白名单里）。理由：「压缩边缘」由宿主定义，我们再校准
-一份阈值参数只会与之漂移，还多一份没人维护的旋钮。
+**不自定阈值**，就是订阅宿主真的压缩（都在宿主的事件白名单里）。理由：「压缩边缘」由宿主
+定义，我们再校准一份阈值参数只会与之漂移，还多一份没人维护的旋钮。
+
+**但「发过压缩事件」不等于「这段历史真的被折叠了」**：宿主的压缩插件在**每一步**都会试一次
+（`agent/pre-step` 里的 `compactIfNeeded`），而代理层（如 billion-context）会拒掉原生压缩。
+一次失败的尝试什么都没折叠，不需要抢救 —— 按「试过就救」记账，触发器就退化成「每步一次」。
+所以只认**内容真的被移除过**的三种事件（判定在 `src/continuity.js` 的 `isCompactionEdge`）：
+
+| 事件 | 算不算边缘 | 为什么 |
+|---|---|---|
+| `compaction/summary` | ✅ | 宿主压缩成功才落（`dsh-compaction-basic` 的 `commitCompactionBody`） |
+| `compaction/prune` | ✅ | 宿主把超预算的旧 tool/result 折叠出表面 —— 「表面真的变短了」最直接的证据 |
+| `compaction/end` **不带 error** | ✅ | 成功路的收尾 |
+| `compaction/end` **带 error** | ❌ | 成败两条路都发这个事件，失败路额外带 `error`；整笔事务失败 |
+| `compaction/start` | ❌ | 只是开锁标记（「有人试过」） |
+
+本机实测（2026-10-14，两个长会话、12,000+ 事件，原生压缩被 100% 拒绝）：按 `start|summary|end`
+记账置位 1,287 / 2,895 次，改成「真落地」后降到 39 / 161 次。
 
 DSH 没有 in-memory 消息改写钩子，所以本机制一律是「注入 + 序号引用寻址」，**不改写
 历史消息本体**。

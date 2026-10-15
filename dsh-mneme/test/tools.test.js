@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTools } from "../src/tools.js";
 import { TRANSFORMERS_ENTRY, defaultModelCacheDir, payloadDir, payloadId } from "../src/runtime/layout.js";
+import { hostModulesDir } from "../src/runtime/provision.js";
 
 function setup(embedder, config = {}) {
   const store = createStore(":memory:");
@@ -370,7 +371,21 @@ test("memory_runtime：status 只读且带代价说明；两条来源都不可�
   const provision = await tool.execute({ action: "provision" });
   assert.deepEqual(validateJsonSchemaValue(tool.output.schema, provision), []);
   assert.equal(provision.status, "failed");
-  assert.match(provision.reason, /收编失败|下载失败/);
+  // #323：车道（junction node_modules）里这条用例报过一次红，红的是下面那句「半份 payload」，
+  // 但变的是**环境**不是产品。所以把这条用例赖以成立的前提显式钉在这里：
+  // hostModulesDir 是 import.meta.url 的 4 级上溯，只有装入布局
+  // （<profile>/node_modules/@modusensus/dsh-mneme/src/tools.js → <profile>/node_modules）
+  // 才指向真的 node_modules；仓库根与车道布局下它落到仓库父目录 / <repo>\.worktrees，
+  // 于是收编在**计划阶段**就因「入口包不存在」零写入地失败——根本没走到物化分支，残留无从产生。
+  // （「物化到一半要清干净」由 runtime-adopt.test.js / runtime-download.test.js 的注入式用例负责，不靠这里。）
+  // 若有人改了目录层级、让源目录变成真的 node_modules，这一条会先红并把推导出的路径打出来，
+  // 而不是让「半份 payload」背一个看不懂的锅。
+  const source = hostModulesDir(new URL("../src/tools.js", import.meta.url).href);
+  assert.match(
+    provision.reason,
+    /收编失败：入口包不存在/,
+    `本用例的前提是「${source} 里没有可收编的 payload」；源目录换了形状，收编就会真的走物化分支（issue #323）`
+  );
   assert.equal(existsSync(runtimeDir) ? readdirSync(runtimeDir).length : 0, 0, "失败后不该留下半份 payload");
 });
 
