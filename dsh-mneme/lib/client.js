@@ -422,31 +422,48 @@ window.__ModuleLoader__.load({
         "memory.tab.constraint": "工程约束",
         "memory.tab.document": "文档",
         "memory.features.title": "功能开关",
-        "memory.features.desc": "控制插件在后台做哪些事。改动即时保存，重启 DSH 后生效。",
-        "memory.features.group.core": "基础",
-        "memory.features.group.enhance": "检索与增强",
-        "memory.features.group.dream": "巩固与睡眠",
-        "memory.features.group.scope": "多会话隔离",
+        "memory.features.desc": "控制插件在后台做哪些事。先看「常用」里的总开关就够了，其余项收在「全部设置」里。改动即时保存，重启 DSH 后生效。",
+        // Issue #427：分组原先按「实现」分（基础/检索与增强/巩固与睡眠/多会话隔离
+        // 是架构图的分区），而人真正会问的是四个问题：它会记住什么、它什么时候
+        // 写进去、它怎么用回来、不同会话会不会串。组名改成人话，术语留在 hint。
+        // group.basic 是首屏层：新用户不读文档就该答得出「会不会自动记」；
+        // 「别的会话能不能看到」由同在首屏的 scope 组回答。
+        "memory.features.group.basic": "常用（先动这几个）",
+        "memory.features.group.core": "它会记住什么",
+        "memory.features.group.enhance": "它什么时候写进去",
+        "memory.features.group.dream": "它怎么用回来",
+        "memory.features.group.scope": "不同会话之间",
         "memory.features.group.advanced": "高级",
-        "memory.features.advancedToggle": "高级（注入策略 · 反思 · 实验项）",
+        // 「全部设置」= 第一层折叠（issue #427 建议 1），常显只留 basic + scope
+        // 两组；「高级」是它内部的第二层（进阶 7 项）。
+        "memory.features.allToggle": "全部设置",
+        "memory.features.advancedToggle": "更少用的 7 个开关",
         "memory.features.restartHint": "重启 DSH 后生效",
         "memory.features.loadFailed": "加载失败",
         "memory.features.saveFailed": "保存失败",
-        "memory.features.autoInject": "自动注入",
-        "memory.features.autoInject.hint": "每轮对话自动携带相关记忆",
-        "memory.features.injectGuidanceEnabled": "能力说明",
-        "memory.features.injectGuidanceEnabled.hint": "教 Agent 怎么用记忆：什么时候该查、什么时候该写、拿不准就不动",
-        "memory.features.continuityRescueEnabled": "压缩边缘抢救",
-        "memory.features.continuityRescueEnabled.hint": "长对话被压缩前，先存一份「正在做什么 / 下一步 / 未决问题」的快照，让关键上下文活过压缩",
-        "memory.features.parentOff": "父开关关闭时不生效",
-        "memory.features.autoSummarize": "自动总结",
-        "memory.features.autoSummarize.hint": "对话结束自动提炼记忆条目",
-        "memory.features.hotMemoryEnabled": "热记忆",
-        "memory.features.hotMemoryEnabled.hint": "最近几轮对话原文随注入携带，不写入长期记忆",
-        "memory.features.injectTimePrefix": "对话开始注入当前时间",
-        "memory.features.injectTimePrefix.hint": "每次新会话的首轮注入一次日期与星期（默认关）",
-        "memory.features.entityExtractionEnabled": "实体抽取",
-        "memory.features.entityExtractionEnabled.hint": "从记忆中提取人物/项目/概念，图谱随之生长",
+        // Issue #427 建议 2：条目名给「打开会怎样、关掉会怎样」，术语放末尾。
+        // 括号里的英文是设置项键名，末尾的「（BM25）」才是术语。
+        "memory.features.autoInject": "自动带上旧记忆（每轮都用）",
+        "memory.features.autoInject.hint": "开：每轮自动挑相关记忆塞给 Agent，它不用问就能想起；关：Agent 得自己调用查记忆的工具",
+        "memory.features.injectGuidanceEnabled": "顺带教 Agent 怎么用记忆",
+        "memory.features.injectGuidanceEnabled.hint": "开：在记忆工具的说明里写清什么时候该查、什么时候该写；关：只给工具不给用法",
+        "memory.features.continuityRescueEnabled": "长对话被压缩前先存一份快照",
+        "memory.features.continuityRescueEnabled.hint": "开：压缩前先存「正在做什么 / 下一步 / 未决问题」，关键上下文活过压缩；关：压缩可能把它压掉",
+        "memory.features.parentOff": "上一项关闭时不生效",
+        // 「默认 / 已改」徽标：overrides 里没有这个键 = 值来自 config schema 的
+        // 默认值，一条命令就能退回。徽标让这件事不必去读配置文件才成立。
+        "memory.features.tagDefault": "默认",
+        "memory.features.tagDefault.hint": "这一项用的是出厂默认值，没有被你改过",
+        "memory.features.tagChanged": "已改",
+        "memory.features.tagChanged.hint": "你改过这一项，它不再用默认值",
+        "memory.features.autoSummarize": "自动把对话记下来（自动注入之外）",
+        "memory.features.autoSummarize.hint": "开：对话结束自动提炼成长期记忆条目（autoSummarize）；关：只有你手动存或 Agent 主动存才有记忆",
+        "memory.features.hotMemoryEnabled": "顺带带上最近几轮原话",
+        "memory.features.hotMemoryEnabled.hint": "开：注入时把最近几轮的对话原文一并带上，Agent 眼前就是刚才聊的内容；关：只带提炼后的长期记忆。这几轮原文不会写进长期记忆（热记忆，默认开）",
+        "memory.features.injectTimePrefix": "会话开头告诉它今天几号",
+        "memory.features.injectTimePrefix.hint": "开：每个新会话的第一轮注入一次日期与星期，「今天」「上周」这类说法更稳；关：注入里不带时间（时间前缀，默认关）",
+        "memory.features.entityExtractionEnabled": "顺手抽出人名、项目和概念",
+        "memory.features.entityExtractionEnabled.hint": "开：每条新记忆里抽出人物/项目/概念，关系图谱自己长起来，也能按「谁」找记忆；关：只存整条记忆，不建关系（实体抽取，默认关）",
         "memory.features.entityExtractionProvider": "实体抽取 Provider",
         "memory.features.entityExtractionModel": "实体抽取模型",
         "memory.features.entityExtractionReasoning": "实体抽取思考强度",
@@ -462,14 +479,14 @@ window.__ModuleLoader__.load({
         "memory.features.summarizeReasoningEffort.high": "高",
         "memory.features.summarizeReasoningEffort.hint": "思考型模型建议选「低」或「关闭思考」，避免推理占满输出导致总结失败",
         "memory.features.entityExtractionModelHint": "Provider / 模型留空 = 跟随主对话模型；思考强度选「跟随默认」= 服务商默认",
-        "memory.features.codingRetrospect": "编码记忆蒸馏",
-        "memory.features.codingRetrospect.hint": "回顾写代码的完整过程（含报错与工具调用），沉淀踩坑、约束和被否决的方案",
-        "memory.features.rerankEnabled": "结果重排",
-        "memory.features.rerankEnabled.hint": "本地重排模型对召回结果精排，更慢更准",
-        "memory.features.heatEnabled": "热度衰减",
-        "memory.features.heatEnabled.hint": "像遗忘曲线一样给记忆降温：越久没用到排得越靠后，不占注入名额",
-        "memory.features.documentMemoryEnabled": "document 型记忆",
-        "memory.features.documentMemoryEnabled.hint": "Agent 写的长文档只在记忆里放一张「摘要卡」：正文仍由 Agent 保管、按需读取，注入时只带摘要，不占上下文",
+        "memory.features.codingRetrospect": "写代码的过程也记下来",
+        "memory.features.codingRetrospect.hint": "开：整段编码过程（含报错与工具调用）一并回顾，沉淀踩坑、约束和被否决的方案；关：只提炼对话内容（编码记忆蒸馏，默认关）",
+        "memory.features.rerankEnabled": "搜出来的结果再精排一遍",
+        "memory.features.rerankEnabled.hint": "开：本地重排模型给召回结果重新打分，更准但更慢；关：直接用检索时的排序（结果重排，默认关）",
+        "memory.features.heatEnabled": "越久没用越靠后（像会忘）",
+        "memory.features.heatEnabled.hint": "开：像遗忘曲线一样给记忆降温，长期没用过的往后排、不占注入名额；关：一直按相关度排（热度衰减，默认关）",
+        "memory.features.documentMemoryEnabled": "长文档只存一张摘要卡",
+        "memory.features.documentMemoryEnabled.hint": "开：Agent 写的长文档在记忆里只放「摘要卡」，正文仍由 Agent 保管、按需读取，注入只带摘要；关：整篇都往上下文里带（document 型记忆，默认关）",
         // --- v0.9.0 M.O.（Modus Operandi · 手法，beta）---
         // M.O. = Modus Operandi，拉丁语「一个人一贯的做事方式」；也是 org 词根
         // modus（modusensus）。界面主显示 M.O.，设置项 hint 第一句给全名。
@@ -512,22 +529,25 @@ window.__ModuleLoader__.load({
         "memory.actions.settle.refutedWarn": "本次路径里有已被推翻的节点，结果仅供参考",
         "memory.features.actionPipelineEnabled": "M.O.（beta）",
         "memory.features.actionPipelineEnabled.hint": "Modus Operandi（手法）：把真实会话里反复走通的「做法」连成一张只读图谱——会话头图标、右栏完整视图、每次运行的结算卡。重启 DSH 后生效",
-        "memory.features.resilientModelDownload": "模型下载断点续传",
-        "memory.features.resilientModelDownload.hint": "模型下载中断后从断点续传并自动重试；关闭则回到一次性下载",
-        "memory.features.searchSemanticDedup": "语义去重",
-        "memory.features.searchSemanticDedup.hint": "搜索结果中意思相近的条目只保留一条",
-        "memory.features.autoDream": "记忆巩固",
-        "memory.features.autoDream.hint": "后台自动合并、沉淀碎片记忆",
-        "memory.features.sleepModeEnabled": "睡眠模式",
-        "memory.features.sleepModeEnabled.hint": "空闲时段做分层压缩与整理",
-        "memory.features.hybridInject": "混合注入",
-        "memory.features.hybridInject.hint": "关键词 + 向量双路召回后合并注入",
-        "memory.features.selectiveInjectEnabled": "选择性注入",
-        "memory.features.selectiveInjectEnabled.hint": "按相关性筛选，只注入值得携带的记忆",
-        "memory.features.adaptiveThresholdEnabled": "自适应阈值",
-        "memory.features.adaptiveThresholdEnabled.hint": "按召回质量动态调整相关性门槛",
-        "memory.features.reflectionUpdateEnabled": "反思更新",
-        "memory.features.reflectionUpdateEnabled.hint": "巩固时允许修正已有记忆",
+        "memory.features.resilientModelDownload": "模型下载断了能续上",
+        "memory.features.resilientModelDownload.hint": "开：下载中断后从断点续传并自动重试；关：中断就整份重来（断点续传，默认开）",
+        "memory.features.searchSemanticDedup": "搜到意思相同的只留一条",
+        "memory.features.searchSemanticDedup.hint": "开：检索结果里意思相近的条目合并成一条，少占名额；关：同义条目一起出现（语义去重，默认关）",
+        "memory.features.autoDream": "后台自动整理记忆（合并 · 去重）",
+        "memory.features.autoDream.hint": "开：后台自动合并、沉淀碎片记忆（autoDream）；关：记忆只增不减，越用越散",
+        "memory.features.sleepModeEnabled": "你不在的时候它整理记忆",
+        "memory.features.sleepModeEnabled.hint": "开：空闲时段做分层压缩与整理，白天少打扰；关：只有你手动触发的整理（睡眠模式，默认关）",
+        // #427 建议 5：hybridInject / selectiveInjectEnabled / adaptiveThresholdEnabled
+        // 是同一件事「带什么回来」的三档，相邻摆放并在 hint 里点明，不再摊成
+        // 三个不相干的并列开关。
+        "memory.features.hybridInject": "关键词 + 意思 两路一起找",
+        "memory.features.hybridInject.hint": "开：两路检索各取一批再合并，召回更全；关：只用一路。「带什么回来」共三档（混合注入 / 选择性注入 / 自适应阈值），可只开其中一档（混合注入，默认开）",
+        "memory.features.selectiveInjectEnabled": "只带真正相关的记忆",
+        "memory.features.selectiveInjectEnabled.hint": "开：按相关性筛一遍再注入，上下文更干净；关：带出去的更多也更杂。三档之一（选择性注入，默认开）",
+        "memory.features.adaptiveThresholdEnabled": "按检索质量自动调松紧",
+        "memory.features.adaptiveThresholdEnabled.hint": "开：召回质量差时放宽门槛、好时收紧；关：门槛固定。三档之一（自适应阈值，默认开）",
+        "memory.features.reflectionUpdateEnabled": "整理时允许改已有记忆",
+        "memory.features.reflectionUpdateEnabled.hint": "开：巩固可以改写、合并已有条目，不是只增不改；关：旧记忆永不被自动改动（反思更新，默认开）",
         "memory.features.distill": "蒸馏与限流",
         "memory.features.distillRateLimitIntervalMs": "蒸馏放行间隔 (ms)",
         "memory.features.distillRateLimitRetries": "429 重试次数",
@@ -542,38 +562,38 @@ window.__ModuleLoader__.load({
         "memory.features.distillRecords.retentionDays": "原文保留天数",
         "memory.features.distillRecords.retentionDays.hint": "1–3650 天；只管启动期裁剪。想让 reclaim 也按这个天数回收，需显式传 --older-than 同一数值",
         "memory.features.codingBoostFactor": "编码记忆加权",
-        "memory.features.memoryQualityFilter.enabled": "记忆质量过滤",
-        "memory.features.memoryQualityFilter.enabled.hint": "低价值记忆自动归档，注入按质量降权",
-        "memory.features.llmAudit.enabled": "后台调用审计",
-        "memory.features.llmAudit.enabled.hint": "记录巩固/总结的后台模型调用与 token 消耗",
+        "memory.features.memoryQualityFilter.enabled": "没价值的记忆自动收起来",
+        "memory.features.memoryQualityFilter.enabled.hint": "开：低价值条目自动归档、注入时按质量降权；关：什么都留着，噪声也一起带（记忆质量过滤，默认开）",
+        "memory.features.llmAudit.enabled": "记下后台用了多少模型调用",
+        "memory.features.llmAudit.enabled.hint": "开：巩固/总结的后台调用与 token 消耗都有账可查；关：后台开销无从核对（调用审计，默认开）",
         // #254：写入准入两层。检测关时整条路径不碰；检测开、拦截关 = 仅告警 +
         // 留审计；两个都开才真拦。文案要写清「只留审计」与「真拦下」的区别，
         // 否则操作者会以为打开检测就已经在拦。
-        "memory.features.writeAdmission.enabled": "写入准入判定",
-        "memory.features.writeAdmission.enabled.hint": "写入前判空白/噪声，命中留审计（不拦）",
-        "memory.features.writeAdmission.enforce": "写入准入拦截",
-        "memory.features.writeAdmission.enforce.hint": "真拦下命中的写入；关闭时只留审计不拦",
-        "memory.features.preInjectGate.enabled": "注入前判定",
-        "memory.features.preInjectGate.enabled.hint": "注入前判意见/立场记忆，先观察分布（不拦）",
-        "memory.features.preInjectGate.enforce": "注入前判定拦截",
-        "memory.features.preInjectGate.enforce.hint": "判定命中的候选在注入时滤除；关闭时只留审计不拦",
+        "memory.features.writeAdmission.enabled": "写入前先判一下是不是废话（只记不拦）",
+        "memory.features.writeAdmission.enabled.hint": "开：空白/噪声写入判为命中并留一条审计记录，但仍存进去；关：完全不判。要真拦，见下一项（写入准入判定，默认关）",
+        "memory.features.writeAdmission.enforce": "真把没用的写入挡下来",
+        "memory.features.writeAdmission.enforce.hint": "开：命中直接拒绝写入；关：只留审计、照存不误。需先打开上面那项判定（写入准入拦截，默认关）",
+        "memory.features.preInjectGate.enabled": "注入前先筛掉「只是我的看法」的记忆（只记不拦）",
+        "memory.features.preInjectGate.enabled.hint": "开：注入前判出意见/立场类记忆并留审计，先观察分布；关：照常注入（注入前判定，默认关）",
+        "memory.features.preInjectGate.enforce": "注入时真滤掉判定不合适的",
+        "memory.features.preInjectGate.enforce.hint": "开：命中的候选在注入时丢掉；关：只留审计、照常注入。需先打开上面那项判定（注入前判定拦截，默认关）",
         // #164 A2：密钥/PII 判据自己的闸。文案要写清它管的是哪一批判据（与上面的
         // 空白/噪声分开）、它跑在「写入准入判定」里面（那一项关着就不跑），以及
         // 「开着也不拦」——拦是上面那项的事。
-        "memory.features.sensitiveScanEnabled": "密钥/PII 扫描",
-        "memory.features.sensitiveScanEnabled.hint": "写入前扫密钥与个人信息；需先打开写入准入判定才会执行，命中只留审计，要拦再打开写入准入拦截",
-        "memory.features.bm25SearchEnabled": "BM25 关键词检索",
-        "memory.features.bm25SearchEnabled.hint": "传统关键词打分检索，与向量召回互补",
-        "memory.features.conflictFreezeEnabled": "冲突冻结",
-        "memory.features.conflictFreezeEnabled.hint": "巩固发现互相矛盾的记忆时先冻结待确认",
-        "memory.features.scopeEnabled": "作用域标注",
-        "memory.features.scopeEnabled.hint": "新记忆自动记下来自哪个会话（Agent / 工作区），供隔离与检索过滤使用",
-        "memory.features.strictScope": "严格隔离",
-        "memory.features.strictScope.hint": "开启后，其他会话明确设为私有的记忆对你完全不可见；关闭时仍可见、只是排到后面。要做到彻底隔离，请用条目的「敏感度」字段",
-        "memory.features.trustEpistemicWeighting": "可信度加权",
-        "memory.features.trustEpistemicWeighting.hint": "按来源可信度调整召回排序（实验性）",
-        "memory.features.reflectionFailureTracking": "反思失败追踪",
-        "memory.features.reflectionFailureTracking.hint": "记录巩固失败的案例供后续改进（诊断用）",
+        "memory.features.sensitiveScanEnabled": "写入前扫一遍密钥和个人信息",
+        "memory.features.sensitiveScanEnabled.hint": "开：在写入准入判定里面扫密钥/个人信息，命中只留审计；要真拦，再打开「写入准入拦截」。判定关着时它不跑（密钥/PII 扫描，默认关）",
+        "memory.features.bm25SearchEnabled": "也用关键词方式找记忆",
+        "memory.features.bm25SearchEnabled.hint": "开：多一个字少一个字也搜得到，专名、报错码、路径更易命中，与「按意思找」互补；关：只按语义相近度（BM25 关键词检索，默认开）",
+        "memory.features.conflictFreezeEnabled": "互相矛盾的记忆先冻结",
+        "memory.features.conflictFreezeEnabled.hint": "开：整理发现矛盾时先冻结待你确认，不让两条同时生效；关：两边都照用（冲突冻结，默认关）",
+        "memory.features.scopeEnabled": "记住每条记忆来自哪个会话",
+        "memory.features.scopeEnabled.hint": "开：每条新记忆标上来自哪个 Agent / 工作区，别的会话能不能看到由它说了算；关：新记忆不带来源，所有会话共用一批记忆（作用域标注，默认关）",
+        "memory.features.strictScope": "别人设为私有的记忆我看不见",
+        "memory.features.strictScope.hint": "开：其他会话明确标私有的记忆对你彻底不可见；关：仍可见、只是排到后面。要彻底隔离请用条目的「敏感度」字段。需先打开上面那项标注（严格隔离，默认关）",
+        "memory.features.trustEpistemicWeighting": "按来源可信度调排序",
+        "memory.features.trustEpistemicWeighting.hint": "开：可信度高的来源排前面；关：一视同仁（可信度加权，实验性，默认关）",
+        "memory.features.reflectionFailureTracking": "整理失败时留下案例",
+        "memory.features.reflectionFailureTracking.hint": "开：把失败原因与案例记下来供诊断改进；关：失败不留记录（失败追踪，默认开）",
         "memory.features.embedRoute": "语义检索路线",
         "memory.features.embedProvider": "Embedding 提供方",
         "memory.features.embedProvider.openai": "OpenAI 兼容接口",
@@ -1017,31 +1037,43 @@ window.__ModuleLoader__.load({
         "memory.tab.constraint": "Constraints",
         "memory.tab.document": "Documents",
         "memory.features.title": "Features",
-        "memory.features.desc": "Choose what the plugin does in the background. Changes are saved immediately and take effect after restarting DSH.",
-        "memory.features.group.core": "Basics",
-        "memory.features.group.enhance": "Search & enrichment",
-        "memory.features.group.dream": "Consolidation & sleep",
-        "memory.features.group.scope": "Multi-session isolation",
+        "memory.features.desc": "Choose what the plugin does in the background. The Common switches at the top are all you need to start; everything else lives under All settings. Changes are saved immediately and take effect after restarting DSH.",
+        // Issue #427: groups used to be implementation slices (the architecture
+        // diagram's partitions). What a person actually asks is four questions —
+        // what gets remembered, when it gets written, how it comes back, and
+        // whether sessions bleed into each other. Terminology stays in the hints.
+        // group.basic is the first-screen tier; the scope group sits there too so
+        // "can other sessions see this?" is answerable without opening anything.
+        "memory.features.group.basic": "Common (start here)",
+        "memory.features.group.core": "What gets remembered",
+        "memory.features.group.enhance": "When it gets written",
+        "memory.features.group.dream": "How it comes back",
+        "memory.features.group.scope": "Between sessions",
         "memory.features.group.advanced": "Advanced",
-        "memory.features.advancedToggle": "Advanced (injection · reflection · experimental)",
+        "memory.features.allToggle": "All settings",
+        "memory.features.advancedToggle": "7 rarer switches",
         "memory.features.restartHint": "Takes effect after restarting DSH",
         "memory.features.loadFailed": "Failed to load",
         "memory.features.saveFailed": "Failed to save",
-        "memory.features.autoInject": "Auto injection",
-        "memory.features.autoInject.hint": "Carry relevant memories into every turn",
-        "memory.features.injectGuidanceEnabled": "Capability guide",
-        "memory.features.injectGuidanceEnabled.hint": "Teach the agent how to use memory: when to search, when to save, when to leave things alone",
-        "memory.features.continuityRescueEnabled": "Compaction-edge rescue",
-        "memory.features.continuityRescueEnabled.hint": "Before a long conversation gets compacted, store a snapshot of what's in progress / next steps / open questions so key context survives the compaction",
-        "memory.features.parentOff": "Inactive while auto injection is off",
-        "memory.features.autoSummarize": "Auto summarization",
-        "memory.features.autoSummarize.hint": "Distill memory entries when a conversation ends",
-        "memory.features.hotMemoryEnabled": "Hot memory",
-        "memory.features.hotMemoryEnabled.hint": "Carry the last few turns verbatim; never written to long-term memory",
-        "memory.features.injectTimePrefix": "Inject current time at conversation start",
-        "memory.features.injectTimePrefix.hint": "Adds the date and weekday once at each new session's first turn (off by default)",
-        "memory.features.entityExtractionEnabled": "Entity extraction",
-        "memory.features.entityExtractionEnabled.hint": "Extract people / projects / concepts so the graph grows by itself",
+        "memory.features.autoInject": "Carry old memories into every turn",
+        "memory.features.autoInject.hint": "On: relevant memories are handed to the agent every turn, so it remembers without being asked. Off: the agent has to call the search tool itself",
+        "memory.features.injectGuidanceEnabled": "Also teach the agent how to use memory",
+        "memory.features.injectGuidanceEnabled.hint": "On: the memory tools' description says when to search and when to write. Off: the tools ship without guidance",
+        "memory.features.continuityRescueEnabled": "Snapshot before a long chat gets compacted",
+        "memory.features.continuityRescueEnabled.hint": "On: a snapshot of what's in progress / next steps / open questions is stored before compaction, so key context survives it. Off: compaction can crush it",
+        "memory.features.parentOff": "Inactive while the switch above is off",
+        "memory.features.tagDefault": "default",
+        "memory.features.tagDefault.hint": "This one is at its factory default — you have not changed it",
+        "memory.features.tagChanged": "changed",
+        "memory.features.tagChanged.hint": "You changed this one; it no longer uses the default",
+        "memory.features.autoSummarize": "Turn conversations into memory automatically",
+        "memory.features.autoSummarize.hint": "On: memory entries are distilled when a conversation ends (autoSummarize). Off: memory only exists if you save it, or the agent decides to",
+        "memory.features.hotMemoryEnabled": "Carry the last few turns verbatim",
+        "memory.features.hotMemoryEnabled.hint": "On: the recent turns ride along with each injection, so the agent sees what was just said. Off: only distilled memories travel. Those turns are never written to long-term memory (hot memory, on by default)",
+        "memory.features.injectTimePrefix": "Tell it today's date at session start",
+        "memory.features.injectTimePrefix.hint": "On: the first turn of each new session gets the date and weekday once, so \"today\" and \"last week\" land reliably. Off: no time in the injection (time prefix, off by default)",
+        "memory.features.entityExtractionEnabled": "Also pull out people, projects and concepts",
+        "memory.features.entityExtractionEnabled.hint": "On: each new memory yields people / projects / concepts, so the relation graph grows by itself and recall can key on who. Off: memories stay whole, no relations (entity extraction, off by default)",
         "memory.features.entityExtractionProvider": "Entity extraction provider",
         "memory.features.entityExtractionModel": "Entity extraction model",
         "memory.features.entityExtractionReasoning": "Entity extraction reasoning",
@@ -1057,14 +1089,14 @@ window.__ModuleLoader__.load({
         "memory.features.summarizeReasoningEffort.high": "High",
         "memory.features.summarizeReasoningEffort.hint": "For thinking models, prefer Low or No reasoning so thinking cannot fill the output budget and break summaries",
         "memory.features.entityExtractionModelHint": "Provider / model empty = follow the main conversation model; reasoning \"Follow default\" = provider default",
-        "memory.features.codingRetrospect": "Coding retrospection",
-        "memory.features.codingRetrospect.hint": "Review the full coding session (tools and errors included) and distill pitfalls, constraints and rejected solutions",
-        "memory.features.rerankEnabled": "Reranking",
-        "memory.features.rerankEnabled.hint": "Rerank recalled results with a local model — slower, more precise",
-        "memory.features.heatEnabled": "Heat decay",
-        "memory.features.heatEnabled.hint": "Cool memories down like a forgetting curve: the longer unused, the lower they rank — they stop taking injection slots",
-        "memory.features.documentMemoryEnabled": "Document memory",
-        "memory.features.documentMemoryEnabled.hint": "Long agent-authored documents are stored as a \"summary card\" only: the full text stays agent-owned and is read on demand, so injection carries the summary without filling the context",
+        "memory.features.codingRetrospect": "Remember how the code was written too",
+        "memory.features.codingRetrospect.hint": "On: the whole coding session (errors and tool calls included) is reviewed, yielding pitfalls, constraints and rejected solutions. Off: only conversation content is distilled (coding retrospection, off by default)",
+        "memory.features.rerankEnabled": "Rerank search results once more",
+        "memory.features.rerankEnabled.hint": "On: a local rerank model re-scores recalled candidates — more precise, slower. Off: the search-time order stands (reranking, off by default)",
+        "memory.features.heatEnabled": "The longer unused, the lower it ranks",
+        "memory.features.heatEnabled.hint": "On: memories cool down like a forgetting curve — long-unused ones rank later and stop taking injection slots. Off: relevance order always (heat decay, off by default)",
+        "memory.features.documentMemoryEnabled": "Store long documents as a summary card",
+        "memory.features.documentMemoryEnabled.hint": "On: long agent-authored documents live in memory as a \"summary card\"; the full text stays agent-owned and is read on demand. Off: the whole document travels into context (document memory, off by default)",
         // --- v0.9.0 M.O. / Modus Operandi (beta) ---
         "memory.actions.beta": "Beta",
         "memory.actions.notice": "Extracted steps are candidates: they may be wrong, outdated, or refuted.",
@@ -1105,22 +1137,25 @@ window.__ModuleLoader__.load({
         "memory.actions.settle.refutedWarn": "This path contains refuted steps; take the result with caution",
         "memory.features.actionPipelineEnabled": "M.O. (beta)",
         "memory.features.actionPipelineEnabled.hint": "Modus Operandi: the ways of working that actually got walked through in real sessions, drawn as a read-only graph — session-header icon, full sidebar view, and a per-run settlement card. Takes effect after restarting DSH",
-        "memory.features.resilientModelDownload": "Resumable model downloads",
-        "memory.features.resilientModelDownload.hint": "Resume model downloads from where they stopped and retry automatically; off = one-shot downloads",
-        "memory.features.searchSemanticDedup": "Semantic dedup",
-        "memory.features.searchSemanticDedup.hint": "Keep one entry when search hits near-duplicates",
-        "memory.features.autoDream": "Memory consolidation",
-        "memory.features.autoDream.hint": "Merge and settle fragmented memories in the background",
-        "memory.features.sleepModeEnabled": "Sleep mode",
-        "memory.features.sleepModeEnabled.hint": "Layered compaction during idle periods",
-        "memory.features.hybridInject": "Hybrid injection",
-        "memory.features.hybridInject.hint": "Merge keyword + vector recall before injecting",
-        "memory.features.selectiveInjectEnabled": "Selective injection",
-        "memory.features.selectiveInjectEnabled.hint": "Only inject memories worth carrying, filtered by relevance",
-        "memory.features.adaptiveThresholdEnabled": "Adaptive threshold",
-        "memory.features.adaptiveThresholdEnabled.hint": "Adjust the relevance floor with recall quality",
-        "memory.features.reflectionUpdateEnabled": "Reflective update",
-        "memory.features.reflectionUpdateEnabled.hint": "Allow consolidation to revise existing memories",
+        "memory.features.resilientModelDownload": "Model downloads resume after interruption",
+        "memory.features.resilientModelDownload.hint": "On: downloads continue from where they stopped and retry automatically. Off: an interrupted download starts over (resumable downloads, on by default)",
+        "memory.features.searchSemanticDedup": "Keep one entry when search hits near-duplicates",
+        "memory.features.searchSemanticDedup.hint": "On: near-duplicate entries merge into one, saving injection slots. Off: duplicates all show up (semantic dedup, off by default)",
+        "memory.features.autoDream": "Tidy memories in the background (merge · dedupe)",
+        "memory.features.autoDream.hint": "On: fragmented memories are merged and settled in the background (autoDream). Off: memory only accumulates, so it gets messier the longer you use it",
+        "memory.features.sleepModeEnabled": "It tidies memories while you are away",
+        "memory.features.sleepModeEnabled.hint": "On: layered compaction and tidying happen during idle periods. Off: only consolidation you trigger manually (sleep mode, off by default)",
+        // #427 suggestion 5: hybridInject / selectiveInjectEnabled /
+        // adaptiveThresholdEnabled are three dials of one question — what comes
+        // back. Adjacent placement plus a hint that names the other two.
+        "memory.features.hybridInject": "Search by keywords and meaning together",
+        "memory.features.hybridInject.hint": "On: both channels each fetch a batch and merge — broader recall. Off: one channel only. Three dials exist for \"what comes back\" (hybrid / selective / adaptive threshold); one is enough (hybrid injection, on by default)",
+        "memory.features.selectiveInjectEnabled": "Only carry memories that truly matter",
+        "memory.features.selectiveInjectEnabled.hint": "On: relevance is filtered before injecting — cleaner context. Off: more comes along, and noisier. One of the three dials (selective injection, on by default)",
+        "memory.features.adaptiveThresholdEnabled": "Tighten or loosen by retrieval quality",
+        "memory.features.adaptiveThresholdEnabled.hint": "On: a poor-recall day loosens the floor, a good one tightens it. Off: the floor is fixed. One of the three dials (adaptive threshold, on by default)",
+        "memory.features.reflectionUpdateEnabled": "Let tidying revise existing memories",
+        "memory.features.reflectionUpdateEnabled.hint": "On: consolidation may rewrite and merge existing entries, not only add. Off: old memories are never auto-edited (reflective update, on by default)",
         "memory.features.distill": "Distillation & rate limiting",
         "memory.features.distillRateLimitIntervalMs": "Distill spacing (ms)",
         "memory.features.distillRateLimitRetries": "429 retries",
@@ -1131,38 +1166,38 @@ window.__ModuleLoader__.load({
         "memory.features.distillRecords.retentionDays": "Transcript retention (days)",
         "memory.features.distillRecords.retentionDays.hint": "1–3650 days; startup pruning only. To make reclaim use the same window, pass the same value via --older-than",
         "memory.features.codingBoostFactor": "Coding boost factor",
-        "memory.features.memoryQualityFilter.enabled": "Memory quality filter",
-        "memory.features.memoryQualityFilter.enabled.hint": "Archive low-value memories automatically; injection downranks by quality",
-        "memory.features.llmAudit.enabled": "Background call audit",
-        "memory.features.llmAudit.enabled.hint": "Log background model calls and token usage from consolidation / summaries",
+        "memory.features.memoryQualityFilter.enabled": "Tuck low-value memories away automatically",
+        "memory.features.memoryQualityFilter.enabled.hint": "On: low-value entries are archived automatically and injection downranks by quality. Off: everything stays, noise included (memory quality filter, on by default)",
+        "memory.features.llmAudit.enabled": "Keep tabs on background model usage",
+        "memory.features.llmAudit.enabled.hint": "On: background consolidation / summary calls and token usage are all on record. Off: there is no way to check what the background spent (call audit, on by default)",
         // #254 — two layers: enabled runs the check (audit only), enforce actually
         // blocks. The hints must keep that difference explicit.
-        "memory.features.writeAdmission.enabled": "Write admission checks",
-        "memory.features.writeAdmission.enabled.hint": "Flag blank / noise writes before storing, with an audit row (never blocks)",
-        "memory.features.writeAdmission.enforce": "Write admission enforcement",
-        "memory.features.writeAdmission.enforce.hint": "Actually reject flagged writes; off keeps the audit row only",
-        "memory.features.preInjectGate.enabled": "Pre-inject gate",
-        "memory.features.preInjectGate.enabled.hint": "Judge opinion/stance memories before injection, audit-only (never blocks)",
-        "memory.features.preInjectGate.enforce": "Pre-inject gate enforcement",
-        "memory.features.preInjectGate.enforce.hint": "Actually drop flagged candidates at injection; off keeps the audit row only",
+        "memory.features.writeAdmission.enabled": "Judge blank / noise writes before storing (audit only)",
+        "memory.features.writeAdmission.enabled.hint": "On: blank / noise writes are flagged with an audit row but still stored. Off: nothing is judged. To actually block, see the next switch (write admission checks, off by default)",
+        "memory.features.writeAdmission.enforce": "Really reject useless writes",
+        "memory.features.writeAdmission.enforce.hint": "On: flagged writes are rejected outright. Off: audit row only, stored anyway. Needs the checks switch above (write admission enforcement, off by default)",
+        "memory.features.preInjectGate.enabled": "Screen out \"just my opinion\" memories before injection (audit only)",
+        "memory.features.preInjectGate.enabled.hint": "On: opinion / stance memories are judged before injection and audited, so you can watch the distribution first. Off: injected as usual (pre-inject gate, off by default)",
+        "memory.features.preInjectGate.enforce": "Really drop flagged candidates at injection",
+        "memory.features.preInjectGate.enforce.hint": "On: flagged candidates are dropped at injection time. Off: audit row only, injected anyway. Needs the gate switch above (pre-inject gate enforcement, off by default)",
         // #164 A2: its own gate for the secret / PII rules (separate from the
         // blank/noise pair above), and it runs inside the write admission checks
         // above, so with those off it never runs. Hits are audited only;
         // enforcement stays with the key above.
-        "memory.features.sensitiveScanEnabled": "Secret / PII scan",
-        "memory.features.sensitiveScanEnabled.hint": "Scan writes for credentials and personal data; needs write admission checks to run. Hits are audited only; enforcement needs the enforcement toggle too",
-        "memory.features.bm25SearchEnabled": "BM25 keyword search",
-        "memory.features.bm25SearchEnabled.hint": "Classic keyword scoring, complementary to vector recall",
-        "memory.features.conflictFreezeEnabled": "Conflict freezing",
-        "memory.features.conflictFreezeEnabled.hint": "Freeze contradictory memories for confirmation during consolidation",
-        "memory.features.scopeEnabled": "Scope tagging",
-        "memory.features.scopeEnabled.hint": "New memories record which session (agent / workspace) they came from, for isolation and filtered recall",
-        "memory.features.strictScope": "Strict isolation",
-        "memory.features.strictScope.hint": "When on, memories explicitly made private by other sessions become fully invisible; when off they stay visible but rank lower. For true isolation use a memory's sensitivity field",
-        "memory.features.trustEpistemicWeighting": "Credibility weighting",
-        "memory.features.trustEpistemicWeighting.hint": "Adjust recall ranking by source credibility (experimental)",
-        "memory.features.reflectionFailureTracking": "Reflection failure tracking",
-        "memory.features.reflectionFailureTracking.hint": "Record failed consolidation cases for later improvement (diagnostics)",
+        "memory.features.sensitiveScanEnabled": "Scan writes for credentials and personal data",
+        "memory.features.sensitiveScanEnabled.hint": "On: secret / PII rules run inside the write admission checks; hits are audited only — to block, also enable enforcement. Nothing runs while the checks switch is off (secret / PII scan, off by default)",
+        "memory.features.bm25SearchEnabled": "Also search by exact keywords",
+        "memory.features.bm25SearchEnabled.hint": "On: exact-term scoring joins in, so proper nouns, error codes and paths hit reliably — a complement to meaning-based search. Off: semantic similarity only (BM25 keyword search, on by default)",
+        "memory.features.conflictFreezeEnabled": "Freeze contradictory memories first",
+        "memory.features.conflictFreezeEnabled.hint": "On: contradictions found while tidying are frozen for your confirmation instead of both staying live. Off: both stay in use (conflict freezing, off by default)",
+        "memory.features.scopeEnabled": "Record which session each memory came from",
+        "memory.features.scopeEnabled.hint": "On: every new memory is tagged with the agent / workspace it came from — that tag decides whether other sessions see it. Off: new memories carry no origin and all sessions share one pool (scope tagging, off by default)",
+        "memory.features.strictScope": "Memories others marked private stay invisible to me",
+        "memory.features.strictScope.hint": "On: memories explicitly made private by other sessions are fully invisible. Off: they stay visible but rank lower. For true isolation use a memory's sensitivity field. Needs the tagging switch above (strict isolation, off by default)",
+        "memory.features.trustEpistemicWeighting": "Rank by source credibility",
+        "memory.features.trustEpistemicWeighting.hint": "On: more credible sources rank higher. Off: everything counts the same (credibility weighting, experimental, off by default)",
+        "memory.features.reflectionFailureTracking": "Keep failed tidying cases on record",
+        "memory.features.reflectionFailureTracking.hint": "On: failure causes and cases are stored for diagnosis and improvement. Off: failures leave no record (failure tracking, on by default)",
         "memory.features.embedRoute": "Semantic search route",
         "memory.features.embedProvider": "Embedding provider",
         "memory.features.embedProvider.openai": "OpenAI-compatible API",
@@ -1763,6 +1798,11 @@ window.__ModuleLoader__.load({
       ".mneme-badge--conflict{color:var(--mneme-danger);background:color-mix(in srgb,var(--mneme-danger) 10%,transparent);border:1px solid color-mix(in srgb,var(--mneme-danger) 30%,transparent)}",
       ".mneme-badge--archived{color:var(--mneme-fg-dim);background:var(--dsw-alias-interactive-bg-hover)}",
       ".mneme-badge--scope{color:var(--mneme-accent);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 10%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-business-primary) 30%,transparent)}",
+      // 「默认 / 已改」徽标（#427）：default 复用 --archived 的语义色组合
+      // （fg-dim on interactive-bg-hover），changed 复用 --scope 的 accent 组
+      // 合——两组配对都已过 contrast.test.js 的重算，不再发明新颜色。
+      ".mneme-badge--default{color:var(--mneme-fg-dim);background:var(--dsw-alias-interactive-bg-hover)}",
+      ".mneme-badge--changed{color:var(--mneme-accent);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 10%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-business-primary) 30%,transparent)}",
       // 冲突集中处理队列（v0.8.0）：状态页的待确认冲突列表
       ".mneme-conflictq{display:flex;flex-direction:column;gap:10px}",
       ".mneme-conflictq-head{display:flex;align-items:center;gap:8px}",
@@ -2657,15 +2697,24 @@ window.__ModuleLoader__.load({
     // 后端 src/config.js 的 INJECT_CHILD_FLAGS（运行时闸门），两侧漂移由
     // test/inject-parent-gate.test.js 钉住。
     const FEATURE_CHILDREN = { autoInject: ["injectGuidanceEnabled", "continuityRescueEnabled"] };
+    // Issue #427 建议 1：折叠线挪到「新手之外」。group.basic 是首屏层，只列新
+    // 用户敢动的总开关；group.scope 也在首屏——它回答新用户的第二个必答题
+    // 「它记的东西会不会被别的会话看到」。其余组整组收进「全部设置」折叠
+    // （showAll）。成员从原组里移走而不是渲染时过滤：同一项永远只渲染一次。
+    // 首屏可点项 = 3 总开关 + autoInject 的 2 个子开关 + scope 2 开关 +
+    // 「全部设置」按钮 = 8（验收线 ≤ 8；RuntimeProvisionBlock 配好即消失，
+    // 常态首屏更少）。
+    const FEATURE_FIRST_SCREEN = ["group.basic", "group.scope"];
     const FEATURE_GROUPS = [
-      { key: "group.core", items: ["autoInject", "autoSummarize", "hotMemoryEnabled", "injectTimePrefix", "memoryQualityFilter.enabled", "llmAudit.enabled", "writeAdmission.enabled", "writeAdmission.enforce", "preInjectGate.enabled", "preInjectGate.enforce", "sensitiveScanEnabled",
+      { key: "group.basic", items: ["autoInject", "autoSummarize", "autoDream"] },
+      { key: "group.core", items: ["hotMemoryEnabled", "injectTimePrefix", "memoryQualityFilter.enabled", "llmAudit.enabled", "writeAdmission.enabled", "writeAdmission.enforce", "preInjectGate.enabled", "preInjectGate.enforce", "sensitiveScanEnabled",
         // #399 的留存总闸（见下方 distillSub：天数行是它的子块）。放在组末，
         // 子块才能紧跟在它后面展开——items.map 之后的子块是按组尾渲染的。
         "distillRecords.enabled"] },
       // v0.9.0 M.O.（beta）：开关挂在 enhance 组。它不是行为开关而是
       // 座位闸门——关=一个座位都不注册（见 apply 内的 M.O. 块）。
       { key: "group.enhance", items: ["entityExtractionEnabled", "codingRetrospect", "rerankEnabled", "resilientModelDownload", "searchSemanticDedup", "bm25SearchEnabled", "heatEnabled", "documentMemoryEnabled", "actionPipelineEnabled"] },
-      { key: "group.dream", items: ["autoDream", "sleepModeEnabled"] },
+      { key: "group.dream", items: ["sleepModeEnabled"] },
       // v0.8.0 A4（issue #17）：作用域隔离组——标注总开关 + 严格硬过滤。
       { key: "group.scope", items: ["scopeEnabled", "strictScope"] }
     ];
@@ -2689,10 +2738,14 @@ window.__ModuleLoader__.load({
     // 蒸馏防推理烧预算）。后端枚举含 off，面板必须能选到，否则操作者用不上。
     const SUMMARIZE_REASONING = ["off", "none", "low", "medium", "high"];
 
-    function FeatureRow({ name, hint, on, disabled, onToggle, sub }) {
+    function FeatureRow({ name, hint, on, disabled, onToggle, sub, tag }) {
       return h("div", { className: "mneme-featrow", style: sub ? { paddingLeft: 18, opacity: 0.86 } : undefined },
         h("div", { className: "mneme-featmain" },
-          h("div", { className: "mneme-featname" }, name),
+          h("div", { className: "mneme-featname" }, name,
+            // 「默认 / 已改」徽标（#427 建议 3）：不用点开配置文件就知道哪
+            // 些是出厂值、哪些被你改过；title 给完整解释（键盘/读屏可达）。
+            tag && h("span", { className: "mneme-badge " + tag.kind, title: tag.title }, tag.text)
+          ),
           h("div", { className: "mneme-feathint" }, hint)
         ),
         h("button", {
@@ -2717,6 +2770,9 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = useState(false);
       const [savedTick, setSavedTick] = useState(false);
       const [showAdv, setShowAdv] = useState(false);
+      // Issue #427 建议 1：「全部设置」是第一层折叠（默认收起），「高级」是它
+      // 内部的第二层。两个状态独立：收起全部设置时高级的展开与否被记住。
+      const [showAll, setShowAll] = useState(false);
       const [strs, setStrs] = useState({}); // 字符串输入的本地草稿：key -> string
       const [nums, setNums] = useState({}); // 数值输入的本地草稿：key -> string（提交时才转整数）
       // 巩固/睡眠模型路由下拉的数据源：GET /llm-providers 探测（云端 v0.7.26+
@@ -2822,6 +2878,16 @@ window.__ModuleLoader__.load({
         });
       };
 
+      // 「默认 / 已改」的信号来源是 state.overrides：featureSnapshot 只把
+      // settings.getFeatureFlags() 里真实落库的键放进 overrides，键不在其中
+      // = 值仍来自 config schema 的默认值。面板自己判断，不加后端字段、
+      // 不动 config.js（#427 的验收红线之一）。
+      const ovr = (state && state.overrides) || {};
+      const flagTag = (k) => ({
+        kind: Object.prototype.hasOwnProperty.call(ovr, k) ? "mneme-badge--changed" : "mneme-badge--default",
+        text: t(Object.prototype.hasOwnProperty.call(ovr, k) ? "memory.features.tagChanged" : "memory.features.tagDefault"),
+        title: t(Object.prototype.hasOwnProperty.call(ovr, k) ? "memory.features.tagChanged.hint" : "memory.features.tagDefault.hint")
+      });
       const boolRow = (k, opts = {}) => h(FeatureRow, {
         key: k,
         name: t(`memory.features.${k}`),
@@ -2830,6 +2896,7 @@ window.__ModuleLoader__.load({
         on: !!eff[k],
         disabled: busy,
         sub: !!opts.sub,
+        tag: flagTag(k),
         onToggle: () => put({ [k]: !eff[k] })
       });
 
@@ -3083,8 +3150,12 @@ window.__ModuleLoader__.load({
         h(RuntimeProvisionBlock, { t }),
         state === null && !error
           ? h("div", { className: "mneme-set-hint" }, "…")
-          : h(react.Fragment, null,
-              FEATURE_GROUPS.map((g) => h(react.Fragment, { key: g.key },
+          : (() => {
+              // Issue #427：分组按「实现」分改不动需求本身，改的是「折叠线划在
+              // 哪里」。renderGroup 是唯一的组渲染路径（含组尾子块），首屏层与
+              // 「全部设置」共用它，保证 g.items.map(flagRow) 只写一次、子项
+              // 只可能经 flagRow 渲染（test/inject-parent-gate.test.js 的门）。
+              const renderGroup = (g) => h(react.Fragment, { key: g.key },
                 h("div", { className: "mneme-featgroup" }, t(`memory.features.${g.key}`)),
                 g.items.map(flagRow),
                 // 子块按组尾追加。distillSub 紧跟在 core 组最后一行
@@ -3092,19 +3163,40 @@ window.__ModuleLoader__.load({
                 g.key === "group.core" && h(react.Fragment, null, distillSub, summarizeSub),
                 g.key === "group.enhance" && h(react.Fragment, null, embedSub, entitySub),
                 g.key === "group.dream" && h(react.Fragment, null, dreamSub, sleepSub)
-              )),
-              h("div", { className: "mneme-featgroup" },
-                h("button", {
-                  type: "button",
-                  className: "mneme-footbtn",
-                  "aria-expanded": String(showAdv),
-                  onClick: () => setShowAdv(!showAdv)
-                },
-                  h(Icon, { name: showAdv ? "chevronDown" : "chevronRight", size: 12 }),
-                  t("memory.features.advancedToggle"))
-              ),
-              showAdv && FEATURE_ADVANCED_BOOLS.map((k) => boolRow(k))
-            )
+              );
+              const firstScreen = FEATURE_GROUPS.filter((g) => FEATURE_FIRST_SCREEN.includes(g.key));
+              const restGroups = FEATURE_GROUPS.filter((g) => !FEATURE_FIRST_SCREEN.includes(g.key));
+              return h(react.Fragment, null,
+                firstScreen.map(renderGroup),
+                // 「全部设置」= 第一层折叠（默认收起，#427 建议 1）：里面的
+                // 30 余项对新手是噪音，对新用户可见的只有上面的总开关层。
+                h("div", { className: "mneme-featgroup" },
+                  h("button", {
+                    type: "button",
+                    className: "mneme-footbtn",
+                    "aria-expanded": String(showAll),
+                    onClick: () => setShowAll(!showAll)
+                  },
+                    h(Icon, { name: showAll ? "chevronDown" : "chevronRight", size: 12 }),
+                    t("memory.features.allToggle"))
+                ),
+                showAll && h(react.Fragment, null,
+                  restGroups.map(renderGroup),
+                  // 「高级」降为第二层，嵌在「全部设置」内部。
+                  h("div", { className: "mneme-featgroup" },
+                    h("button", {
+                      type: "button",
+                      className: "mneme-footbtn",
+                      "aria-expanded": String(showAdv),
+                      onClick: () => setShowAdv(!showAdv)
+                    },
+                      h(Icon, { name: showAdv ? "chevronDown" : "chevronRight", size: 12 }),
+                      t("memory.features.advancedToggle"))
+                  ),
+                  showAdv && FEATURE_ADVANCED_BOOLS.map((k) => boolRow(k))
+                )
+              );
+            })()
       );
     }
 
