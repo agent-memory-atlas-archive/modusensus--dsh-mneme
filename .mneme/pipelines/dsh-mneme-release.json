@@ -1,0 +1,348 @@
+{
+  "id": "dsh-mneme-release",
+  "name": "dsh-mneme 发版",
+  "project": "slow-stack/mneme",
+  "version": 0,
+  "status": "active",
+  "done": "npm 上 @modusensus/dsh-mneme 的 latest = 目标版本、gitHead 指向 main 上那个提交；GitHub Release 已发布（非 draft）且正文与 CHANGELOG 版本节一致；发版分支与车道已清理。",
+  "trigger": [
+    { "kind": "phrase", "value": "发版", "note": "用户说「发版 dsh-mneme」" },
+    { "kind": "phrase", "value": "release", "note": "" },
+    { "kind": "condition", "value": "main 上的 [Unreleased] 攒够了一批要发的", "note": "没有固定周期，发不发由人定" }
+  ],
+  "inputs": [
+    "目标版本号",
+    "仓库 push 权限与 gh 登录",
+    "仓库 secret NPM_TOKEN（release.yml 的 publish 步用）",
+    "一棵内容等于待发布 main 的发版树"
+  ],
+  "steps": [
+    {
+      "id": "P1",
+      "phase": "准备",
+      "title": "定版本号与发布范围",
+      "when": "决定要发一版，但还没定发到哪个号",
+      "do": "读 main 上 [Unreleased] 的全部小节与上一版以来的 PR 列表，定出目标版本号（补全修正走 patch，新功能走 minor）与这一版要收进去的条目清单。",
+      "who": "main",
+      "tool": "git log / gh pr list",
+      "done": "一句话写清「发 X.Y.Z，收这几条」，条目清单里的每个 PR 号都能在 main 上找到。",
+      "risk": "R0",
+      "needs": [],
+      "why": "版本号的语义由内容决定，不由日期决定；先清点再定号，否则 [Unreleased] 里会留下没人认领的条目。",
+      "evidence": [
+        "上一版 0.8.13 的做法是「[Unreleased] 承接为版本节、四条条目补 PR 号」，说明清单是发版前才成形的"
+      ],
+      "gate": false
+    },
+    {
+      "id": "P2",
+      "phase": "准备",
+      "title": "跑 release-prep 工作流",
+      "when": "版本号已定，仓库干净",
+      "do": "gh workflow run release-prep.yml -f version=<X.Y.Z>。它会 bump package.json + package-lock.json、同步双 README 徽章、在 CHANGELOG 顶部插版本节，并推 release-prep/<版本> 分支。",
+      "who": "main",
+      "tool": "gh workflow run release-prep.yml",
+      "done": "远端出现 release-prep/<版本> 分支，其上的提交改了 package.json / package-lock.json / 双 README / CHANGELOG 四处。",
+      "risk": "R2",
+      "needs": ["P1"],
+      "why": "这四处改动分散在四个文件、彼此必须同号，手工做会漏；v0.8.11 那次徽章与注释就差了两个数。",
+      "evidence": [
+        "本机 scripts/release-prep.mjs 用 /^(# Changelog\\n\\n)/ 匹配，CRLF 检出下静默失效还打印 ✓（v0.8.13 中招，PR #360 已修）——所以本机跑脚本不算数，走工作流（ubuntu 上是 LF）"
+      ],
+      "gate": false
+    },
+    {
+      "id": "P3",
+      "phase": "准备",
+      "title": "人工补开发版 PR",
+      "when": "release-prep 运行以红叉结束",
+      "do": "别重跑。去 Actions 页面拿那次运行里已经推上去的分支名，用 gh pr create 人工开 PR，标题 `release: vX.Y.Z 发布准备`。",
+      "who": "human",
+      "tool": "gh pr create",
+      "done": "PR 存在于 GitHub 上、base 是 main、head 是 release-prep/<版本>。",
+      "risk": "R2",
+      "needs": ["P2"],
+      "why": "这一步的红叉是仓库设置造成的预期结果，不是失败——重跑多少次都是同一个红叉，只会浪费时间并掩盖真正的失败。",
+      "evidence": [
+        "根因是仓库没勾「Allow GitHub Actions to create and approve pull requests」，报错原文 GraphQL: GitHub Actions is not permitted to create or approve pull requests (createPullRequest)",
+        "2026-09-28 至 2026-10-12 的 5 次运行失败步骤完全相同；v0.8.16 那次也是人工补开的 PR"
+      ],
+      "gate": false
+    },
+    {
+      "id": "P4",
+      "phase": "准备",
+      "title": "重排 CHANGELOG 版本节",
+      "when": "发版 PR 已开，分支已拉到本地",
+      "do": "把 [Unreleased] 的条目收口到版本标题下、重新置空 [Unreleased]，并按仓库惯例重排成「🆕 新增 → ⚠️ 行为变更 → 🐛 修复 → 🧹 工程」，补上 PR 号与贡献者。",
+      "who": "main",
+      "tool": "",
+      "done": "CHANGELOG 里出现 `## [X.Y.Z] - YYYY-MM-DD` 小节，其形状与上一版一致；[Unreleased] 回到只剩小节标题。",
+      "risk": "R1",
+      "needs": ["P3"],
+      "why": "release-prep 插的占位节落在 [Unreleased] 之前、只带一个空的 🐛 小节；而 release.yml 的 verify 要求 CHANGELOG 里能找到 `## [<版本>]` 开头的小节，不重排就到了打 tag 那步才会失败。",
+      "evidence": [
+        "release-prep.mjs 的占位节形状：落在 [Unreleased] 之前、只有一个空 🐛 修复小节",
+        "PR #423 那次两边都往 [Unreleased] 顶端插节直接撞出冲突，解法是两节都留、顺序对齐下面 [0.8.16] 节的结构"
+      ],
+      "gate": false
+    },
+    {
+      "id": "P5",
+      "phase": "准备",
+      "title": "对齐测试徽章",
+      "when": "本批新增或删除了测试",
+      "do": "在发版树里跑 npm run badge:sync，让双 README 的徽章与四种注释形状报同一个数。",
+      "who": "main",
+      "tool": "npm run badge:sync",
+      "done": "git diff 里 README 的改动与 `ℹ tests N` 一致；再跑一次没有新改动。",
+      "risk": "R1",
+      "needs": ["P4"],
+      "why": "测试数写在 shields.io 静态 URL 里，跑 npm test 不会更新它；release.yml 已经没有 badge job（bot 的 GITHUB_TOKEN 绕不过 main 的必过检查，push 必被 GH006 拒），所以这件事只能发版前手动做。",
+      "evidence": [
+        "v0.8.11 发版后徽章 1437、注释 1431——两条写入路径各存一份替换规则、形状集合不同；#346 把规则收拢到 test-count-sync.mjs 才对齐",
+        "六处必须永远同数，故必须用工具刷新而不是手改"
+      ],
+      "gate": false
+    },
+    {
+      "id": "P6",
+      "phase": "准备",
+      "title": "跑完整测试套件",
+      "when": "发版树的内容已经定下来",
+      "do": "在 dsh-mneme/ 里跑 npm test 与 node scripts/check-sync.js，全绿才继续。",
+      "who": "main",
+      "tool": "npm test",
+      "done": "`ℹ fail 0`，check-sync 报 src 与 lib 一致。",
+      "risk": "R0",
+      "needs": ["P5"],
+      "why": "这条规矩是排查「记忆沉淀失败」之后定下的：发版前必须跑完整套件，全过才发。",
+      "evidence": [
+        "git diff 有改动而没跑 sync 时 lib-smoke 会抓；但抓不到逻辑错误，只有全量套件能"
+      ],
+      "gate": false
+    },
+    {
+      "id": "P7",
+      "phase": "准备",
+      "title": "对外文本自检",
+      "when": "分支上已经有将进入 npm 包与 Release 正文的文字",
+      "do": "扫本批发版提交与 CHANGELOG 版本节：AI 署名（Co-Authored-By / Generated with / Claude / ChatGPT）、本机路径与用户名、邮箱、token 形状。命中即改。",
+      "who": "main",
+      "tool": "",
+      "done": "每一类的命中数都是 0，并且核验命令写进了发版记录。",
+      "risk": "R0",
+      "needs": ["P6"],
+      "why": "CHANGELOG 会原样进 npm 包和 GitHub Release 正文，发出去就撤不回来；npm 不允许覆盖已发布版本。",
+      "evidence": [
+        "v0.8.13 发版时对 Release 正文做过一次核验，检查项正是本机用户名、本机路径、邮箱、账号名，全部 0"
+      ],
+      "gate": false
+    },
+    {
+      "id": "V1",
+      "phase": "送审",
+      "title": "人工过目",
+      "when": "分支已改完、还没推给远端之前",
+      "do": "把 CHANGELOG 版本节、双 README 改动、测试计数、自检结果摆给人看，等明确点头。",
+      "who": "human",
+      "tool": "",
+      "done": "得到一句明确的同意；没有得到同意就停在这里，不推。",
+      "risk": "R3",
+      "needs": ["P7"],
+      "why": "发版是这套流程里唯一一次「对世界说话」，改判据和对外文本必须先拿到人的点头；未获同意前什么都不做。",
+      "evidence": [
+        "跨项目反复出现同一闸门：凡不可逆或对外动作（合并 PR、推分支、打 tag、发 Release、npm 发布）都先停在待批状态"
+      ],
+      "gate": true
+    },
+    {
+      "id": "V2",
+      "phase": "送审",
+      "title": "推发版分支",
+      "when": "已拿到点头，本地改动已提交",
+      "do": "把改动提交到 release-prep/<版本> 并 push 回该分支，让 CI 在最新内容上重跑。",
+      "who": "main",
+      "tool": "git push",
+      "done": "远端分支顶端就是刚才这棵树，PR 页面显示 CI 已重新触发。",
+      "risk": "R2",
+      "needs": ["V1"],
+      "why": "不推就等于没改；PR 上停留的绿灯如果是旧内容的，等于拿旧证据做决定。",
+      "evidence": [
+        "#423 那次 rebase 解完冲突后是 --force-with-lease 推回自己分支、CI 重跑 11/11 全绿才合，不拿旧绿灯过"
+      ],
+      "gate": false
+    },
+    {
+      "id": "M1",
+      "phase": "合并",
+      "title": "等 CI 全绿",
+      "when": "发版 PR 的内容已经是最终形态",
+      "do": "等 check-sync、测试矩阵（ubuntu + windows × node 22/24）、host-legacy 腿、gitleaks、dependency-review 全部通过。",
+      "who": "ci",
+      "tool": "gh pr checks",
+      "done": "必需检查项全部 success，没有 pending 也没有 skipped 的必要项。",
+      "risk": "R0",
+      "needs": ["V2"],
+      "why": "main 把必过检查设成了必需，红着也合不进去；提前看清哪一条红，比在合并时被告知好。",
+      "evidence": [
+        "有腿偶发红过：端口顺延撞进 Windows 保留段报 EACCES 而非 EADDRINUSE，同一份内容跑两次一次绿一次红——先看红的是不是环境性的"
+      ],
+      "gate": true
+    },
+    {
+      "id": "M2",
+      "phase": "合并",
+      "title": "rebase 合并发版 PR",
+      "when": "CI 全绿、发版 PR 可合并",
+      "do": "gh pr merge <号> --rebase。发版 PR 要求线性历史，不能用 merge commit。",
+      "who": "main",
+      "tool": "gh pr merge --rebase",
+      "done": "main 顶端是发版提交，且它只有一个 parent。",
+      "risk": "R2",
+      "needs": ["M1"],
+      "why": "发版提交是 tag 的落点，多一个 parent 会让「tag 指向的那个提交 = 发布内容」这句话变得需要额外解释。",
+      "evidence": [
+        "0.8.13 的 PR #359 走 rebase 合并后 main = d3cce29，tag 就打在它上面；非发版 PR 才用 merge commit"
+      ],
+      "gate": false
+    },
+    {
+      "id": "T1",
+      "phase": "发布",
+      "title": "发布树对齐刚合并的 main",
+      "when": "发版 PR 已进 main，准备打 tag",
+      "do": "切换到内容等于合并后 main 的树（或车道的 ff-only 更新），用 git diff 对着 main 确认没有差；不要在主工作区根发。",
+      "who": "main",
+      "tool": "git diff",
+      "done": "该树与 origin/main 逐文件无差异，且 package.json 的 version 就是目标版本。",
+      "risk": "R0",
+      "needs": ["M2"],
+      "why": "发出去的那棵树要和刚合并的 main 一模一样；目录不对时 npm 的报错会伪装成权限问题。",
+      "evidence": [
+        "v0.8.13 首次 npm publish 在错误的树（主工作区根，还是 0.8.12）跑，被 npm「不可覆盖已发布版本」挡下——不是权限、不是 2FA，是目录不对"
+      ],
+      "gate": false
+    },
+    {
+      "id": "T2",
+      "phase": "发布",
+      "title": "打并推 tag",
+      "when": "发布树已对齐",
+      "do": "在发布提交上打 v<版本> tag 并 push，触发 release.yml。先确认本地与远端 main 同一个提交。",
+      "who": "main",
+      "tool": "git tag / git push <tag>",
+      "done": "远端出现 tag，指向那个提交；release.yml 被触发。",
+      "risk": "R2",
+      "needs": ["T1"],
+      "why": "tag 是 release.yml 的唯一入口，也是「这一版发的是哪棵树」的唯一凭据；打错提交只能删 tag 重来。",
+      "evidence": [
+        "历史上的铁律是「npm publish 先于 tag」——顺序反了 release.yml 的 publish 步会真发一次并因认证失败弄红 run，而 registry 不允许覆盖已发布版本",
+        "2026-10-12 起 Actions 直发已可用（维护者换了 NPM_TOKEN），普通路径是直接推 tag 触发；但 2027-01 npm 政策落地后令牌直发会再次失效，长期应迁 OIDC Trusted Publisher"
+      ],
+      "gate": false
+    },
+    {
+      "id": "T3",
+      "phase": "发布",
+      "title": "盯 release.yml 三步",
+      "when": "tag 已推",
+      "do": "看 verify（tag ↔ package.json ↔ CHANGELOG 三方一致）→ 双平台测试 → publish 三步；任一步红就停下来读日志，不要删 tag 重推。",
+      "who": "main",
+      "tool": "gh run watch",
+      "done": "publish 步日志里出现 `+ @modusensus/dsh-mneme@<版本>`。",
+      "risk": "R0",
+      "needs": ["T2"],
+      "why": "verify 是唯一挡住「tag 与包内容不一致」的闸门；publish 那行是发布真的发生了的凭据。",
+      "evidence": [
+        "verify 要求 CHANGELOG 里存在 ^## \\[<版本>\\] 小节——P4 没收口的话就挂在这一步"
+      ],
+      "gate": false
+    },
+    {
+      "id": "T4",
+      "phase": "发布",
+      "title": "过 publish 闸门",
+      "when": "publish 步报成功",
+      "do": "等 publish-gate.mjs 轮询 registry 直到能看到该版本；拿不到就以非零退出。",
+      "who": "ci",
+      "tool": "node dsh-mneme/scripts/publish-gate.mjs <版本>",
+      "done": "闸门返回成功（registry 传播通常要几分钟），工作流整体 success。",
+      "risk": "R0",
+      "needs": ["T3"],
+      "why": "publish 步自己说成功不等于 registry 上真有——传播有延迟，而旧版 verify 的假绿正是靠这个延迟骗过人的。",
+      "evidence": [
+        "旧 verify 写成 echo \"Published: $(npm view ...)\"，命令替换吞掉退出码：v0.8.16 日志里明明有 404 No match found，step 与 job 却都是 success"
+      ],
+      "gate": true
+    },
+    {
+      "id": "F1",
+      "phase": "复核",
+      "title": "核包与 gitHead",
+      "when": "工作流已 success",
+      "do": "npm view @modusensus/dsh-mneme version dist.gitHead dist.integrity dist.tarball，确认 latest = 目标版本且 gitHead = main 上那个提交。",
+      "who": "main",
+      "tool": "npm view",
+      "done": "version 与 gitHead 都对得上；integrity 与 tarball 记进发版记录。",
+      "risk": "R0",
+      "needs": ["T4"],
+      "why": "gitHead 是把 registry 上那个包钉回某个提交的唯一凭据；对不上就说明发出的不是你以为的那棵树。",
+      "evidence": [
+        "v0.8.16 的记录形状：npm latest=0.8.16、gitHead=e38caae、279 files / 1.4 MB"
+      ],
+      "gate": false
+    },
+    {
+      "id": "F2",
+      "phase": "复核",
+      "title": "核 GitHub Release 正文与隐私",
+      "when": "工作流已建出 Release",
+      "do": "看 Release 是否非 draft 非 prerelease，正文与 CHANGELOG 版本节是否一致，再扫一遍隐私（本机用户名、本机路径、邮箱、token 形状）。",
+      "who": "main",
+      "tool": "gh release view",
+      "done": "正文与仓库记录一致，隐私扫描 0 命中。",
+      "risk": "R0",
+      "needs": ["T4"],
+      "why": "Release 正文是对外页面，和 CHANGELOG 是两处显示；不一致时别人看到的是错的那份。",
+      "evidence": [
+        "仓库惯例是 Release 正文直接照搬 CHANGELOG 那节、不另写，以保证发布页与仓库记录一致"
+      ],
+      "gate": false
+    },
+    {
+      "id": "F3",
+      "phase": "复核",
+      "title": "清理分支与车道",
+      "when": "发布已确认",
+      "do": "删 release-prep/<版本> 分支（远端与本地）与发版车道；删车道前先摘 node_modules junction，别递归删。",
+      "who": "main",
+      "tool": "git push --delete / git worktree remove",
+      "done": "发版分支与车道都不在了，tag 与 Release 仍在。",
+      "risk": "R1",
+      "needs": ["F1", "F2"],
+      "why": "发版分支已进 main，留着只会和下一次的 release-prep 混淆；而递归删 junction 会把目标树里的 node_modules 一起毁掉。",
+      "evidence": [
+        "删分支不影响 tag（v0.8.11 的 tag 在删分支后仍指向 8519f57）"
+      ],
+      "gate": false
+    },
+    {
+      "id": "F4",
+      "phase": "复核",
+      "title": "回灌这一版的经验",
+      "when": "整个发版走完",
+      "do": "把这次新踩的坑、被证伪的旧结论、失效的凭据写成记忆条目（含根因与复现路径），并把本工作流里因此过时的步骤改掉。",
+      "who": "main",
+      "tool": "",
+      "done": "每条新坑都有一个可指认的条目；本文件的 version 加一，改动写进 commit message。",
+      "risk": "R1",
+      "needs": ["F3"],
+      "why": "这套流程本身就该随发版一起演进——只记不用的流程会烂掉，而不回灌的流程下次还会踩同一个坑。",
+      "evidence": [
+        "本文件里一半的 evidence 正是从这种回灌里来的：CRLF 静默失效、假绿闸门、Actions 建不了 PR"
+      ],
+      "gate": false
+    }
+  ]
+}

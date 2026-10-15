@@ -521,8 +521,20 @@ window.__ModuleLoader__.load({
         "memory.actions.credit": "复用",
         "memory.actions.creditValue": "{n} 次 · 上次 {d} 天前",
         "memory.actions.dep": "依赖",
-        "memory.actions.empty.title": "还没有可展示的做法",
-        "memory.actions.empty.body": "做法被复用第二次才算类型，第一次只是实例——同一路径被走通两次后，这里才会长出第一批节点。",
+        "memory.actions.zoom.in": "放大",
+        "memory.actions.zoom.out": "缩小",
+        "memory.actions.zoom.fit": "适应宽度",
+        "memory.actions.zoom.hint": "Ctrl/⌘ + 滚轮也能缩放",
+        "memory.actions.list.heading": "这个项目里的工作流",
+        "memory.actions.list.count": "工作流 {n} 条",
+        "memory.actions.list.meta": "{steps} 步 · {gates} 道闸门 · 反事实 {cf}/{steps}",
+        "memory.actions.scope.project": "项目 {name}",
+        "memory.actions.scope.global": "全局",
+        "memory.actions.scope.none": "项目未知",
+        "memory.actions.broken": "有文件读不出来：",
+        "memory.actions.empty.title": "这个项目里还没有工作流",
+        "memory.actions.empty.body": "工作流的本体住在项目里的 .mneme/pipelines/ 下——跟着仓库走，能被提交、能被 review、能被 CI 读。做法被复用第二次才算节点类型，第一次只是实例；同一路径被走通两次之后，它才会从会话里被提炼出来、落到那个目录里。",
+        "memory.actions.noRuns": "这一条还没有运行记录，所以每个节点都还是候选。",
         "memory.actions.settle.title": "本次运行",
         "memory.actions.settle.line": "「{title}」",
         "memory.actions.settle.used": "本次复用 {n} 条做法（勾选为被用上）",
@@ -1129,8 +1141,20 @@ window.__ModuleLoader__.load({
         "memory.actions.credit": "Reuse",
         "memory.actions.creditValue": "{n} uses · last {d}d ago",
         "memory.actions.dep": "depends on",
-        "memory.actions.empty.title": "No practices to show yet",
-        "memory.actions.empty.body": "A practice becomes a type on its second reuse — the first run is just an instance. Nodes appear here once the same path has been walked twice.",
+        "memory.actions.zoom.in": "Zoom in",
+        "memory.actions.zoom.out": "Zoom out",
+        "memory.actions.zoom.fit": "Fit width",
+        "memory.actions.zoom.hint": "Ctrl/⌘ + wheel also zooms",
+        "memory.actions.list.heading": "Workflows in this project",
+        "memory.actions.list.count": "{n} workflow(s)",
+        "memory.actions.list.meta": "{steps} steps · {gates} gates · counterfactual {cf}/{steps}",
+        "memory.actions.scope.project": "project {name}",
+        "memory.actions.scope.global": "global",
+        "memory.actions.scope.none": "project unknown",
+        "memory.actions.broken": "Some files could not be read:",
+        "memory.actions.empty.title": "No workflows in this project yet",
+        "memory.actions.empty.body": "A workflow lives in the project, under .mneme/pipelines/ — it travels with the repository: committable, reviewable, readable by CI. A practice becomes a node type on its second reuse; the first run is just an instance. Once the same path has been walked twice it gets distilled out of the session and lands in that directory.",
+        "memory.actions.noRuns": "No runs recorded for this workflow yet, so every step is still a candidate.",
         "memory.actions.settle.title": "This run",
         "memory.actions.settle.line": "\"{title}\"",
         "memory.actions.settle.used": "Reused {n} steps this run (checked = actually used)",
@@ -2078,7 +2102,18 @@ window.__ModuleLoader__.load({
       ".mneme-pipe-runDot--failed{background:var(--mneme-warn)}",
       ".mneme-pipe-runDot--refuted{background:var(--mneme-danger)}",
       // 图：宽态 SVG 分层 DAG（trace viewer 读法），窄态整块换成竖排列表。
-      ".mneme-pipe-graph{flex:1;min-height:0;overflow:auto;padding:4px 8px 2px}",
+      // 高度下限：flex:1 的基准是 0，只要某一层祖先没有确定高度（浮层与居中 sheet 都是 max-height
+      // 封顶），分到的就是 0 像素——画布「在 DOM 里、但看不见」。下限不修复成因，只保证最坏情况下
+      // 还能看见图；这跟上面那条撞车是两件事，别把任何一条当成另一条的修复。
+      ".mneme-pipe-graph{flex:1;min-height:220px;overflow:auto;padding:4px 8px 2px}",
+      // 缩放条与缩放容器。画布本身是 width:100% 的 SVG，所以「缩放」= 改外层容器的百分比宽度：
+      // 100% 就是适应栏宽，放大则容器比栏宽，滚动条自己出来——平移不必另写一套。
+      ".mneme-pipe-zoombar{flex:none;display:flex;align-items:center;gap:6px;padding:5px 12px 0;font-size:12px;color:var(--mneme-fg-dim)}",
+      ".mneme-pipe-zoombtn{border:1px solid var(--dsw-alias-border-l2);background:0 0;border-radius:6px;cursor:pointer;color:var(--mneme-fg-dim);font-family:inherit;font-size:12px;line-height:16px;padding:1px 7px}",
+      ".mneme-pipe-zoombtn:hover{background:var(--dsw-alias-interactive-bg-hover)}",
+      ".mneme-pipe-zoombtn:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}",
+      ".mneme-pipe-zoomval{min-width:40px;text-align:right;font-variant-numeric:tabular-nums}",
+      ".mneme-pipe-zoomwrap{min-width:0}",
       ".mneme-pipe-svg{display:block;width:100%;height:auto}",
       ".mneme-pipe-edge{stroke:var(--mneme-graphic-dim);fill:none;stroke-width:1.5}",
       ".mneme-pipe-edgeOn{stroke:var(--mneme-accent);fill:none;stroke-width:2.5}",
@@ -2111,7 +2146,7 @@ window.__ModuleLoader__.load({
       ".mneme-pipe-cf--none{background:0 0;border:1px dashed var(--dsw-alias-border-l2);color:var(--mneme-fg-dim)}",
       // 窄态（better-sidebar ~500px / 浮层内）：节点竖排列表化，边收成
       // 左侧轨道线 + 「依赖」芯片——换布局，不是缩放。
-      ".mneme-pipe-list{flex:1;min-height:0;overflow:auto;padding:4px 12px 8px}",
+      ".mneme-pipe-list{flex:1;min-height:180px;overflow:auto;padding:4px 12px 8px}",
       ".mneme-pipe-item{position:relative;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2);padding:8px 10px 8px 30px;margin:0 0 10px}",
       ".mneme-pipe-item::before{content:\"\";position:absolute;left:13px;top:-10px;height:10px;border-left:2px solid var(--mneme-graphic-dim)}",
       ".mneme-pipe-item:first-child::before{display:none}",
@@ -2141,7 +2176,24 @@ window.__ModuleLoader__.load({
       ".mneme-pipe-sheetbody{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column}",
       // 空态/加载/错误共用文案块。
       ".mneme-pipe-empty{flex:none;padding:18px 14px;text-align:center;font-size:13px;line-height:20px;color:var(--mneme-fg-dim)}",
-      ".mneme-pipe-emptyTitle{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);margin-bottom:4px}"
+      ".mneme-pipe-emptyTitle{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);margin-bottom:4px}",
+      // 工作流清单：**选择器**，不是「一屏」。它在上面占一条、图在下面占其余——
+      // 第一版把它做成吃掉整屏、点条目才换屏，结果画布藏在一次点击后面且界面上没有任何
+      // 提示，反馈连着两次说「看不到画布和节点」。上限用固定值不用百分比：百分比在
+      // 高度不确定的祖先下会被当成 none，又变回吃掉整屏。
+      ".mneme-pipe-wflist{flex:none;max-height:220px;min-height:0;overflow:auto;padding:8px 14px 10px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--dsw-alias-border-l1)}",
+      ".mneme-pipe-wfhead{flex:none;display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:12px;color:var(--mneme-fg-dim)}",
+      ".mneme-pipe-wf{display:block;width:100%;text-align:left;font-family:inherit;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2);padding:9px 11px;cursor:pointer;color:var(--dsw-alias-label-primary)}",
+      ".mneme-pipe-wf:hover{background:var(--dsw-alias-interactive-bg-hover)}",
+      ".mneme-pipe-wf:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}",
+      // 当前展开的那条：只有颜色不同，图仍由下面的画布独占——选择器不该抢主语的位置。
+      ".mneme-pipe-wf.mneme-on{border-color:var(--dsw-alias-state-business-primary)}",
+      ".mneme-pipe-wfTop{display:flex;align-items:baseline;justify-content:space-between;gap:8px}",
+      ".mneme-pipe-wfName{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);min-width:0}",
+      ".mneme-pipe-wfScope{flex:none;font-size:11px;color:var(--mneme-fg-dim)}",
+      ".mneme-pipe-wfMeta{display:block;margin-top:3px;font-size:12px;color:var(--mneme-fg-dim)}",
+      ".mneme-pipe-wfId{display:block;margin-top:2px;font-size:11px;color:var(--mneme-fg-dim)}",
+      ".mneme-pipe-broken{flex:none;font-size:12px;line-height:17px;color:var(--mneme-warn);padding:6px 14px 0}",
     ].join("\n");
     if (typeof document !== "undefined" && document.querySelector(`style[data-plugin-css="${CSS_TAG}"]`) === null) {
       const tag = document.createElement("style");
@@ -6666,126 +6718,75 @@ window.__ModuleLoader__.load({
     // 节点状态四值，refuted 是全篇核心信号（最扎眼）。
     const PIPELINE_STATES = ["candidate", "trusted", "stale", "refuted"];
 
-    // 假数据：一次「召回排障」做法，覆盖所有状态与运行结果。
-    const PIPELINE_MOCK = {
-      pipeline: {
-        id: "pl-recall-triage",
-        title: "召回排障",
-        scope: "global",
-        scopeLabel: "全局",
-        status: "active",
-        updatedAt: "2026-10-13T02:40:00.000Z"
-      },
-      nodes: [
-        {
-          id: "n1", kind: "step", title: "复现召回为空",
-          situation: "用户问了一个库里应该有答案的问题，检索却空手而归",
-          action: "先用原话重试检索，记录 query 与命中的记忆条目数",
-          why: "先把「检索坏了」和「库里没有」分开，不猜",
-          state: "trusted",
-          credit: { uses: 4, refuted: 0, lastUsedAt: "2026-10-12T09:10:00.000Z" },
-          counterfactual: { contrast: "不重试直接改配置，3 次里 2 次只是查询太长被截断", evidence: 2 },
-          source: { memoryIds: ["m-901", "m-877"], originSession: "s-338" }
-        },
-        {
-          id: "n2", kind: "step", title: "检查 BM25 分词",
-          situation: "重试仍为空",
-          action: "看分词后 query 是否被切碎（大小写/连字符/空格）",
-          why: "分词是检索第一跳，坏了后面全白做",
-          state: "trusted",
-          credit: { uses: 3, refuted: 0, lastUsedAt: "2026-10-11T18:00:00.000Z" },
-          counterfactual: { contrast: "跳过分词检查直接重建索引，慢且没修到点子上", evidence: 1 },
-          source: { memoryIds: ["m-855"], originSession: "s-312" }
-        },
-        {
-          id: "n3", kind: "gate", title: "换查询粒度重试",
-          situation: "分词正常但仍空",
-          action: "整句 → 关键词 → 逐词，三档各试一次",
-          why: "粒度不对是最常见的假阴性",
-          state: "trusted",
-          credit: { uses: 5, refuted: 1, lastUsedAt: "2026-10-12T20:30:00.000Z" },
-          counterfactual: { contrast: "只试整句，5 次里 3 次漏检", evidence: 2 },
-          source: { memoryIds: ["m-902"], originSession: "s-338" }
-        },
-        {
-          id: "n4", kind: "step", title: "检查向量索引年龄",
-          situation: "粒度三档都空",
-          action: "对比 vector-index 的最后构建时间与最近写入时间",
-          why: "索引落后于写入是静默丢召回的头号原因",
-          state: "candidate",
-          credit: { uses: 1, refuted: 0, lastUsedAt: "2026-10-12T20:30:00.000Z" },
-          counterfactual: { contrast: "还没攒够对照——只跑过一次", evidence: 0 },
-          source: { memoryIds: ["m-910"], originSession: "s-341" }
-        },
-        {
-          id: "n5", kind: "branch", title: "回滚 embedding 版本",
-          situation: "索引明显落后且重建失败",
-          action: "退回上一个可用的 embedding 模型版本重建",
-          why: "先恢复服务，再排查升级问题",
-          state: "stale",
-          credit: { uses: 2, refuted: 0, lastUsedAt: "2026-08-02T11:00:00.000Z" },
-          counterfactual: { contrast: "硬等新版修复，一次等了三天", evidence: 1 },
-          source: { memoryIds: ["m-402"], originSession: "s-150" }
-        },
-        {
-          id: "n6", kind: "artifact", title: "召回计数对照",
-          situation: "任何一步修复后",
-          action: "从 recall_runs 取修复前后 Top-N 命中率对比",
-          why: "让修复可验证，不靠感觉",
-          state: "trusted",
-          credit: { uses: 6, refuted: 0, lastUsedAt: "2026-10-12T20:30:00.000Z" },
-          counterfactual: { contrast: "不对照就宣布修复，两次被同一个 query 打脸", evidence: 2 },
-          source: { memoryIds: ["m-880", "m-901"], originSession: "s-338" }
-        },
-        {
-          id: "n7", kind: "step", title: "关闭 adaptive 阈值",
-          situation: "召回率偏低",
-          action: "直接把 adaptive 阈值关掉换固定值",
-          why: "（已被推翻）当时以为是阈值太紧",
-          state: "refuted",
-          credit: { uses: 1, refuted: 1, lastUsedAt: "2026-10-10T08:00:00.000Z" },
-          counterfactual: { contrast: "对照实验显示关掉后召回率反而下降 12%，问题在索引年龄", evidence: 3 },
-          source: { memoryIds: ["m-895"], originSession: "s-330" }
-        },
-        {
-          id: "n8", kind: "gate", title: "确认识别字段",
-          situation: "检索命中但内容不对",
-          action: "打开命中的记忆条目核对 scope 与类型",
-          why: "经常是 scope 隔离挡住了，不是检索问题",
-          state: "candidate",
-          credit: { uses: 0, refuted: 0, lastUsedAt: null },
-          counterfactual: null,
-          source: { memoryIds: ["m-912"], originSession: "s-342" }
-        }
-      ],
-      edges: [
-        { id: "e1", from: "n1", to: "n2", kind: "control", label: "" },
-        { id: "e2", from: "n1", to: "n4", kind: "control", label: "" },
-        { id: "e3", from: "n1", to: "n6", kind: "data", label: "" },
-        { id: "e4", from: "n2", to: "n3", kind: "control", label: "" },
-        { id: "e5", from: "n4", to: "n5", kind: "control", label: "重建失败" },
-        { id: "e6", from: "n4", to: "n7", kind: "control", label: "误判" },
-        { id: "e7", from: "n3", to: "n8", kind: "control", label: "" },
-        { id: "e8", from: "n6", to: "n3", kind: "data", label: "仍偏低" }
-      ],
-      runs: [
-        {
-          id: "r1", at: "2026-10-12T20:30:00.000Z", outcome: "ok",
-          path: ["n1", "n2", "n3", "n6", "n8"],
-          usedNodeIds: ["n2", "n3", "n6"]
-        },
-        {
-          id: "r2", at: "2026-10-10T08:00:00.000Z", outcome: "refuted",
-          path: ["n1", "n4", "n7"],
-          usedNodeIds: ["n4"]
-        },
-        {
-          id: "r3", at: "2026-10-12T09:10:00.000Z", outcome: "failed",
-          path: ["n1", "n4", "n5"],
-          usedNodeIds: []
-        }
-      ]
-    };
+    // 数据面 = **项目里**的工作流（服务端 /api/dsh-mneme/pipeline 投影成 mneme.pipeline/v1）。
+    // 项目从哪来：只有客户端拿得到会话的工作目录，所以这里解析出 cwd、当 ?project= 带上；
+    // 服务端没有「当前项目」这个概念，也不许替谁猜一个。
+    // 为什么四个座位共用缓存、且缓存**按项目 + 按工作流**分桶：四个座位读的必须是同一份
+    // ——「会话头说有 3 条、右栏说有 5 条」这种分家没人查得出来；同理，同一个进程里开着
+    // 两个不同项目的会话时，不分桶就会把 A 项目的清单端给 B 项目看，而画面看不出错。
+    const pipelineDocs = new Map();
+    const pipelinePendingByKey = new Map();
+    function pipelineKey(project, id) { return (project || "") + "\u0000" + (id || ""); }
+    function loadPipeline(project, id) {
+      const key = pipelineKey(project, id);
+      if (!pipelinePendingByKey.has(key)) {
+        const params = [];
+        if (project) params.push("project=" + encodeURIComponent(project));
+        if (id) params.push("id=" + encodeURIComponent(id));
+        const url = "/api/dsh-mneme/pipeline" + (params.length ? "?" + params.join("&") : "");
+        pipelinePendingByKey.set(key, apiFetch(url)
+          .then((res) => (res.ok ? res.json() : null))
+          .catch(() => null)
+          .then((doc) => { pipelineDocs.set(key, doc); return doc; }));
+      }
+      return pipelinePendingByKey.get(key);
+    }
+    // undefined = 还在读；null = 读不出来；对象 = 拿到了（其中 pipeline 为 null 表示
+    // 这个项目里还没有工作流——那是空态，不是错误，别把两者画成同一张脸）。
+    // id 为空 = 取清单（服务端会顺带给出第一条的完整投影，够结算卡用）。
+    function usePipeline(project, id) {
+      const key = pipelineKey(project, id);
+      const [doc, setDoc] = useState(pipelineDocs.has(key) ? pipelineDocs.get(key) : undefined);
+      useEffect(() => {
+        let alive = true;
+        loadPipeline(project, id).then((d) => { if (alive) setDoc(d); });
+        return () => { alive = false; };
+      }, [key]);
+      return doc;
+    }
+    // 会话工作目录。两条来源依次试，各自兜自己的异常——一条抛了不能把另一条也带走；
+    // 两处都试不到就**返回 null**（面板退到全局层，并如实标「项目未知」），绝不退回进程
+    // 目录之类的东西——那会把「读不到」变成「读到别处」，而后者在界面上看不出来，是最难
+    // 查的一类错。
+    // 首选会话列表快照：byId[sessionId].cwd 是宿主给客户端的公开形状（dsh-context 用的
+    // 就是这条）；sessions.get() 是宿主侧写法，客户端不一定有，所以放第二位。
+    function sessionProject(ctx, sessionId) {
+      if (!sessionId || !ctx || typeof ctx.get !== "function") return null;
+      const warn = (err) => console.warn("[dsh-mneme] session cwd lookup failed:", err);
+      const pick = (row) => {
+        if (!row) return null;
+        const cwd = (row.header && row.header.cwd) || row.cwd;
+        return typeof cwd === "string" && cwd ? cwd : null;
+      };
+      let sessions = null;
+      try { sessions = ctx.get("sessions"); } catch (err) { warn(err); }
+      if (sessions) {
+        try {
+          const snap = sessions.list && typeof sessions.list.getSnapshot === "function"
+            ? sessions.list.getSnapshot()
+            : null;
+          const hit = pick(snap && snap.byId ? snap.byId[sessionId] : null);
+          if (hit) return hit;
+        } catch (err) { warn(err); }
+        try {
+          if (typeof sessions.get === "function") {
+            const hit = pick(sessions.get(sessionId));
+            if (hit) return hit;
+          }
+        } catch (err) { warn(err); }
+      }
+      return null;
+    }
 
     // DAG 分层布局：Kahn 最长路分层（层数 = 到该节点最长边数），
     // 防环——正常分层算完后如果还有节点没落位（说明有环），
@@ -7052,6 +7053,104 @@ window.__ModuleLoader__.load({
       );
     }
 
+    // 条目清单（名字 + 规模 + 作用域）：图上方的**选择器**。
+    // 它解决的是「这是哪条工作流」——一进来就是一张图时这个问题没有落点，多条之间也没得选。
+    // 但它不占整屏：图和它同屏，见下面的 PipelineBrowser。
+    function PipelineWorkflowList(props) {
+      const { t, data, activeId, onOpen } = props;
+      const list = (data && data.available) || [];
+      const scopeOf = (row) => (row.scope === "global"
+        ? t("memory.actions.scope.global")
+        : t("memory.actions.scope.project").replace("{name}", row.scopeLabel || row.scope));
+      return h("div", { className: "mneme-pipe-wflist" },
+        h("div", { className: "mneme-pipe-wfhead" },
+          h("span", null, t("memory.actions.list.heading")),
+          h("span", null, t("memory.actions.list.count").replace("{n}", String(list.length)))
+        ),
+        list.length
+          ? list.map((row) => h("button", {
+              key: row.id,
+              type: "button",
+              className: "mneme-pipe-wf" + (row.id === activeId ? " mneme-on" : ""),
+              "aria-current": row.id === activeId ? "true" : undefined,
+              onClick: () => onOpen(row.id)
+            },
+              h("span", { className: "mneme-pipe-wfTop" },
+                h("span", { className: "mneme-pipe-wfName" }, row.title || row.id),
+                h("span", { className: "mneme-pipe-wfScope" }, scopeOf(row))
+              ),
+              h("span", { className: "mneme-pipe-wfMeta" }, t("memory.actions.list.meta")
+                .replace("{steps}", String(row.steps || 0))
+                .replace("{gates}", String(row.gates || 0))
+                .replace("{cf}", String(row.contrast || 0))),
+              h("span", { className: "mneme-pipe-wfId" }, row.id)
+            ))
+          // 「读得出来但一份都没有」与「读不出来」是两回事，别画成同一张脸：
+          // 前者要告诉人文件该放哪，后者只有 loadPipeline 返回 null 时才是。
+          : h("div", { className: "mneme-pipe-empty" },
+              h("div", { className: "mneme-pipe-emptyTitle" }, t("memory.actions.empty.title")),
+              t("memory.actions.empty.body")
+            ),
+        data && data.unreadable && data.unreadable.length
+          ? h("div", { className: "mneme-pipe-broken" },
+              t("memory.actions.broken") + " " + data.unreadable.map((u) => u.detail || u.dir).join("；"))
+          : null
+      );
+    }
+
+    // 清单与图**同屏**：上面清单（选择器），下面画布（主语），默认展开第一条。
+    // 形状换过两次，两次的教训都留在这里，免得再翻回去：
+    //   一进来就是图 —— 没有名字、没有落点，用户要的是「像 Hermes 那样一串条目」；
+    //   清单 ⟷ 图两屏来回切 —— 条目有了，但画布藏在一次点击后面、界面上没有任何提示，
+    //   反馈连着两次说「看不到画布和节点」。
+    // 两个 usePipeline 都是无条件调用：hook 不能条件调用，而「默认选第一条」这件事
+    // 恰好可以放在两个读取之间，不必为此拆组件。
+    function PipelineBrowser(props) {
+      const { t, project } = props;
+      const [picked, setPicked] = useState(null);
+      const listDoc = usePipeline(project, null);
+      const rows = (listDoc && listDoc.available) || [];
+      // 没手选过就跟第一条；手选之后清单再刷新也不跳回去（否则一刷新就把人的选择抹掉）。
+      const activeId = picked || (rows.length ? rows[0].id : null);
+      const detailDoc = usePipeline(project, activeId);
+      return h("div", {
+        className: "mneme-pipe",
+        style: { height: "100%", display: "flex", flexDirection: "column", minHeight: "0" }
+      },
+        h(PipelineWorkflowList, { t, data: listDoc, activeId, onOpen: setPicked }),
+        h(PipelineView, { t, data: detailDoc })
+      );
+    }
+
+    // 画布缩放。为什么要有：19 步是一条竖链，固有尺寸约 174×2010，被 width:100% 拉到栏宽之后
+    // 高度上万像素——只能上下滚，既看不到全貌也没法凑近看某一段。按钮管精确、滚轮管顺手。
+    const PIPELINE_ZOOM_MIN = 0.3;
+    const PIPELINE_ZOOM_MAX = 4;
+    const clampZoom = (z) => Math.min(PIPELINE_ZOOM_MAX, Math.max(PIPELINE_ZOOM_MIN, z));
+
+    function PipelineZoomBar(props) {
+      const { t, zoom, onZoom } = props;
+      return h("div", { className: "mneme-pipe-zoombar" },
+        h("button", {
+          type: "button", className: "mneme-pipe-zoombtn",
+          title: t("memory.actions.zoom.out"), "aria-label": t("memory.actions.zoom.out"),
+          onClick: () => onZoom(zoom / 1.25)
+        }, "−"),
+        h("span", { className: "mneme-pipe-zoomval" },
+          t("memory.actions.zoom.value").replace("{n}", String(Math.round(zoom * 100)))),
+        h("button", {
+          type: "button", className: "mneme-pipe-zoombtn",
+          title: t("memory.actions.zoom.in"), "aria-label": t("memory.actions.zoom.in"),
+          onClick: () => onZoom(zoom * 1.25)
+        }, "+"),
+        h("button", {
+          type: "button", className: "mneme-pipe-zoombtn",
+          title: t("memory.actions.zoom.hint"),
+          onClick: () => onZoom(1)
+        }, t("memory.actions.zoom.fit"))
+      );
+    }
+
     // 主视图：宽态 SVG 图 ↔ 窄态列表按容器宽切换（640px 阈值，ResizeObserver）。
     // 根挂 .mneme-pipeview 拿语义色变量层。
     function PipelineView(props) {
@@ -7061,17 +7160,38 @@ window.__ModuleLoader__.load({
       const [selectedRunId, setSelectedRunId] = react.useState(runs.length ? runs[0].id : null);
       const [selectedNodeId, setSelectedNodeId] = react.useState(null);
       const rootRef = react.useRef(null);
+      const graphRef = react.useRef(null);
       const [narrow, setNarrow] = react.useState(false);
+      const [zoom, setZoom] = react.useState(1);
       react.useEffect(() => {
         const el = rootRef.current;
         if (!el || typeof ResizeObserver !== "function") return;
         const ro = new ResizeObserver((entries) => {
           const w = entries && entries[0] ? entries[0].contentRect.width : 0;
-          setNarrow(w > 0 && w < 640);
+          // 阈值从 640 降到 320：这张图是竖链，固有宽度只有 174px——栏窄一点反而更该画图。
+          // 640 那档是按当年那张摊得很开的假数据定的，真数据下它只会把右栏（通常 400~600px）
+          // 全部推给「一列节点卡片」那一支，于是「看不到图谱」。
+          setNarrow(w > 0 && w < 320);
         });
         ro.observe(el);
         return () => ro.disconnect();
       }, []);
+      // 滚轮缩放必须**自己挂非被动监听**：React 的 onWheel 是挂在 root 上的被动监听，
+      // preventDefault 会被浏览器忽略（控制台里那句 "Unable to preventDefault inside passive
+      // event listener"），结果是 Ctrl+滚轮既缩放画布、又缩放整页，谁也没拦住。
+      // 只认 Ctrl/⌘：普通滚轮仍旧是滚动画布——劫持它会让人滚不到下面的图例。
+      react.useEffect(() => {
+        const el = graphRef.current;
+        if (!el || typeof el.addEventListener !== "function") return undefined;
+        const onWheel = (ev) => {
+          if (!ev.ctrlKey && !ev.metaKey) return;
+          ev.preventDefault();
+          setZoom((z) => clampZoom(z * (ev.deltaY < 0 ? 1.15 : 1 / 1.15)));
+        };
+        el.addEventListener("wheel", onWheel, { passive: false });
+        return () => el.removeEventListener("wheel", onWheel);
+      }, [narrow]);
+
       const run = runs.find((r) => r.id === selectedRunId) || null;
       const selectedNode = selectedNodeId ? nodes.find((n) => n.id === selectedNodeId) : null;
       if (!nodes.length) {
@@ -7085,15 +7205,31 @@ window.__ModuleLoader__.load({
       }
       return h("div", { className: "mneme-pipeview", ref: rootRef, style: { display: "flex", flexDirection: "column", flex: "1", minHeight: "0" } },
         h(PipelineRunChips, { t, runs, selectedRunId, onSelectRun: setSelectedRunId }),
+        // 一条运行记录都没有 = 全部候选。这句话得说出来：卡片上「候选」两个字本身
+        // 不解释任何东西，而用户在这一屏最容易问的就是「为什么全是候选」。
+        runs.length ? null : h("div", { className: "mneme-hint" }, t("memory.actions.noRuns")),
+        // 缩放条放在分支**外面**：不论宽窄都在，既是控制，也是「新代码到没到」的肉眼标记。
+        h(PipelineZoomBar, { t, zoom, onZoom: (z) => setZoom(clampZoom(z)) }),
         narrow
           ? h(PipelineList, { t, data, run, selectedNodeId, onSelectNode: setSelectedNodeId })
-          : h("div", { className: "mneme-pipe-graph" },
-              h(PipelineGraphSvg, { t, data, run, selectedNodeId, onSelectNode: setSelectedNodeId })
+          : h("div", { className: "mneme-pipe-graph", ref: graphRef },
+              // 宽度用百分比而不是 transform：百分比改的是**布局尺寸**，容器照常出滚动条，
+              // 于是顺带就有了平移；transform 只改绘制，放大出去的那一半永远滚不到。
+              h("div", { className: "mneme-pipe-zoomwrap", style: { width: (zoom * 100) + "%" } },
+                h(PipelineGraphSvg, { t, data, run, selectedNodeId, onSelectNode: setSelectedNodeId })
+              )
             ),
         h(PipelineLegend, { t }),
         selectedNode ? h(PipelineNodeDetail, { t, node: selectedNode }) : null,
         h("div", { className: "mneme-pipe-notice" }, t("memory.actions.notice"))
       );
+    }
+
+    // 右栏 tab 的正文。单独包一层组件、而不是把 hook 塞进 slots.register 的回调里：
+    // 那个回调是不是当组件渲染由宿主决定，hook 放在名字明确的组件里才不必赌这件事。
+    function PipelinePane(props) {
+      const { t, project } = props;
+      return h(PipelineBrowser, { t, project });
     }
 
     // 流水线标记：两个步骤块 + 依赖连线 + 状态点；开合状态用右上角
@@ -7116,7 +7252,7 @@ window.__ModuleLoader__.load({
     // portal 到 body。老宿主没有右栏服务时补一个「完整视图」按钮退回
     // 居中 sheet（形态沿用记忆库 overlay 的背板 + 居中面板）。
     function PipelineHeaderEntry(props) {
-      const { t, hasPane, openPane } = props;
+      const { t, hasPane, openPane, project } = props;
       const [open, setOpen] = useState(false);
       const [sheetOpen, setSheetOpen] = useState(false);
       const openRef = useRef(false);
@@ -7225,7 +7361,16 @@ window.__ModuleLoader__.load({
           if (panelRef.current) panelRef.current.focus();
         }
       };
-      const candidates = PIPELINE_MOCK.nodes.filter((n) => n.state === "candidate").length;
+      const doc = usePipeline(project, null);
+      // 头部这一格标的是**这份清单读的是哪个项目**（某条工作流归谁，标在清单每一行上）：
+      // 只取目录名，绝对路径不上界面——面板是会被截图的那一面。认不出项目时如实说，
+      // 而不是编一个「全局」顶上：认不出和全局是两件事。
+      const projectSource = ((doc && doc.sources) || []).find((s) => s.scope === "project");
+      const scopeLabel = projectSource && projectSource.label
+        ? t("memory.actions.scope.project").replace("{name}", projectSource.label)
+        : t("memory.actions.scope.none");
+      // 数的是这个项目里读出几条工作流；没拿到数据时是 0，不是随便挑一个数。
+      const workflowCount = doc && doc.available ? doc.available.length : 0;
 
       const panel = (open && reactDom && typeof document !== "undefined")
         ? reactDom.createPortal(
@@ -7244,7 +7389,7 @@ window.__ModuleLoader__.load({
               h("div", { className: "mneme-pipe-head" },
                 h("span", { className: "mneme-pipe-title" }, t("memory.actions.title")),
                 h("span", { className: "mneme-pipe-beta" }, t("memory.actions.beta")),
-                h("span", { className: "mneme-pipe-scope" }, PIPELINE_MOCK.pipeline.scopeLabel),
+                h("span", { className: "mneme-pipe-scope" }, scopeLabel),
                 h("button", {
                   type: "button",
                   className: "mneme-pipe-run",
@@ -7260,7 +7405,7 @@ window.__ModuleLoader__.load({
                 }, hasPane && openPane ? t("memory.actions.openPane") : t("memory.actions.viewFull"))
               ),
               h("div", { className: "mneme-pipe-notice" }, t("memory.actions.notice")),
-              h(PipelineView, { t, data: PIPELINE_MOCK })
+              h(PipelineBrowser, { t, project })
             ),
             document.body
           )
@@ -7282,10 +7427,10 @@ window.__ModuleLoader__.load({
                 h("div", { className: "mneme-pipe-sheetbar" },
                   h("span", { className: "mneme-pipe-title" }, t("memory.actions.title")),
                   h("span", { className: "mneme-pipe-beta" }, t("memory.actions.beta")),
-                  h("span", { className: "mneme-pipe-scope" }, PIPELINE_MOCK.pipeline.scopeLabel),
+                  h("span", { className: "mneme-pipe-scope" }, scopeLabel),
                   h("button", { type: "button", className: "mneme-pipe-run", onClick: () => setSheetOpen(false) }, t("memory.actions.close"))
                 ),
-                h("div", { className: "mneme-pipe-sheetbody" }, h(PipelineView, { t, data: PIPELINE_MOCK }))
+                h("div", { className: "mneme-pipe-sheetbody" }, h(PipelineBrowser, { t, project }))
               )
             ),
             document.body
@@ -7310,10 +7455,10 @@ window.__ModuleLoader__.load({
         },
           h(PipelineMark, { open }),
           h("span", { ref: labelRef, className: "mneme-pipe-triggerLabel" }, t("memory.actions.title")),
-          candidates > 0 ? h("span", {
+          workflowCount > 0 ? h("span", {
             className: "mneme-pipe-dot",
-            title: t("memory.actions.candidates").replace("{n}", String(candidates))
-          }, String(candidates)) : null
+            title: t("memory.actions.list.count").replace("{n}", String(workflowCount))
+          }, String(workflowCount)) : null
         ),
         panel,
         sheet
@@ -7321,11 +7466,13 @@ window.__ModuleLoader__.load({
     }
 
     // 对话行结算卡（turnTail）：死的落款——「这次跑哪条被用上了」。
-    // 与会话头浮层共用同一份假数据；卡上勾选 = usedNodeIds（真正被复用），
-    // 其余 path 节点只是被走过。
+    // 与会话头浮层读同一份数据；卡上勾选 = usedNodeIds（真正被复用），
+    // 其余 path 节点只是被走过。没有运行记录时整张卡不出现——发一条「本次没用上任何
+    // 做法」的空卡比不发更吵：它每一轮都会来一次。
     function TurnRunCard(props) {
-      const { t } = props;
-      const data = PIPELINE_MOCK;
+      const { t, project } = props;
+      const doc = usePipeline(project, null);
+      const data = doc || {};
       const run = (data.runs || []).find((r) => r.id === "r1") || (data.runs || [])[0];
       if (!run) return null;
       const used = run.usedNodeIds || [];
@@ -7393,12 +7540,18 @@ window.__ModuleLoader__.load({
       };
 
       // 会话头入口：.actions 座位（.corner 被原生侧栏展开键占用，别用）。
+      // 会话工作目录只有客户端拿得到，而「当前是哪个会话」只在座位注入里给——所以
+      // 每个座位都要 inject: (sessionId) => ({ sessionId })，否则读到的永远是全局层。
+      // 宿主若不吃这个选项，project 就是 null，面板如实说「项目未知」，不假装成功。
       ctx.slots.inject("conversation.session.header.actions", () => {
         return ctx.slots.register({
           name: "conversation.session.header.actions",
           id: "dsh-mneme:pipeline",
-          order: 30
-        }, (props) => h(PipelineHeaderEntry, { t, hasPane, openPane }));
+          order: 30,
+          inject: (sessionId) => ({ sessionId })
+        }, (props) => h(PipelineHeaderEntry, {
+          t, hasPane, openPane, project: sessionProject(ctx, props && props.sessionId)
+        }));
       });
 
       // 对话行结算卡：回答「这次跑哪条被用上了」。
@@ -7406,35 +7559,53 @@ window.__ModuleLoader__.load({
         return ctx.slots.register({
           name: "conversation.chat.turnTail",
           id: "dsh-mneme:pipeline:settle",
-          kind: "list",
-          scope: "session"
-        }, (props) => h(TurnRunCard, { t }));
+          // kind/scope 是**声明方**（宿主）在 children 上写的，注册方不重复声明——
+          // 座位本身已经声明成 { kind: "list", scope: "session" }，多写一份只是噪音，
+          // 万一注册侧按 schema 严校就是一次启动期抛错。
+          inject: (sessionId) => ({ sessionId })
+        }, (props) => h(TurnRunCard, { t, project: sessionProject(ctx, props && props.sessionId) }));
       });
+
+      // tab 的**类型**与它的**正文**必须各自兜自己的异常，而且类型注册要幂等。
+      // 为什么：宿主对重复的类型 id 会抛（`sidebarRight: tab type id "…" is already registered`），
+      // 而这两件事的生命周期不一样——类型注册挂在宿主服务 `sidebarRightTabs` 上、插件重挂（刷新 /
+      // 热重载 / 会话重建）时**留着**；正文座位是挂插件 scope 的，会随插件回收、重挂时要重来。
+      // 原来两件事写在同一个 try 里，于是第二次挂载时类型那一抛就把正文一起带走了：界面上
+      // 只剩宿主的 fallback「这类内容还没有可用的查看方式」，而错误只落在浏览器控制台里
+      // ——看不见、也搜不到，是最费时间的一类。
+      try {
+        const tabs = typeof ctx.get === "function" ? ctx.get("sidebarRightTabs") : null;
+        if (tabs && typeof tabs.register === "function") {
+          const already = typeof tabs.get === "function" ? tabs.get(PIPELINE_ACTIONS_TAB_ID) : null;
+          if (!already) {
+            tabs.register({
+              id: PIPELINE_ACTIONS_TAB_ID,
+              kind: PIPELINE_ACTIONS_TAB_KIND,
+              title: () => t("memory.actions.title"),
+              guide: [{
+                id: "dsh-mneme:pipeline:guide",
+                order: 10,
+                title: () => t("memory.actions.title"),
+                description: () => t("memory.actions.notice"),
+                icon: (size) => h(PipelineMark, { size, open: false })
+              }]
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("[dsh-mneme] action pipeline tab type registration failed:", err);
+      }
 
       try {
         const tabs = typeof ctx.get === "function" ? ctx.get("sidebarRightTabs") : null;
         if (tabs && typeof tabs.register === "function") {
-          tabs.register({
-            id: PIPELINE_ACTIONS_TAB_ID,
-            kind: PIPELINE_ACTIONS_TAB_KIND,
-            title: () => t("memory.actions.title"),
-            guide: [{
-              id: "dsh-mneme:pipeline:guide",
-              order: 10,
-              title: () => t("memory.actions.title"),
-              description: () => t("memory.actions.notice"),
-              icon: (size) => h(PipelineMark, { size, open: false })
-            }]
-          });
           // 正文/标题都是按键座位：key = 类型 id，宿主按当前 tab 取。
           ctx.slots.inject("sidebar.right.pane.tab", () => {
             return ctx.slots.register({
               name: "sidebar.right.pane.tab",
-              key: PIPELINE_ACTIONS_TAB_ID
-            }, () => h("div", {
-              className: "mneme-pipe",
-              style: { height: "100%", display: "flex", flexDirection: "column", minHeight: "0" }
-            }, h(PipelineView, { t, data: PIPELINE_MOCK })));
+              key: PIPELINE_ACTIONS_TAB_ID,
+              inject: (sessionId) => ({ sessionId })
+            }, (props) => h(PipelinePane, { t, project: sessionProject(ctx, props && props.sessionId) }));
           });
           ctx.slots.inject("sidebar.right.pane.tab.title", () => {
             return ctx.slots.register({
@@ -7444,7 +7615,7 @@ window.__ModuleLoader__.load({
           });
         }
       } catch (err) {
-        console.warn("[dsh-mneme] action pipeline sidebar registration failed:", err);
+        console.warn("[dsh-mneme] action pipeline pane body registration failed:", err);
       }
 
       if (!hasPane) {
