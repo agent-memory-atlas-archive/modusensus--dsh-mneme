@@ -12,6 +12,7 @@ import {
   suggestRetirements,
   RETIRE_AFTER_SKIPS,
   RETIRE_AFTER_DETOURS,
+  projectLabel,
   RISK_LEVELS,
   ACTORS
 } from "../src/pipeline.js";
@@ -245,6 +246,28 @@ test("readPipelineDoc：认不出 id 时不编造，但要列出有什么", () =
   assert.deepEqual(doc.nodes, []);
   assert.deepEqual(doc.available.map((p) => p.id), ["dsh-mneme-release"]);
 });
+
+test("作用域标签对两种分隔符一视同仁：Windows 路径不得整条画进面板", () => {
+  // 回归锁，指向一个**只在 posix 上现形**的缺陷：原实现借 path.basename() 取目录名，
+  // 它跟着运行平台走——Linux 上一条 Windows 路径会被整条当成标签，而面板是会被
+  // 截图、被贴进 issue 的那一面，标签里会带着本机用户名。
+  //
+  // **这条锁在 Windows 上是绿的、也永远抓不住回退**：win32.basename 两种分隔符都认，
+  // 旧实现在本机结果就是对的。它的杀伤力只在 ubuntu 矩阵腿上——别当成冗余删掉。
+  const win = projectLabel("C:\\Users\\someone\\Desktop\\dsh-mneme");
+  const fwd = projectLabel("C:/Users/someone/Desktop/dsh-mneme");
+  const posix = projectLabel("/home/someone/Desktop/dsh-mneme");
+  assert.equal(win, "dsh-mneme", "反斜杠路径要取到目录名");
+  assert.equal(fwd, "dsh-mneme", "正斜杠路径要取到目录名");
+  assert.equal(posix, "dsh-mneme", "posix 路径行为不变");
+  assert.equal(projectLabel("/home/someone/Desktop/dsh-mneme/"), "dsh-mneme", "尾随分隔符不改变结果");
+  assert.equal(win.includes("someone"), false, "标签里不得出现用户名");
+  assert.equal(/[\\/]/.test(win), false, "标签里不得残留分隔符");
+  // 取不到目录名时按原样回退（与 basename 的 "" 语义一致）。
+  assert.equal(projectLabel("/"), "/", "根路径回退原串");
+  assert.equal(projectLabel(""), "", "空串回退原串");
+});
+
 
 test("清单行自带规模与作用域，够第一屏用（不必先读图）", () => {
   const doc = readPipelineDoc({ projectRoot: REPO_ROOT });
