@@ -1,0 +1,456 @@
+/**
+ * M.O.（Modus Operandi · 手法）工作流的**读侧**。
+ *
+ * 本体的落点是仓库（`<项目>/.mneme/pipelines/*.json`），不是记忆库：
+ * 工作流是要跑的东西，必须能提交、能 PR、能 review、能被 CI 读、能整版回退；
+ * 记忆库只存「为什么有这条」（证据）与「跑得怎么样」（结算）。
+ * 三句话的分工：记忆是「为什么」，仓库是「怎么跑」，图是「看起来怎么样」。
+ *
+ * 这里只做三件事：读盘 → 校验（宁可读不出来，也不要读出一个半成品）→ 投影成
+ * `mneme.pipeline/v1`（前端与 agent 共用的那一份结构化数据）。
+ *
+ * 为什么不用 YAML：本包运行时依赖只有 `morphicons` 一个，为一个配置文件引 YAML
+ * 解析器不划算；手写子集解析器则是给未来埋一个「读起来对、跑起来错」的坑。
+ * 人读的形态由面板渲染负责，不靠文件格式。
+ *
+ * **两层来源**（2026-10-15 定）：项目层在前、全局层在后，顺序即优先级。
+ * 一条工作流默认属于某个项目，跟着项目走；装一次插件就在所有项目里看到同一套
+ * 「全局手法」，正是设计备忘要避免的局面——本机活跃记忆里 95.7% 的
+ * `workspace_scope` 为空，「全局」于是变成谁都不看的杂物堆。全局层留着的唯一
+ * 理由是接那些**跨项目复用**的手法，而跨项目复用是一个要留痕的显式动作。
+ */
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { dirname, join, basename } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/**
+ * **全局层**的家：插件包自带的 `pipelines/`。算法是「本模块所在目录的上一级」——
+ * src/ 与 lib/ 都在包根下，所以这个式子对源码树和发布包同时成立。
+ *
+ * 它只是**兜底层**，不是默认住处：默认住处是 `projectPipelineDir()`。发布包里今天
+ * 没有 `pipelines/`（目录为空即不进包），所以全局层通常是空的——**这正是想要的**：
+ * 一条手法该不该跨项目用，得是一个人说出来的动作，而不是装插件时顺手塞进去的默认。
+ */
+export function defaultPipelineDir() {
+  return join(dirname(fileURLToPath(import.meta.url)), "..", "pipelines");
+}
+
+/** **项目层**的家：`<项目>/.mneme/pipelines/*.json`。点开头不碍眼，但仍随仓库提交。 */
+export const PROJECT_PIPELINE_SUBDIR = ".mneme";
+
+export function projectPipelineDir(projectRoot) {
+  return join(projectRoot, PROJECT_PIPELINE_SUBDIR, "pipelines");
+}
+
+/**
+ * 项目根 → 面板上那个作用域标签。**只取目录名，不把整条绝对路径画出去**：
+ * 绝对路径里有本机用户名，而面板是会被截图、被贴进 issue 的那一面。
+ * 机器要用的完整路径另在 `sources[].dir`，那是数据，不是给人读的。
+ */
+export function projectLabel(projectRoot) {
+  const base = basename(projectRoot);
+  return base === "" ? projectRoot : base;
+}
+
+/**
+ * 读取来源，**项目层在前、全局层在后**——顺序就是优先级：同 id 时项目层赢。
+ *
+ * 没有项目根（会话工作目录那一刻不可得）时只给全局层，并如实标 `project: null`；
+ * **绝不回退到进程自己所在的目录**：那会把「读不到」变成「读到别的地方」，
+ * 而后者在界面上看不出来，是最难查的一类错。
+ */
+export function pipelineSources({ projectRoot = null, pluginDir = defaultPipelineDir() } = {}) {
+  const sources = [];
+  const root = typeof projectRoot === "string" ? projectRoot.trim() : "";
+  if (root !== "") sources.push({ scope: "project", label: projectLabel(root), dir: projectPipelineDir(root) });
+  sources.push({ scope: "global", label: null, dir: pluginDir });
+  return sources;
+}
+
+/** 风险四档（R0–R3）。跨档按最高档算；子 agent 只准接 R0 / R1。 */
+export const RISK_LEVELS = ["R0", "R1", "R2", "R3"];
+
+/** 这一步谁做。`human` 与 `ci` 是闸门与流水线自己的位置，不是 agent。 */
+export const ACTORS = ["main", "subagent", "human", "ci"];
+
+/** 工作流状态：草稿 / 生效 / 退役。退役不删文件——留着才知道它曾经存在过。 */
+export const STATUSES = ["draft", "active", "retired"];
+
+/** 节点状态四值；`refuted` 是全篇核心信号。 */
+export const NODE_STATES = ["candidate", "trusted", "stale", "refuted"];
+
+/** 单层最多读多少条。目录被人塞满时宁可报错，也不要把一次面板刷新变成磁盘扫描。 */
+const MAX_PIPELINES = 200;
+
+const ID_RE = /^[a-z0-9][a-z0-9._-]*$/;
+const STEP_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/** 校验失败的统一出口：一次把话说完，别让人一轮修一条。 */
+class PipelineError extends Error {
+  constructor(file, problems) {
+    super(`${file}: ${problems.join("; ")}`);
+    this.name = "PipelineError";
+    this.problems = problems;
+  }
+}
+
+function isPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+/**
+ * 校验一条工作流。返回归一化后的对象；有任何问题就抛，不返回「部分可用」的东西
+ * ——半个工作流比没有工作流更危险，因为它会被当成完整的跑。
+ */
+export function validatePipeline(raw, file = "<pipeline>") {
+  const problems = [];
+  const bad = (msg) => problems.push(msg);
+
+  if (!isPlainObject(raw)) {
+    throw new PipelineError(file, ["顶层必须是一个对象"]);
+  }
+
+  if (!isNonEmptyString(raw.id) || !ID_RE.test(raw.id)) {
+    bad("id 必须是小写 kebab（如 dsh-mneme-maintenance）");
+  }
+  if (!isNonEmptyString(raw.name)) bad("name 必须是字符串");
+  if (!isNonEmptyString(raw.project)) bad("project 必须是字符串（如 slow-stack/mneme）");
+  if (!Number.isInteger(raw.version) || raw.version < 0) bad("version 必须是从 0 起的整数");
+  if (!STATUSES.includes(raw.status)) bad(`status 必须是 ${STATUSES.join(" / ")}`);
+  if (!isNonEmptyString(raw.done)) bad("done 必须写清「整条怎么算完成」");
+
+  if (!Array.isArray(raw.trigger) || raw.trigger.length === 0) {
+    bad("trigger 至少要有一条");
+  } else {
+    raw.trigger.forEach((t, i) => {
+      if (!isPlainObject(t) || !isNonEmptyString(t.value)) {
+        bad(`trigger[${i}] 必须写成 { kind, value }`);
+      }
+    });
+  }
+
+  if (!Array.isArray(raw.steps) || raw.steps.length === 0) {
+    bad("steps 至少要有一级");
+    throw new PipelineError(file, problems);
+  }
+
+  const ids = new Set();
+  for (const [i, step] of raw.steps.entries()) {
+    const at = isPlainObject(step) && isNonEmptyString(step.id) ? step.id : `steps[${i}]`;
+    if (!isPlainObject(step)) {
+      bad(`${at} 必须是对象`);
+      continue;
+    }
+    if (!isNonEmptyString(step.id) || !STEP_ID_RE.test(step.id)) {
+      bad(`${at}.id 非法（如 A1 / C2）`);
+    } else if (ids.has(step.id)) {
+      bad(`${at}.id 重复`);
+    } else {
+      ids.add(step.id);
+    }
+    for (const key of ["phase", "title", "when", "do", "done", "why"]) {
+      if (!isNonEmptyString(step[key])) bad(`${at}.${key} 必须是非空字符串`);
+    }
+    if (!RISK_LEVELS.includes(step.risk)) bad(`${at}.risk 必须是 ${RISK_LEVELS.join(" / ")}`);
+    if (!ACTORS.includes(step.who)) bad(`${at}.who 必须是 ${ACTORS.join(" / ")}`);
+    if (!Array.isArray(step.needs)) bad(`${at}.needs 必须是数组（可空，表示这是一段的入口）`);
+    if (step.gate !== undefined && typeof step.gate !== "boolean") bad(`${at}.gate 只能是布尔`);
+    if (step.evidence !== undefined && !Array.isArray(step.evidence)) {
+      bad(`${at}.evidence 必须是字符串数组`);
+    }
+  }
+
+  // 先把 id 收集齐再校验引用，否则会按声明顺序报一堆假错。
+  for (const step of raw.steps) {
+    if (!Array.isArray(step.needs)) continue;
+    for (const need of step.needs) {
+      if (!ids.has(need)) bad(`${step.id}.needs 指向了不存在的步骤 ${need}`);
+    }
+  }
+
+  const cycles = findCycles(raw.steps, ids);
+  if (cycles.length) bad(`图里有环：${cycles.join(" / ")}（回写是新版本，不是回到自己）`);
+
+  if (problems.length) throw new PipelineError(file, problems);
+
+  return {
+    id: raw.id,
+    name: raw.name,
+    project: raw.project,
+    version: raw.version,
+    status: raw.status,
+    done: raw.done,
+    trigger: raw.trigger.map((t) => ({ kind: t.kind || "phrase", value: t.value, note: t.note || "" })),
+    inputs: Array.isArray(raw.inputs) ? raw.inputs.slice() : [],
+    steps: raw.steps.map((s) => ({
+      id: s.id,
+      phase: s.phase,
+      title: s.title,
+      when: s.when,
+      do: s.do,
+      who: s.who,
+      tool: isNonEmptyString(s.tool) ? s.tool : "",
+      done: s.done,
+      risk: s.risk,
+      needs: s.needs.slice(),
+      why: s.why,
+      evidence: Array.isArray(s.evidence) ? s.evidence.slice() : [],
+      gate: s.gate === true
+    }))
+  };
+}
+
+/** 三色 DFS 找环，把环上的步骤 id 拼出来（报错要能直接指到人看的那一行）。 */
+function findCycles(steps, ids) {
+  const needsOf = new Map();
+  for (const step of steps) {
+    if (isNonEmptyString(step.id) && Array.isArray(step.needs)) {
+      needsOf.set(step.id, step.needs.filter((n) => ids.has(n)));
+    }
+  }
+  const state = new Map(); // 0 未访问 / 1 在栈上 / 2 已定
+  const cycles = [];
+  const walk = (id, trail) => {
+    if (state.get(id) === 2) return;
+    if (state.get(id) === 1) {
+      cycles.push([...trail.slice(trail.indexOf(id)), id].join(" → "));
+      return;
+    }
+    state.set(id, 1);
+    for (const next of needsOf.get(id) || []) walk(next, [...trail, id]);
+    state.set(id, 2);
+  };
+  for (const id of needsOf.keys()) walk(id, []);
+  return cycles;
+}
+
+/**
+ * 读一个目录下的全部工作流；坏文件直接抛，不做「跳过继续」——静默少一条最难查。
+ * 每条挂上 `origin`（哪一层来的、家在哪个目录、哪个文件），供上层判优先级与显示。
+ */
+export function loadPipelines(dir, { scope = "global", label = null } = {}) {
+  if (!existsSync(dir)) return [];
+  const files = readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
+  if (files.length > MAX_PIPELINES) {
+    throw new PipelineError(dir, [`目录里有 ${files.length} 个 .json，超过上限 ${MAX_PIPELINES}——这里应该是工作流目录，不是数据堆`]);
+  }
+  const out = [];
+  const seen = new Map();
+  for (const file of files) {
+    const full = join(dir, file);
+    let raw;
+    try {
+      raw = JSON.parse(readFileSync(full, "utf8"));
+    } catch (error) {
+      throw new PipelineError(file, [`JSON 解析失败：${error.message}`]);
+    }
+    const pipeline = validatePipeline(raw, file);
+    if (seen.has(pipeline.id)) {
+      throw new PipelineError(file, [`id "${pipeline.id}" 与 ${seen.get(pipeline.id)} 重复`]);
+    }
+    seen.set(pipeline.id, file);
+    out.push({ ...pipeline, origin: { scope, label, dir, file } });
+  }
+  return out;
+}
+
+/** 从一条运行记录里数出「这次走过哪几步」——结算用。 */
+function tallyRuns(runs) {
+  const perStep = new Map();
+  for (const run of runs || []) {
+    for (const step of run.steps || []) {
+      const cur = perStep.get(step.id) || { uses: 0, refuted: 0, lastUsedAt: null };
+      perStep.set(step.id, cur);
+      if (step.skipped) {
+        // 跳过不是使用：E2 那条「跳过 ≥3 次就提议删掉」要的正是这个计数。
+        cur.skipped = (cur.skipped || 0) + 1;
+      } else {
+        cur.uses += 1;
+      }
+      if (step.refuted) cur.refuted += 1;
+      if (step.at && (!cur.lastUsedAt || step.at > cur.lastUsedAt)) cur.lastUsedAt = step.at;
+    }
+  }
+  return perStep;
+}
+
+/**
+ * 节点状态由**对照数据**推出来，不由作者写死：
+ * 被推翻过 → refuted；用过没用砸 → trusted；有记录但久未使用 → stale；没有记录 → candidate。
+ * 没有运行记录时全体是 candidate —— 这是实话，也正是面板上那句 beta 免责必须摆在脸上的原因。
+ */
+function deriveState(credit, now, staleAfterDays = 90) {
+  if (!credit || credit.uses === 0) return credit && credit.skipped ? "stale" : "candidate";
+  if (credit.refuted > 0) return "refuted";
+  if (credit.lastUsedAt) {
+    const age = (now - Date.parse(credit.lastUsedAt)) / 86400000;
+    if (Number.isFinite(age) && age > staleAfterDays) return "stale";
+  }
+  return "trusted";
+}
+
+/**
+ * 清单页要的那点信息：够渲染「名字 + 一句话 + 状态 + 作用域」，不必把整张图读出来。
+ * 面板第一屏是清单、点进去才是图，所以这一份是**首屏的全部输入**。
+ */
+function summarizePipeline(pipeline, runs, now) {
+  const credit = tallyRuns(runs);
+  const states = { candidate: 0, trusted: 0, stale: 0, refuted: 0 };
+  let gates = 0;
+  let contrast = 0;
+  for (const step of pipeline.steps) {
+    states[deriveState(credit.get(step.id) || null, now)] += 1;
+    if (step.gate) gates += 1;
+    if (step.evidence.length) contrast += 1;
+  }
+  return {
+    id: pipeline.id,
+    title: pipeline.name,
+    scope: pipeline.origin.scope,
+    scopeLabel: pipeline.origin.label,
+    project: pipeline.project,
+    status: pipeline.status,
+    version: pipeline.version,
+    done: pipeline.done,
+    trigger: pipeline.trigger,
+    file: pipeline.origin.file,
+    steps: pipeline.steps.length,
+    gates,
+    // 反事实对照覆盖率：19/19 与 6/19 是两条完全不同的工作流，清单上就该看得出来。
+    contrast,
+    states
+  };
+}
+
+/**
+ * 投影成 `mneme.pipeline/v1`：前端渲染与 agent 读取用的是同一份数据，
+ * 画面只是它的投影——只画不存，agent 就什么也读不到。
+ */
+export function toPipelineV1(pipeline, { runs = [], now = Date.now(), memoryLinks = {} } = {}) {
+  const credit = tallyRuns(runs);
+  // 没经过 loadPipelines 的对象（手工 validate 出来的、别处传来的）没有来源。
+  // 这时 scope 落 null 而不是 "project"：默认成项目级会让一条其实来路不明的工作流
+  // 看起来「就是本项目的」，而面板上没人能分辨。
+  const origin = pipeline.origin || { scope: null, label: null, dir: "", file: "" };
+
+  const nodes = pipeline.steps.map((step) => {
+    const c = credit.get(step.id) || null;
+    const link = memoryLinks[step.id] || null;
+    return {
+      id: step.id,
+      // gate / branch 是画法，不是第二套数据：闸门要能一眼看出来「这里会停下」。
+      kind: step.gate ? "gate" : step.needs.length > 1 ? "branch" : "step",
+      title: step.title,
+      phase: step.phase,
+      situation: step.when,
+      action: step.do,
+      why: step.why,
+      who: step.who,
+      tool: step.tool,
+      done: step.done,
+      risk: step.risk,
+      state: deriveState(c, now),
+      credit: c ? { uses: c.uses, refuted: c.refuted, skipped: c.skipped || 0, lastUsedAt: c.lastUsedAt } : null,
+      // 反事实对照是**准入判据**的载体（「没有它这次会不会失败」），不是备注：
+      // 答不出来的步骤在图上要显得比答得出来的虚。
+      counterfactual: step.evidence.length
+        ? { contrast: step.evidence.join(" ／ "), evidence: step.evidence.length }
+        : null,
+      // 记忆 id 是本机私有数据，不进仓库文件；有本地对照表才填。
+      source: link ? { memoryIds: link.memoryIds || [], originSession: link.originSession || null } : null
+    };
+  });
+
+  const edges = [];
+  for (const step of pipeline.steps) {
+    for (const need of step.needs) {
+      edges.push({ id: `${need}->${step.id}`, from: need, to: step.id, kind: "control", label: "" });
+    }
+  }
+
+  return {
+    contract: "mneme.pipeline/v1",
+    pipeline: {
+      id: pipeline.id,
+      title: pipeline.name,
+      // scope 是**从哪儿读出来的**，不是作者写的：同一条文件放进项目层就变项目级。
+      scope: origin.scope,
+      scopeLabel: origin.label,
+      project: pipeline.project,
+      file: origin.file,
+      status: pipeline.status,
+      version: pipeline.version,
+      done: pipeline.done,
+      trigger: pipeline.trigger,
+      inputs: pipeline.inputs,
+      updatedAt: null
+    },
+    nodes,
+    edges,
+    runs
+  };
+}
+
+/**
+ * 面板与 agent 的公共入口：按来源顺序读全两层，投影出第一条（或指定 id 的那条），
+ * 并**总是**给出清单（`available`）——首屏是清单，图是点进去才要的东西。
+ *
+ * `projectRoot` 是会话工作目录。给不出来时只读全局层，并在 `sources` 里如实标
+ * `project: null`、`available` 为空：界面据此说「这个会话的工作目录拿不到」，
+ * 而不是悄悄显示一份不属于任何项目的清单。
+ */
+export function readPipelineDoc({
+  projectRoot = null,
+  pluginDir = defaultPipelineDir(),
+  id = null,
+  runsById = {},
+  now = Date.now(),
+  memoryLinks = {}
+} = {}) {
+  const sources = pipelineSources({ projectRoot, pluginDir });
+  const ordered = [];
+  const byId = new Map();
+  const shadowed = [];
+  const unreadable = [];
+
+  for (const source of sources) {
+    let list;
+    try {
+      list = loadPipelines(source.dir, { scope: source.scope, label: source.label });
+    } catch (error) {
+      // 项目层里有个坏文件，不该把全局层一起拖死：如实记下来继续读下一层。
+      // 全局层是自家发出去的包，坏了就是坏了——照抛。
+      if (source.scope === "global") throw error;
+      unreadable.push({ scope: source.scope, dir: source.dir, detail: error.message });
+      continue;
+    }
+    for (const pipeline of list) {
+      const already = byId.get(pipeline.id);
+      if (already) {
+        // 项目层赢是**安排好的**，不是巧合：记下来，免得以后有人以为丢了文件。
+        shadowed.push({ id: pipeline.id, hidden: source.scope, by: already.origin.scope });
+        continue;
+      }
+      byId.set(pipeline.id, pipeline);
+      ordered.push(pipeline);
+    }
+  }
+
+  const available = ordered.map((p) => summarizePipeline(p, runsById[p.id] || [], now));
+  const chosen = (id ? byId.get(id) : ordered[0]) || null;
+
+  const base = {
+    contract: "mneme.pipeline/v1",
+    sources: sources.map((s) => ({ scope: s.scope, label: s.label, dir: s.dir, present: existsSync(s.dir) })),
+    available,
+    shadowed,
+    unreadable
+  };
+
+  if (!chosen) return { ...base, pipeline: null, nodes: [], edges: [], runs: [] };
+  return { ...toPipelineV1(chosen, { runs: runsById[chosen.id] || [], now, memoryLinks }), ...base };
+}

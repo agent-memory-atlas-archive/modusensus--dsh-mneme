@@ -1,4 +1,5 @@
 import { URL } from "node:url";
+import { isAbsolute } from "node:path";
 import { timingSafeEqual, randomBytes } from "node:crypto";
 import { FEATURE_FLAG_SPEC } from "./settings.js";
 import { TYPES } from "./store.js";
@@ -11,6 +12,7 @@ import { describeLocalRuntime, publicRuntimeStatus } from "./runtime/loader.js";
 import { hostModulesDir, provisionRuntime } from "./runtime/provision.js";
 import { classify, fetchLatestVersion, PACKAGE_VERSION } from "./version-check.js";
 import { parseReclaimQuery, parseReclaimJson, readReclaimFields, reclaimReply, RECLAIM_UNAVAILABLE } from "./reclaim-http.js";
+import { readPipelineDoc } from "./pipeline.js";
 
 // headers：少数端点（/export 附件下载）需要追加 Content-Disposition 等响应头。
 function sendJson(res, status, payload, headers = {}) {
@@ -1640,8 +1642,42 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
     }
   });
 
+  // --- M.O.（Modus Operandi · 手法）工作流 ---
+  // 只读端点，读的是**项目里**的 `<项目>/.mneme/pipelines/*.json`（文件头在
+  // src/pipeline.js），项目层优先、插件包里那份降级成全局层；投影成
+  // mneme.pipeline/v1 交给面板与 agent——两边读同一份，画面只是它的投影。
+  // 刻意不做旗标闸门：旗标管的是**客户端座位**（关=一个座位都不注册），不是数据面；
+  // 多一个只读端点不会让任何人看见它，而给它加闸门只会让「为什么面板打不开」多一种成因。
+  register({
+    kind: "exact",
+    path: "/api/dsh-mneme/pipeline",
+    handler(req, res) {
+      try {
+        const url = new URL(req.url, "http://localhost");
+        const id = url.searchParams.get("id") || null;
+        const project = url.searchParams.get("project");
+        // project 是**会话工作目录**，由面板侧解析后带过来——工作目录只有客户端拿得到
+        // （宿主会话头里的 header.cwd），服务端没有「当前项目」这个概念。
+        // 不是绝对路径就**拒掉**，不能忽略：忽略了会静默退成「全局」，而全局看起来
+        // 一切正常——那正是这版要修掉的那类错。
+        if (project !== null && !isAbsolute(project)) {
+          sendJson(res, 400, { error: "project-not-absolute", detail: project });
+          return;
+        }
+        sendJson(res, 200, readPipelineDoc({ projectRoot: project, id }));
+      } catch (error) {
+        // 工作流是人手写的 JSON，报错本身就是给人看的：说清哪一条、坏在哪，
+        // 而不是回一句 internal 让人去翻日志。
+        sendJson(res, 500, {
+          error: "pipeline-unreadable",
+          detail: String((error && error.message) || error)
+        });
+      }
+    }
+  });
+
   return {
-    routes: 34,
+    routes: 35,
     dispose: () => {
       for (const dispose of disposers) dispose();
     }

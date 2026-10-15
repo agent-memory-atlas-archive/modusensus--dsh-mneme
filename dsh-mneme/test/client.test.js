@@ -1736,3 +1736,206 @@ test("a rejected feature write is visible and reverts the draft", () => {
   const occurrences = clientSource.split('"memory.features.saveFailed"').length - 1;
   assert.ok(occurrences >= 2, `i18n key memory.features.saveFailed must exist in both zh and en (got ${occurrences})`);
 });
+
+// ── M.O.（Modus Operandi）面板的数据面 ────────────────────────────────────────
+// 第一版面板拿硬编码的 PIPELINE_MOCK 验证形状与交互（服务端管线当时还没落地）。
+// 接上真数据之后那份常量必须消失：留着它，面板随时可能退回展示一份并不存在的
+// 工作流——而这正是这一刀要修掉的东西。这里锁「没有」比锁「有什么」更要紧。
+test("M.O. panel carries no mock pipeline data", () => {
+  assert.equal(
+    clientSource.includes("PIPELINE_MOCK"),
+    false,
+    "the hardcoded PIPELINE_MOCK must be gone now that the panel reads the server"
+  );
+});
+
+// 四个座位——会话头图标、会话头浮层、右栏 tab、对话行结算卡——必须读同一份投影。
+// 分家的事故长这样：会话头说有 3 条候选、右栏说有 5 条，而两个数字都对、没人查得出来。
+// 所以缓存只许有一处（usePipeline），其余要么从它取，要么经 PipelineBrowser 取。
+test("M.O. seats share a single pipeline document", () => {
+  assert.equal(
+    (clientSource.match(/function usePipeline\(/g) || []).length,
+    1,
+    "usePipeline must be defined exactly once — one cache, every seat"
+  );
+  const bodyOf = (name) => {
+    const start = clientSource.indexOf(`function ${name}(`);
+    assert.ok(start > -1, `${name} must exist`);
+    const next = clientSource.slice(start + 1).indexOf("\n    function ");
+    return clientSource.slice(start, next > -1 ? start + 1 + next : clientSource.length);
+  };
+  for (const seat of ["PipelineHeaderEntry", "TurnRunCard"]) {
+    assert.ok(
+      bodyOf(seat).includes("usePipeline(project, null)"),
+      `${seat} must read the shared pipeline document`
+    );
+  }
+  // 另两个座位不再自己调 hook：它们把 project 交给 PipelineBrowser，由它按 openId 决定
+  // 读清单还是读某一条。hook 不能条件调用，所以这道分叉必须落在**组件之间**而不是
+  // 一个组件里的 if/else——后者会在点开那一下炸成「Rendered more hooks than during
+  // the previous render」，而那是运行期才看得见的错。
+  assert.ok(
+    bodyOf("PipelinePane").includes("h(PipelineBrowser, { t, project })"),
+    "PipelinePane must delegate to PipelineBrowser"
+  );
+});
+
+// 清单与图**同屏**。这条锁的形状换过两次，两次的教训都写在这里，免得再翻回去：
+//   一进来就是图 —— 没有名字、没有落点，要的是一串有名字的条目；
+//   清单 ⟷ 图两屏来回切 —— 条目有了，但画布藏在一次点击后面、界面上没有任何提示，
+//                          反馈连着两次说「看不到画布和节点」。
+// 所以锁的是：清单行渲染名字/作用域/规模，**且** 图与清单在同一个组件里同时出现。
+test("M.O. browser shows the named list and the canvas on one screen", () => {
+  const bodyOf = (name) => {
+    const start = clientSource.indexOf(`function ${name}(`);
+    assert.ok(start > -1, `${name} must exist`);
+    const next = clientSource.slice(start + 1).indexOf("\n    function ");
+    return clientSource.slice(start, next > -1 ? start + 1 + next : clientSource.length);
+  };
+  const list = bodyOf("PipelineWorkflowList");
+  assert.ok(list.includes("row.title || row.id"), "each row must show a name");
+  assert.ok(list.includes("memory.actions.scope.project"), "each row must show its scope");
+  assert.ok(list.includes("memory.actions.list.meta"), "each row must show its size");
+  const browser = bodyOf("PipelineBrowser");
+  assert.ok(browser.includes("PipelineWorkflowList"), "the named list must be on screen");
+  assert.ok(
+    browser.includes("h(PipelineView, { t, data: detailDoc })"),
+    "the canvas must be on the SAME screen — not behind a click"
+  );
+  assert.ok(browser.includes("rows.length ? rows[0].id : null"), "the first workflow must be expanded by default");
+});
+
+// 面板读的是服务端投影，不是本地算的：工作流本体住仓库、投影住服务端，
+// 面板只负责画。路由一旦改了名字、或者项目根忘了带，这条会先红。
+test("M.O. panel reads the server projection", () => {
+  assert.match(
+    clientSource,
+    /"\/api\/dsh-mneme\/pipeline" \+/,
+    "the panel must fetch the pipeline route"
+  );
+  // 项目根是**客户端从会话读出来带过去的**，不是服务端猜的：插件侧的 ctx 上没有 cwd
+  // （只有 logger / llm / reflect / webServer / inject / commands），猜不出来。
+  assert.ok(
+    clientSource.includes('params.push("project=" + encodeURIComponent(project))'),
+    "the panel must pass the session's project root to the route"
+  );
+  assert.ok(
+    clientSource.includes("function sessionProject(ctx, sessionId)"),
+    "the session cwd lookup must exist and stay named"
+  );
+  // 两条来源的先后：会话列表快照（byId[sessionId].cwd）是宿主给客户端的公开形状，
+  // sessions.get() 是宿主侧写法、客户端不一定有。顺序反了不会报错，只会让面板静悄悄
+  // 退回全局层——那跟「本项目还没有工作流」长得一模一样，是最难查的一类错。
+  // 而且两条必须各兜各的异常：一条抛了不能把另一条也带走，否则同样表现成「项目未知」。
+  const sessionProjectBody = clientSource.slice(
+    clientSource.indexOf("function sessionProject("),
+    clientSource.indexOf("function layoutDag(")
+  );
+  assert.ok(
+    sessionProjectBody.indexOf("sessions.list.getSnapshot") <
+      sessionProjectBody.indexOf("typeof sessions.get"),
+    "the host's public shape (list snapshot) must be tried before the host-side accessor"
+  );
+  const betweenLookups = sessionProjectBody.slice(
+    sessionProjectBody.indexOf("sessions.list.getSnapshot"),
+    sessionProjectBody.indexOf("typeof sessions.get")
+  );
+  assert.ok(
+    betweenLookups.includes("catch (err)"),
+    "each lookup must carry its own catch — a throwing accessor must not take out the next one"
+  );
+});
+
+// 右栏 tab 的正文单独包了一层具名组件，而不是把 hook 直接塞进 slots.register 的回调里：
+// 那个回调是不是当组件渲染由宿主决定，赌错就是「Rendered more hooks than during the
+// previous render」这种只在运行时炸、测试看不见的错。
+test("right-pane tab renders a named component instead of a bare hook callback", () => {
+  assert.match(clientSource, /function PipelinePane\(/, "PipelinePane must exist");
+  assert.ok(
+    clientSource.includes(
+      "}, (props) => h(PipelinePane, { t, project: sessionProject(ctx, props && props.sessionId) }));"
+    ),
+    "the tab callback must delegate to the named PipelinePane component, with the session's project"
+  );
+});
+
+// 「仓库里还没有工作流」与「一条运行记录都没有」是两句不同的话，都得中英齐全——
+// i18n 掉一边，界面上就是一行 key 裸奔。作用域那三句尤其不能缺：清单行上「项目」
+// 与「全局」是唯一的来源提示，缺了它，人分不清手里这条是本项目的还是跟着插件来的。
+test("M.O. empty-state, list and scope copy exist in both languages", () => {
+  for (const key of [
+    "memory.actions.empty.title",
+    "memory.actions.empty.body",
+    "memory.actions.noRuns",
+    "memory.actions.zoom.in",
+    "memory.actions.zoom.out",
+    "memory.actions.zoom.fit",
+    "memory.actions.list.heading",
+    "memory.actions.list.count",
+    "memory.actions.list.meta",
+    "memory.actions.scope.project",
+    "memory.actions.scope.global",
+    "memory.actions.scope.none",
+    "memory.actions.broken"
+  ]) {
+    const hits = (clientSource.match(new RegExp(`"${key.replace(/\./g, "\\.")}":`, "g")) || []).length;
+    assert.equal(hits, 2, `${key} must exist in both zh and en (got ${hits})`);
+  }
+});
+
+// 画布能放大缩小。锁的重点不是「有没有缩放」，而是滚轮那一条必须**自己挂非被动监听**：
+// React 的 onWheel 挂在 root 上且是 passive 的，preventDefault 会被浏览器忽略，
+// 于是 Ctrl+滚轮既缩放画布又缩放整页，谁也没拦住——这个错本地测不出来，只在真浏览器里响。
+test("M.O. canvas zooms: buttons plus a non-passive, modifier-gated wheel listener", () => {
+  const bodyOf = (name) => {
+    const start = clientSource.indexOf(`function ${name}(`);
+    assert.ok(start > -1, `${name} must exist`);
+    const next = clientSource.slice(start + 1).indexOf("\n    function ");
+    return clientSource.slice(start, next > -1 ? start + 1 + next : clientSource.length);
+  };
+  const view = bodyOf("PipelineView");
+  assert.ok(view.includes("PipelineZoomBar"), "the zoom control must be rendered");
+  assert.ok(view.includes("{ passive: false }"), "the wheel listener must be non-passive, or preventDefault is ignored");
+  assert.ok(view.includes("ev.ctrlKey") && view.includes("ev.metaKey"), "plain wheel must stay a scroll, not a zoom");
+  assert.ok(view.includes('width: (zoom * 100) + "%"'), "zoom must change the layout width so the container can scroll to it");
+  const bar = bodyOf("PipelineZoomBar");
+  assert.ok(bar.includes("memory.actions.zoom.in"), "zoom in must be reachable by button, not only by wheel");
+  assert.ok(bar.includes("memory.actions.zoom.out"), "zoom out must be reachable by button");
+});
+
+// 「tab 的类型」与「tab 的正文」必须是两件互不相干的事，而且类型注册要幂等。
+// 为什么会栽（2026-10-16 真机上现形）：宿主对重复的类型 id 会抛
+// （sidebarRight: tab type id "…" is already registered），而类型注册挂在宿主服务上、
+// 插件重挂（刷新 / 热重载 / 会话重建）时**留着**，正文座位却是挂插件 scope、随插件回收的。
+// 两件事原来同一个 try —— 第二次挂载时那一抛把正文一起带走，界面上只剩宿主的 fallback
+// 「这类内容还没有可用的查看方式」，错误只在浏览器控制台里，界面上零痕迹。
+test("M.O. tab type registration is idempotent and isolated from the pane body", () => {
+  const typeAt = clientSource.indexOf("id: PIPELINE_ACTIONS_TAB_ID,");
+  const bodyAt = clientSource.indexOf('ctx.slots.inject("sidebar.right.pane.tab"');
+  assert.ok(typeAt > -1, "the tab type registration must exist");
+  assert.ok(bodyAt > typeAt, "the pane body registration must exist, after the type");
+  assert.ok(
+    clientSource.includes("tabs.get(PIPELINE_ACTIONS_TAB_ID)"),
+    "the type registration must be idempotent — a re-mount must not re-register the id"
+  );
+  assert.ok(
+    clientSource.slice(typeAt, bodyAt).includes("catch (err)"),
+    "the type registration must carry its own catch — its failure must not take out the pane body"
+  );
+});
+
+// 回归锁：M.O. 段里每个 .mneme-pipe-* 类名在样式表里只许有**一条**规则。
+// 为什么会栽在这里（2026-10-16，真机上才现形）：新写的详情屏容器与既有的「节点详情」面板
+// 撞了同名 .mneme-pipe-detail —— 后写的 flex:1 赢下冲突，先写的 max-height:180px; overflow:auto
+// 却留着，于是详情屏被钉在 180px、里面的画布 flex:1 分到 0 像素，屏幕上只剩空白加一条滚动条。
+// 只查颜色的 contrast.test.js 抓不到这类撞车；它只有在屏幕上看才现形，所以要在这里钉住。
+test("M.O. class names do not collide in the stylesheet", () => {
+  const declared = new Map();
+  for (const m of clientSource.matchAll(/"\.mneme-pipe-([a-z0-9-]+)\{/g)) {
+    declared.set(m[1], (declared.get(m[1]) || 0) + 1);
+  }
+  const dupes = [...declared].filter(([, n]) => n > 1).map(([k, n]) => `.mneme-pipe-${k}×${n}`);
+  assert.deepEqual(dupes, [], `duplicate .mneme-pipe-* rule(s): ${dupes.join(", ")}`);
+  // 扫描量也得钉：正则一旦匹配不到东西，上面那条会静默变绿（例如样式表被整块挪走）。
+  assert.ok(declared.size >= 20, `the scan must actually see the pipeline stylesheet (saw ${declared.size})`);
+});

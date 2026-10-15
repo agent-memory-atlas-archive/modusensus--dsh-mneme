@@ -12,6 +12,8 @@ dsh-mneme 是 DSH 宿主的记忆插件（蒸馏 / 注入 / 检索 / 巩固 / sc
   - `test/` — `node --test`（`npm test`）
   - `scripts/` — 同步、徽章、基准与压测脚本
 - 仓库根 — README（双语）、CHANGELOG、CONTRIBUTING、docs/
+- `.mneme/`（仓库根）— **项目级**工作流（M.O.）：`pipelines/<id>.json`，属于项目不属于插件。
+  住 `dsh-mneme/pipelines/` 会让它在**每个**项目里都读得到（见 [docs/WORKFLOWS.md](dsh-mneme/docs/WORKFLOWS.md)）。
 
 ## 并行工作区与多 agent 协作
 
@@ -43,6 +45,7 @@ dsh-mneme 是 DSH 宿主的记忆插件（蒸馏 / 注入 / 检索 / 巩固 / sc
 | 检索辅助 | `src/search/{bm25,adaptive}.js`、`src/vector-index.js`、`src/embedding.js`、`src/local-embedder.js`、`src/reranker.js` | BM25 / 自适应阈值 / 向量索引 / 嵌入 / 重排 |
 | 热度 | `src/heat.js` | 纯函数遗忘曲线（opt-in） |
 | 复用统计 | `src/recall-stats.js` | recall_runs 只读聚合（#217，Top-N 召回 + 僵尸率） |
+| 工作流 | `src/pipeline.js` + `.mneme/pipelines/*.json`（项目级） | M.O.（手法）读侧：两层来源（项目层优先、包内 `pipelines/` 为全局兜底）→ `mneme.pipeline/v1` 投影（[docs/WORKFLOWS.md](dsh-mneme/docs/WORKFLOWS.md)） |
 | 冷启动 | `src/bootstrap.js` | 从仓库文件反向构建初始记忆（POST /bootstrap） |
 | 配置 | `src/config.js`（schema + lightMode）、`src/settings.js`（feature flags 白名单） | 一切行为开关的家 |
 | API 面 | `src/api.js`（宿主内 /api/dsh-mneme/*）、`src/api-standalone.js`（Bearer 数据面）、`bin/dsh-mneme-mcp.mjs`（MCP stdio）、`src/serve.js` + `bin/dsh-mneme-serve.mjs`（独立服务 daemon，无 LLM 数据面） | 对外四张脸 |
