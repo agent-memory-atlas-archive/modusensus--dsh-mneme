@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/@modusensus/dsh-mneme?color=blue&label=npm)](https://www.npmjs.com/package/@modusensus/dsh-mneme)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Awesome](https://awesome-dsh-plugin.com/badge.svg)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
-[![tests](https://img.shields.io/badge/tests-1718%20passed-success)](https://github.com/slow-stack/mneme)
+[![tests](https://img.shields.io/badge/tests-1730%20passed-success)](https://github.com/slow-stack/mneme)
 [![CI](https://img.shields.io/github/actions/workflow/status/slow-stack/mneme/ci.yml)](https://github.com/slow-stack/mneme/actions)
 [![node](https://img.shields.io/badge/node-22%2B-blue)](https://nodejs.org)
 [![npm downloads](https://img.shields.io/npm/d18m/@modusensus/dsh-mneme.svg?color=blue&label=downloads)](https://www.npmjs.com/package/@modusensus/dsh-mneme)
@@ -390,6 +390,7 @@ dsh web
 | `reflectionFailureTracking` | `true` | 失败追踪总开关 |
 | `reflectionUpdateMaxPerRun` | `2` | 每次整理最多 update 数 |
 | `reflectionUpdateMinAgeHours` | `24` | 新建记忆保护期（小时） |
+| `reflectionFailureRetentionDays` | `90` | 失败表（`failure_memories`）启动期清理保留天数（1-3650；此前写死 90） |
 | `codingRetrospect` | `false` | 编码记忆蒸馏（v0.7.13，默认关）：完整转录提炼编码原子记忆（rejected_solution/pitfall/constraint 三类型） |
 | `codingKeywords` | 内置词表 | 编码任务识别词表（读取侧门控）：命中即视为编码类任务，编码记忆才注入 |
 | `codingBoostFactor` | `2` | 编码记忆注入排序的 boost 倍数（1-5） |
@@ -617,7 +618,7 @@ src/
 ├── api.js            # HTTP 路由（Web 面板数据通道，含 /conflicts 冲突队列）
 └── index.js          # 插件接线
 lib/                  # src 的同步分发产物（npm run sync；发布前由 root prepack 的 check-sync.js 校验一致性；唯一手写例外 lib/client.js——Web 面板 bundle，sync 不覆盖）
-test/                 # 1718 个 node:test 测试（审计与三轴线压测不变量；src↔lib 一致性由 scripts/check-sync.js 发布闸门校验）
+test/                 # 1730 个 node:test 测试（审计与三轴线压测不变量；src↔lib 一致性由 scripts/check-sync.js 发布闸门校验）
 scripts/              # e2e-dsh.js 端到端演示 · stress-dsh.js 三轴线压测 · sync-lib.js 同步 · check-sync.js 发布闸门 · benchmark-recall.js / benchmark-embed.js / benchmark-rerank.js 基准 · sync-test-badge.mjs 测试徽章 · build-runtime-manifest.mjs 运行时清单
 ```
 
@@ -626,7 +627,7 @@ scripts/              # e2e-dsh.js 端到端演示 · stress-dsh.js 三轴线压
 ```bash
 cd dsh-mneme
 npm install        # 安装 peer 依赖（以 devDependencies 形式，用于本地测试）
-npm test           # 运行 1718 个测试
+npm test           # 运行 1730 个测试
 npm run stress     # 三轴线压测：长会话检索 / 冲突仲裁 / 多 Agent 并发（离线 mock LLM）
 npm run sync       # 把 src/ 同步到 lib/（发布时由 prepack 钩子自动执行）
 ```

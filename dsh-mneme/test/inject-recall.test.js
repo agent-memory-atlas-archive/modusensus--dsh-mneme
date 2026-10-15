@@ -37,9 +37,35 @@ test("注入落账：终选集写一行 mode='inject'，candidates 为实际注�
   const row = injectRow(store);
   assert.ok(row, "注入应落一行审计");
   assert.equal(row.mode, "inject");
-  // recall_runs.query 是 NOT NULL（store.js:61）：注入无查询词，用空串而非 null
+  // recall_runs.query 是 NOT NULL（store.js 的 recall_runs 建表语句，2026-10-14 在 :75）：
+  // 调用方没给查询词时用空串而非 null
   assert.equal(row.query, "");
   assert.deepEqual(row.candidates.map((c) => c.id), selected.map((m) => m.id));
+  store.close();
+});
+
+// v0.9.0：注入行此前恒写空串（2026-10-13 快照 18,231/18,231 全空，即 100%），把「当时想干什么」
+// 从审计里抹掉了 —— 而 inject.js 本来就带着 lastUserQuery 传进来。这两条锁住
+// 「传了要记下来」与「没传仍是空串」，同时确认下游 recallStats 按 mode 分账不受影响。
+test("注入落账：调用方给了查询词就记真值（不再恒空串）", () => {
+  const { store, service } = setup();
+  service.saveWithDedupe({ type: "decision", title: "甲", content: "内容甲", importance: 4 });
+  const selected = service.injectCandidates({ query: "夜航App 令牌桶怎么设计的", maxItems: 5 });
+  assert.ok(selected.length >= 1);
+  const row = injectRow(store);
+  assert.ok(row, "注入应落一行审计");
+  assert.equal(row.query, "夜航App 令牌桶怎么设计的");
+  // 下游安全：口径按 mode 分账，不看 query
+  const stats = service.recallStats({ windowDays: 30, exemptDays: 0 });
+  assert.equal(stats.injection.runs, 1);
+  store.close();
+});
+
+test("注入落账：查询词两侧空白按 trim 后入账", () => {
+  const { store, service } = setup();
+  service.saveWithDedupe({ type: "decision", title: "甲", content: "内容甲", importance: 4 });
+  service.injectCandidates({ query: "  终端  ", maxItems: 5 });
+  assert.equal(injectRow(store).query, "终端");
   store.close();
 });
 
@@ -121,9 +147,11 @@ test("#369: 低于重要度闸门的 history 不得例外放行", () => {
   assert.ok(!titles.includes("打开过一次终端"), "history 不是 summary/preference，闸门照样生效");
 });
 
-// pattern 只由手工写入，却已被 dreamMergeGuard 列为长保留受保护类型——巩固层当资产
-// 护住、注入面一次不给看是同一条口径的两头不一致。这条锁它进池。
-test("#369: 手写的 pattern 进注入候选池", () => {
+// pattern 早已被 dreamMergeGuard 列为长保留受保护类型，却一度被当成「只由手工写入」
+// （那个判据是错的，实际是 sleep 的 phasePatterns 在 mint——见 src/service.js 的
+// INJECT_TYPES 注释）。巩固层当资产护住、注入面一次不给看是同一条口径的两头
+// 不一致，与作者是谁无关。这条锁它进池。
+test("#369: pattern 进注入候选池（与作者是谁无关）", () => {
   const { service } = setup();
   service.saveWithDedupe({ type: "pattern", title: "重复字符串先抽共用模块", content: "多处重复的截断逻辑先收拢成共用模块，再改调用方", importance: 5 });
   const titles = service.injectCandidates({ maxItems: 5 }).map((m) => m.title);

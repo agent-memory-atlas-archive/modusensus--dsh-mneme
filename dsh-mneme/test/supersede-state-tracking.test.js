@@ -337,10 +337,10 @@ test("supersede 后注入语义候选池（向量命中 / 语义缓存）不得�
   const { store, service, legacy, current } = await supersededFixture({ embedder: semanticEmbedder() });
   service.setVectorIndex(leakyVectorIndex(store));
 
-  // 先填一次语义缓存：新查询的首帧 render 没有 queryVector（src/inject.js:327
-  // 的预取是异步 .then），只能吃 lastSemanticRecall。真实检索不会吐归档行，
-  // 是上面的假索引在源侧失守。填缓存的这一刻已经是 supersede 之后，所以缓存
-  // 条目里 loser 的 archived 是 true。
+  // 先填一次语义缓存：新查询的首帧 render 没有 queryVector（src/inject.js 的
+  // prefetchQueryVector 预取是异步 .then，2026-10-14 在 :296），只能吃
+  // lastSemanticRecall。真实检索不会吐归档行，是上面的假索引在源侧失守。填缓存
+  // 的这一刻已经是 supersede 之后，所以缓存条目里 loser 的 archived 是 true。
   const cached = await service.searchMemories(QUERY, { mode: "vector", useRerank: false, recordRecall: false });
   const cachedOld = cached.find((r) => r.id === legacy.id);
   // 夹具自检：确认缓存里确实躺着带 archived 标记的旧值，否则 (e) 是空压。

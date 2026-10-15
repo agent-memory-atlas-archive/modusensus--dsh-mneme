@@ -38,7 +38,12 @@ function visibleSeqsOf(session) {
 // session event log (same event shape summarize.js consumes) and returns the
 // most recent human message. Any failure degrades to "" — the injector then
 // falls back to the legacy rule-based pick, never breaking the render.
-function lastUserQuery(ctx) {
+//
+// v0.9.0：导出给 tools.js 的 memory_update 用。失败记录表的 query 与注入
+// 候选问的是同一件事——「当时到底想干什么」；这条取原话的路只该有一份实现。
+// 复制一份的代价本仓库付过几次（src/lib 平价、snapshotEvents 兼容层），所以
+// 这里只加 export，不改行为。
+export function lastUserQuery(ctx) {
   try {
     const session = ctx?.agent?.session;
     // DSH ≥0.1.2-rc only exposes events via snapshotEvents(); older builds
