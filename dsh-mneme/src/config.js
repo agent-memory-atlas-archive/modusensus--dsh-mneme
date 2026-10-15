@@ -91,7 +91,8 @@ export const Config = z.object({
   // feature_flags 的值永远优先于这里的默认值。
   injectGuidanceEnabled: z.boolean().default(true),
   // #249 N3（压缩边缘双落点）：上下文即将大幅精简前抢救「正在做什么」。默认关。
-  // 触发靠宿主自己的压缩事件（`compaction/start|summary|end`，都在事件白名单里），
+  // 触发只认「历史真的被折叠了」的压缩事件（summary / prune / 不带 error 的 end；
+  // 判定见 continuity.js 的 isCompactionEdge —— start 只是「试过」，带 error 的 end 是失败收尾），
   // 不自定一套阈值参数——「压缩边缘」由宿主定义，我们再校准一份只会与之漂移。
   // 为什么是「新时机 + 新表面」因而默认关：它往对话里**追加消息**（新的注入表面，
   // 参照实现里最容易累积成一堆历史的那类），并多写一张提案表。按 §10 判据，引入
