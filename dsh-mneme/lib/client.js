@@ -6942,6 +6942,7 @@ window.__ModuleLoader__.load({
       const anchorRef = useRef(null);
       const panelRef = useRef(null);
       const labelRef = useRef(null);
+      const sheetRef = useRef(null);
 
       const changeOpen = (next) => {
         const was = openRef.current;
@@ -7004,6 +7005,25 @@ window.__ModuleLoader__.load({
         return () => document.removeEventListener("pointerdown", onDown, true);
       }, [open]);
       useEffect(() => () => cancelHoverChange(), []);
+
+      // 居中 sheet 是「宿主没有右栏服务」时的唯一完整入口，键盘用户必须能进能出。
+      // 它 portal 到 body，焦点默认留在原 trigger 上，而挂在 sheet 元素上的
+      // onKeyDown 既因没有 tabIndex 不被聚焦、也收不到外部键盘事件——Escape 于是
+      // 不生效，只剩 Tab 摸到关闭按钮一条路。做法与 MemoryOverlay 一致：打开时把
+      // 焦点移进 sheet，Escape 在 window 上收，关掉再把焦点还给 trigger。
+      useEffect(() => {
+        if (!sheetOpen) return undefined;
+        if (sheetRef.current) sheetRef.current.focus();
+        const onKey = (ev) => {
+          if (ev.key !== "Escape") return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          setSheetOpen(false);
+          if (anchorRef.current) anchorRef.current.focus();
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+      }, [sheetOpen]);
 
       const closeAll = () => {
         changeOpen(false);
@@ -7069,6 +7089,8 @@ window.__ModuleLoader__.load({
               onClick: (ev) => { if (ev.target === ev.currentTarget) setSheetOpen(false); }
             },
               h("div", {
+                ref: sheetRef,
+                tabIndex: -1,
                 className: "mneme-pipe mneme-pipe-sheet",
                 "aria-label": t("memory.actions.title"),
                 onKeyDown: (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); setSheetOpen(false); } }

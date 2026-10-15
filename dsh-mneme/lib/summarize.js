@@ -936,10 +936,18 @@ export function createSummarizer(ctx, service, config, deps = {}) {
           const outcome = service.saveWithDedupe({
             ...entry,
             source,
-            // 合并进既有行时不盖章：那一行的作用域属于它原来被提炼出来的语境，
-            // 不该被本次会话改写（盖章是「新行出生时贴标签」，不是「路过就重贴」）。
-            ...(writeScope && !dup ? { agent_scope: writeScope.agent_scope, agent_scope_source: "auto" } : {}),
-            ...(writeScope && !dup ? { workspace_scope: writeScope.workspace_scope, workspace_scope_source: "auto" } : {}),
+            // 合并进既有行时不盖章，但这件事由 saveWithDedupe 的合并分支自己保证
+            // （它只认 explicit 来源升级，从不采纳这里传的 auto 字段）——调用方不能
+            // 靠「省略字段」来表达这个意图，因为省略会反向把合并也挡掉：
+            // findSessionDuplicate 只按 type+source+时间窗找候选，不看 scope；找到
+            // 候选后由 saveWithDedupe 的 scopeMatches 门决定并或不并。这里一省略，
+            // 新条目的 scope 就是 null，与已盖过章的候选不等，门必拒 → 回落新建，
+            // 而那一行同样是新行、同样该带章，却没有章可带。实测两轮蒸馏正是如此：
+            // 第二轮命中第一轮、门拒后新建，留下同题两行一行 auto 一行 NULL——
+            // 作用域隔离没做成，重复倒留下了。传字段、让合并分支按自己的口径处理，
+            // 才是「不重贴」与「新行必贴」两个要求的唯一相容解。
+            ...(writeScope ? { agent_scope: writeScope.agent_scope, agent_scope_source: "auto" } : {}),
+            ...(writeScope ? { workspace_scope: writeScope.workspace_scope, workspace_scope_source: "auto" } : {}),
             ...(dup ? { _mergeInto: dup.memory.id } : {})
           });
           // created 与 merged 两条成功分支都返回 memory（含 id）；merged 时 id 是
