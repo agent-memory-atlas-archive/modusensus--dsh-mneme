@@ -381,7 +381,7 @@ async function phaseConflicts(ctx, service, config, logger, runId, semantic = nu
     allowedActions: actionSet === "full" ? null : LEGACY_ACTIONS
   });
   if (!ok) return { status: "failed", error: `invalid decisions: ${errors.join("; ")}`, skipped };
-  // M1-4：同 phasePatterns——本相位的 create 也落 source=sleep（默认档的
+  // 同 phasePatterns——本相位的 create 也落 source=sleep（默认档的
   // LEGACY_ACTIONS 含 create，理论上可 mint）。
   const { applied, failures, conflicts } = applyDecisions(
     decisions, service, logger, snapshot, { ...config, mintSource: "sleep" }
@@ -529,7 +529,7 @@ async function phasePatterns(ctx, service, config, logger, runId, signal = null)
     maxCreatePerRun: maxPatterns
   });
   if (!ok) return { status: "failed", error: `invalid decisions: ${errors.join("; ")}` };
-  // M1-4：本相位的 create 落 source=sleep。来源从管道给而非从决策对象取——见
+  // 本相位的 create 落 source=sleep。来源从管道给而非从决策对象取——见
   // applyDecisions 的 @param config。
   const { applied, failures, conflicts } = applyDecisions(
     decisions, service, logger, snapshot, { ...config, mintSource: "sleep" }

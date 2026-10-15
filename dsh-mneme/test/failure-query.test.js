@@ -4,7 +4,7 @@ import { createStore } from "../src/store.js";
 import { createService } from "../src/service.js";
 import { createTools } from "../src/tools.js";
 
-// v0.9.0 M1-2：failure_memories.query 的起点是 2,367 行里只有 69 行非空（2.9%）。
+// v0.9.0：failure_memories.query 的起点是 2,367 行里只有 69 行非空（2.9%）。
 // 但那个分母误导——按「expected 逐字落在某次 dream_runs.decisions 里」归属后
 // （2026-10-14 实测，D:/DSH/.dsh/memory/memory.db）：
 //   dream 侧 2,118 行，query 非空率 0.0%——机器巩固没有用户在场，本该为空；
@@ -37,7 +37,7 @@ const seed = (store) => store.save({ type: "preference", title: "语言", conten
 
 /** exec 形状与宿主一致：工具 execute 的第二个参数（src/tools.js 里的 arguments[1]）。 */
 const execWith = (events, extra = {}) => ({
-  agent: { session: { id: "s-m1-2", snapshotEvents: () => events, ...extra } }
+  agent: { session: { id: "s-failure-query", snapshotEvents: () => events, ...extra } }
 });
 
 const userMessage = (text, seq) => ({
@@ -54,7 +54,7 @@ const assistantMessage = (text, seq) => ({
 
 const run = (def, args, exec) => def.execute.bind(def)(args, exec);
 
-test("memory_update 没给 reason 时，query 落当轮用户原话（M1-2）", async () => {
+test("memory_update 没给 reason 时，query 落当轮用户原话", async () => {
   const { store, tool } = setup();
   const mem = seed(store);
   await run(

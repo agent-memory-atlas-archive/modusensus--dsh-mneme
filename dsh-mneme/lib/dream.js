@@ -1309,7 +1309,7 @@ export function createDreamScheduler({ onRun, thresholdCount = 10, thresholdChar
     // a target changed during the LLM call is skipped and reported as a
     // conflict instead of being overwritten (item ①). Frozen conflicts are
     // excluded from this list (they are parked, not applied).
-    // M1-4：主链路的 create 落 source=dream。来源从管道给而非从决策对象取——
+    // mint 来源：主链路的 create 落 source=dream。来源从管道给而非从决策对象取——
     // 见 applyDecisions 的 @param config。
     const { applied, conflicts, failures, committed } = applyDecisions(
       applyList, service, logger, snapshot, { ...config, mintSource: "dream" }

@@ -396,7 +396,7 @@ function casGuard(service, snapshot, ids) {
  *   computed from stale state is skipped and reported as a conflict instead of
  *   overwriting concurrent writes (item ①).
  * @param config - pipeline config; `config.mintSource` (optional string) is the
- *   provenance stamped on memories minted by `create` decisions (M1-4). It is
+ *   provenance stamped on memories minted by `create` decisions. It is
  *   read from the CALLER, never from the decision object: the LLM authors
  *   `create` payloads and validateDecisions does not strip unknown fields, so
  *   trusting `d.source` would let a model label its own output as human-written.
@@ -490,7 +490,7 @@ function applyCreate(d, service, config = {}) {
   const body = evidence.length > 0
     ? STR.evidenceSuffix[language](content, evidence)
     : content;
-  // M1-4：mint 来源由调用方（管道）给，不从决策对象取——LLM 能自己写 d.source，
+  // mint 来源由调用方（管道）给，不从决策对象取——LLM 能自己写 d.source，
   // 信它就等于让模型给自造条目盖「人写的」戳（见 applyDecisions 的 @param config）。
   // 取不到就一个字段都不传，落回 saveWithDedupe 原有的兜底，行为与改前一致。
   const mintSource = typeof config?.mintSource === "string" ? config.mintSource.trim() : "";

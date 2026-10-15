@@ -6,7 +6,7 @@ import { applyDecisions, validateDecisions } from "../src/dream/decisions.js";
 import { runSleep } from "../src/dream/sleep.js";
 import { createDreamScheduler } from "../src/dream.js";
 
-// M1-4：机器 mint 的记忆必须带真 source。
+// 机器 mint 的记忆必须带真 source。
 //
 // 背景（现场实测，2026-10-14）：pattern 表的 144 行 source 全是 "manual"，
 // 而按 dream_runs 的 patterns.applied 逐轮求和恰好也是 144——它们全是 sleep 的
@@ -93,7 +93,7 @@ test("mint source: without a pipeline source the model-authored one still does n
 });
 
 // 不传 mintSource 时行为与改前逐字一致（不放大行为面）。
-test("mint source: absent mintSource keeps the pre-M1-4 behaviour", () => {
+test("mint source: absent mintSource keeps the previous fallback", () => {
   const { store, service } = setup();
   applyDecisions([{ action: "create", type: "pattern", title: "真模式", content: "规律", importance: 3 }], service);
   const row = service.all().find((m) => m.type === "pattern");

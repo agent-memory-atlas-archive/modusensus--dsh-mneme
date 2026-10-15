@@ -1640,7 +1640,7 @@ test("issue#399: enabled=false (the default) writes nothing at all", async () =>
   assert.equal(countRows(store, "SELECT count(*) AS c FROM memory_provenance"), 0);
   assert.equal(store.count(), 2, "记忆写入照旧");
 });
-// ── M1-3：开关从「设置面」一路走到「盘上有行」 ──────────────────────────────
+// ── 蒸馏留存：开关从「设置面」一路走到「盘上有行」 ──────────────────────────────
 //
 // 上面 #399 那五条锁的是 summarize.js 内部的行为，它们把 config 直接递给
 // createSummarizer。真实链路上，config 不来自测试也不来自 bundle：它由 index.js
@@ -1656,7 +1656,7 @@ test("issue#399: enabled=false (the default) writes nothing at all", async () =>
 //   ② 同一个装配但 kv 一个键都不写（默认态）→ 两表 0 行，记忆写入照旧。
 // 第二条守的是反面：装配默认不许把 opt-in 的开关私自打开。
 
-/** M1-3 的最小宿主：六个服务位按 webServer-optional.test.js 的形状提供。 */
+/** 最小宿主：六个服务位按 webServer-optional.test.js 的形状提供。 */
 function minimalHost() {
   const ctx = new Context();
   ctx.provide("tools", { register() { return () => {}; } });
@@ -1707,8 +1707,8 @@ async function bootAndDistill(config, session) {
   await fiber.dispose();
 }
 
-test("M1-3: distill records grow from the settings face all the way to disk", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "mneme-m1-3-on-"));
+test("distill records grow from the settings face all the way to disk", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mneme-distill-on-"));
   const dbPath = join(dir, "memory.db");
   try {
     // 第一环：用产品自己的设置面写 kv，等价于面板 PUT /api/dsh-mneme/features。
@@ -1721,12 +1721,12 @@ test("M1-3: distill records grow from the settings face all the way to disk", as
     // 第二环 + 第三环：装配时 bundle 说关、kv 说开，合并取 kv；然后真跑一次蒸馏。
     await bootAndDistill(
       { memoryDir: dir, distillRecords: { enabled: false }, distillRateLimitIntervalMs: 0 },
-      recordsSession("s-m1-3-on", [userMessage("M1-3：这句话该落进 distill_records", 1), { seq: 2, type: "turn/end" }])
+      recordsSession("s-distill-on", [userMessage("这句话该落进 distill_records", 1), { seq: 2, type: "turn/end" }])
     );
 
     const after = readTables(dbPath);
     assert.equal(after.records, 1, "装配读过 kv 之后，原文必须真的落盘");
-    assert.equal(after.rows[0].session_id, "s-m1-3-on");
+    assert.equal(after.rows[0].session_id, "s-distill-on");
     assert.equal(after.rows[0].seq, 1);
     assert.equal(after.rows[0].role, "user");
     assert.match(after.rows[0].text, /该落进 distill_records/, "落盘的是公开正文原文");
@@ -1737,14 +1737,14 @@ test("M1-3: distill records grow from the settings face all the way to disk", as
   }
 });
 
-test("M1-3: the same assembly writes nothing when the flag was never set", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "mneme-m1-3-off-"));
+test("the same assembly writes nothing when the flag was never set", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mneme-distill-off-"));
   const dbPath = join(dir, "memory.db");
   try {
     // 连 createStore 都不预先起：一个全新的库就是「从没碰过设置面」的真实形态。
     await bootAndDistill(
       { memoryDir: dir, distillRateLimitIntervalMs: 0 },
-      recordsSession("s-m1-3-off", [userMessage("默认态：不该有原文落盘", 1), { seq: 2, type: "turn/end" }])
+      recordsSession("s-distill-off", [userMessage("默认态：不该有原文落盘", 1), { seq: 2, type: "turn/end" }])
     );
 
     const after = readTables(dbPath);

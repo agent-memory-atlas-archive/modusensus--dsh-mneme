@@ -39,7 +39,7 @@ function visibleSeqsOf(session) {
 // most recent human message. Any failure degrades to "" — the injector then
 // falls back to the legacy rule-based pick, never breaking the render.
 //
-// v0.9.0 M1-2：导出给 tools.js 的 memory_update 用。失败记录表的 query 与注入
+// v0.9.0：导出给 tools.js 的 memory_update 用。失败记录表的 query 与注入
 // 候选问的是同一件事——「当时到底想干什么」；这条取原话的路只该有一份实现。
 // 复制一份的代价本仓库付过几次（src/lib 平价、snapshotEvents 兼容层），所以
 // 这里只加 export，不改行为。

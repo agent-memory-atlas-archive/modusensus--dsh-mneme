@@ -14,7 +14,7 @@ import { createService } from "../src/service.js";
 // 的整条 `||` 会在左半边当场中断，右半边的天花板永远轮不到：stopEmbedReadyPolling()
 // 不执行，定时器活过上限，并且每 100ms 抛一次未捕获异常。
 //
-// 实测现场（2026-10-14，加 M1-3 的装配级用例时撞上）：fiber.dispose() 走完
+// 实测现场（2026-10-14，加蒸馏留存的装配级用例时撞上）：fiber.dispose() 走完
 // index.js 的 disposer（末尾一句就是 store.close()）之后，每次读 ready 都抛
 // "database is not open" [ERR_INVALID_STATE]，5s 内读了 46 次 —— 天花板 31 被
 // 击穿，node --test 进程因此不再退出。一个只在启动时读一次库的 getter，能把
@@ -51,7 +51,7 @@ async function waitUntilSettled(getReads) {
   return getReads();
 }
 
-test("M1-3: the embedder ready poll stops at its ceiling even when reading ready throws", async () => {
+test("the embedder ready poll stops at its ceiling even when reading ready throws", async () => {
   const warns = [];
   const store = createStore(":memory:");
   const service = createService({

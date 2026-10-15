@@ -382,7 +382,7 @@ export function createTools(ctx, service, config, embedder) {
         render: (_args, value) => TEXT_OUTPUT(`Updated memory ${value.memory.id}: ${value.memory.title}`)
       },
       async execute(args) {
-        // v0.9.0 M1-2：失败表的 query 是「当时到底想干什么」唯一的落点，而 service
+        // v0.9.0：失败表的 query 是「当时到底想干什么」唯一的落点，而 service
         // 层看不到会话（它只认 ctx.query，见 src/service.js 的 saveFailure 注释）。
         // 工具层是唯一同时握着改写动作与本轮会话的入口：没给 reason 就退回当轮用户
         // 原话，取法与注入侧共用同一份实现（src/inject.js 的 lastUserQuery），不复制

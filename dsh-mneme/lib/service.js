@@ -22,7 +22,7 @@ import { anchorSeeds, normalizePath, cascadeDepths, HOP_QUOTA } from "./graph/an
 // 判据是错的。机器一直在 mint：2026-10-14 按 dream_runs 的 patterns.applied 逐轮求和，
 // 得 144，与表内 pattern 行数 144 相等（72 轮 sleep 里 48 轮 ok，auto 轮 0），来源是
 // src/dream/sleep.js 的 phasePatterns；当时的 source=manual 只是 saveWithDedupe 没拿到
-// source 时的兜底值，不是「人写的」的意思（M1-4 起 mint 会带 source=sleep/dream）。
+// source 时的兜底值，不是「人写的」的意思（现在 mint 会带 source=sleep/dream）。
 // 但它确实已被 dreamMergeGuard 列为长保留受保护类型（docs/CONFIGURATION.md）——巩固层
 // 当资产护住、注入面一次不给看，是同一条口径的两头不一致。这一点与作者是谁无关，
 // 收编的结论不变，错的只是当初用来支持它的那句前提。
@@ -1955,7 +1955,7 @@ export function createService({ store, mirror, config, onWrite, logger, document
         setArchived: (mid, v) => archiveMemory(mid, v),
         transaction: (fn) => transaction(fn)
       };
-      // M1-4：不传 mintSource——本路径由人在面板上点确认，即便日后有人在这里加
+      // 不传 mintSource——本路径由人在面板上点确认，即便日后有人在这里加
       // create，落 saveWithDedupe 的 manual 兜底恰好就是对的语义（人触发的写入）。
       // 这是刻意的，不是漏传。
       const { committed, failures } = applyDecisions(

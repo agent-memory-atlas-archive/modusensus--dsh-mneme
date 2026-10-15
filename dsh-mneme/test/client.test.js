@@ -1617,7 +1617,7 @@ test("client bundle parses: 面板产物必须是合法 JS（无重复声明等�
 //   ④ 非整数在本地就被挡下并把草稿退回生效值——留着非法文本会让人以为改成功了。
 test("distill retention switches are reachable from the panel (#399)", () => {
   // 认「组里有没有」不要用 `"key"]` 这种子串——`eff["distillRecords.enabled"]`
-  // 也长这样，把组里那一项删掉它照样命中（变异验证 M4 实测：删项后仍全绿）。
+  // 也长这样，把组里那一项删掉它照样命中（变异验证实测：删项后仍全绿）。
   // 必须把 core 组的 items 数组抠出来单独看。
   const coreGroup = clientSource.match(/key: "group\.core", items: \[([\s\S]*?)\]/);
   assert.ok(coreGroup, "the core group must be declared");
@@ -1639,7 +1639,7 @@ test("distill retention switches are reachable from the panel (#399)", () => {
     "the retention-days row must be gated on the parent switch and live in its sub-block"
   );
   // 定义了不等于接线了：把 distillSub 从组尾子块里摘掉，上面每条断言照样全绿
-  // （变异验证 M7 实测）。子块是在 items.map 之后按组尾追加的，所以必须确认
+  // （变异验证实测：摘掉后仍全绿）。子块是在 items.map 之后按组尾追加的，所以必须确认
   // 它真的出现在那一个渲染点上。
   const coreTail = clientSource.match(/g\.key === "group\.core" && h\(react\.Fragment, null, ([^)]*)\)/);
   assert.ok(coreTail, "the core group must append its sub-blocks at the group tail");
