@@ -18,9 +18,14 @@ import { anchorSeeds, normalizePath, cascadeDepths, HOP_QUOTA } from "./graph/an
 // 的 recall_runs `auto` 模式里被按需检索过 328 次：不是垃圾数据，只是进不了注入池。
 // 收编后候选池 1362 → 1713（+25.8%），按 top_k=5 粗算约多占 1 席；重要度闸门对
 // history 一视同仁（见 injectCandidates 的 importance >= threshold），低于闸门照旧出局。
-// pattern 一并收编：它只由手工写入（实测 40 条全 source=manual），却已被 dreamMergeGuard
-// 列为长保留受保护类型（docs/CONFIGURATION.md）——巩固层当资产护住、注入面一次不给看，
-// 是同一条口径的两头不一致。
+// pattern 一并收编：它一度被当成「只由手工写入（实测 40 条全 source=manual）」——那个
+// 判据是错的。机器一直在 mint：2026-10-14 按 dream_runs 的 patterns.applied 逐轮求和，
+// 得 144，与表内 pattern 行数 144 相等（72 轮 sleep 里 48 轮 ok，auto 轮 0），来源是
+// src/dream/sleep.js 的 phasePatterns；当时的 source=manual 只是 saveWithDedupe 没拿到
+// source 时的兜底值，不是「人写的」的意思（现在 mint 会带 source=sleep/dream）。
+// 但它确实已被 dreamMergeGuard 列为长保留受保护类型（docs/CONFIGURATION.md）——巩固层
+// 当资产护住、注入面一次不给看，是同一条口径的两头不一致。这一点与作者是谁无关，
+// 收编的结论不变，错的只是当初用来支持它的那句前提。
 const INJECT_TYPES = new Set(["preference", "project", "decision", "summary", "rejected_solution", "pitfall", "constraint", "history", "pattern"]);
 
 // document 摘要行（#230）：仅 documentMemoryEnabled 开启时进注入候选。独立
@@ -1840,9 +1845,15 @@ export function createService({ store, mirror, config, onWrite, logger, document
     if ((config?.recallRecordDefault ?? true) && recallRecorder && injected.length > 0) {
       try {
         recallRecorder({
-          // recall_runs.query 是 NOT NULL（store.js:61）：注入是主动曝光、
-          // 没有查询词，用空串而非 null——SQLite 改列约束需重建表，不值得。
-          query: "",
+          // recall_runs.query 是 NOT NULL（store.js 的 recall_runs 建表语句，
+          // 2026-10-14 在 :75）—— 注入是主动曝光，
+          // 没有查询词时用空串而非 null——SQLite 改列约束需重建表，不值得。
+          // v0.9.0：调用方（inject.js 的 lastUserQuery，2026-10-14 在 :343）本来就带着本轮的
+          // 用户原话传进来，这里丢掉等于把「当时想干什么」从审计里抹掉
+          // （2026-10-13 快照：18,231/18,231 注入行 query 全空，全空比例
+          // 100%——这个比率才是要记的，绝对行数随表长，引用要带时刻）。
+          // 有就记，真没有才空串。
+          query: q,
           mode: "inject",
           topK: maxItems,
           threshold: null,
@@ -1947,6 +1958,9 @@ export function createService({ store, mirror, config, onWrite, logger, document
         setArchived: (mid, v) => archiveMemory(mid, v),
         transaction: (fn) => transaction(fn)
       };
+      // 不传 mintSource——本路径由人在面板上点确认，即便日后有人在这里加
+      // create，落 saveWithDedupe 的 manual 兜底恰好就是对的语义（人触发的写入）。
+      // 这是刻意的，不是漏传。
       const { committed, failures } = applyDecisions(
         [{ action: "conflict", winner: winnerId, loser: loserId, reason: row.reason ?? "" }],
         applyService,
@@ -2531,11 +2545,31 @@ export function createService({ store, mirror, config, onWrite, logger, document
       // Async-initializing embedder: poll `ready` until it flips, then flush.
       if ("ready" in emb && embedReadyTimer === null) {
         let attempts = 0;
+        let readyReadFailed = false;
+        // 读 `ready` 必须先兜住异常再算天花板，否则天花板形同不存在：`ready` 是
+        // getter（embedding.js 的 OpenAI embedder 直接读库），getter 一抛错，整条
+        // `||` 的求值当场中断，右侧的 `attempts >= EMBED_READY_POLL_LIMIT` 永远轮
+        // 不到 —— stopEmbedReadyPolling() 不执行，定时器就活过 3s 上限，并以未捕获
+        // 异常的形式每 100ms 抛一次。实测（2026-10-14）：卸载路径 store.close() 之后
+        // 每次读 ready 都抛 "database is not open"，5s 内读 46 次，天花板 31 被直接
+        // 打穿，宿主事件循环因此永不排空。读不出来按「没就绪」处理，但上限照算。
+        const readReady = () => {
+          try {
+            return emb.ready === true;
+          } catch (err) {
+            if (!readyReadFailed) {
+              readyReadFailed = true; // 只报一次，别让 3s 上限变成 30 条刷屏
+              logger?.warn?.("embedder ready probe failed, treating it as not-ready:", err);
+            }
+            return false;
+          }
+        };
         embedReadyTimer = setInterval(() => {
           attempts++;
-          if (emb.ready === true || attempts >= EMBED_READY_POLL_LIMIT) {
+          const ready = readReady();
+          if (ready || attempts >= EMBED_READY_POLL_LIMIT) {
             stopEmbedReadyPolling();
-            if (emb.ready === true) flushEmbedPending();
+            if (ready) flushEmbedPending();
             else embedPending = []; // init never landed: drop the queue
           }
         }, EMBED_READY_POLL_MS);

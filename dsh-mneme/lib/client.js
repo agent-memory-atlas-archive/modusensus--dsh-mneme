@@ -431,6 +431,7 @@ window.__ModuleLoader__.load({
         "memory.features.advancedToggle": "高级（注入策略 · 反思 · 实验项）",
         "memory.features.restartHint": "重启 DSH 后生效",
         "memory.features.loadFailed": "加载失败",
+        "memory.features.saveFailed": "保存失败",
         "memory.features.autoInject": "自动注入",
         "memory.features.autoInject.hint": "每轮对话自动携带相关记忆",
         "memory.features.injectGuidanceEnabled": "能力说明",
@@ -532,6 +533,14 @@ window.__ModuleLoader__.load({
         "memory.features.distillRateLimitRetries": "429 重试次数",
         "memory.features.distillRateLimitBaseDelayMs": "退避起始延迟 (ms)",
         "memory.features.distillMaxChars": "转录截断上限（字符）",
+        // #399 的两个留存键。此前只有后端白名单、面板够不着，而
+        // docs/CONFIGURATION.md 写的是「面板可启停」——补 UI 让文档成真。
+        // hint 必须写清两件事：这是**原始对话**落盘（隐私面），以及天数只管
+        // 启动期裁剪（reclaim 走另一条 --older-than，不读这个键）。
+        "memory.features.distillRecords.enabled": "留存蒸馏原文",
+        "memory.features.distillRecords.enabled.hint": "蒸馏时把窗口内的公开对话原文一并落盘，并记下每条记忆的来源区间；私密推理与工具结果不落。关 = 一行不写、连收集都不做",
+        "memory.features.distillRecords.retentionDays": "原文保留天数",
+        "memory.features.distillRecords.retentionDays.hint": "1–3650 天；只管启动期裁剪。想让 reclaim 也按这个天数回收，需显式传 --older-than 同一数值",
         "memory.features.codingBoostFactor": "编码记忆加权",
         "memory.features.memoryQualityFilter.enabled": "记忆质量过滤",
         "memory.features.memoryQualityFilter.enabled.hint": "低价值记忆自动归档，注入按质量降权",
@@ -1017,6 +1026,7 @@ window.__ModuleLoader__.load({
         "memory.features.advancedToggle": "Advanced (injection · reflection · experimental)",
         "memory.features.restartHint": "Takes effect after restarting DSH",
         "memory.features.loadFailed": "Failed to load",
+        "memory.features.saveFailed": "Failed to save",
         "memory.features.autoInject": "Auto injection",
         "memory.features.autoInject.hint": "Carry relevant memories into every turn",
         "memory.features.injectGuidanceEnabled": "Capability guide",
@@ -1116,6 +1126,10 @@ window.__ModuleLoader__.load({
         "memory.features.distillRateLimitRetries": "429 retries",
         "memory.features.distillRateLimitBaseDelayMs": "Backoff base delay (ms)",
         "memory.features.distillMaxChars": "Transcript cap (chars)",
+        "memory.features.distillRecords.enabled": "Keep distilled transcripts",
+        "memory.features.distillRecords.enabled.hint": "Also store the public parts of the distilled window, with a provenance link per memory; private reasoning and tool output are never stored. Off writes nothing and skips collection entirely",
+        "memory.features.distillRecords.retentionDays": "Transcript retention (days)",
+        "memory.features.distillRecords.retentionDays.hint": "1–3650 days; startup pruning only. To make reclaim use the same window, pass the same value via --older-than",
         "memory.features.codingBoostFactor": "Coding boost factor",
         "memory.features.memoryQualityFilter.enabled": "Memory quality filter",
         "memory.features.memoryQualityFilter.enabled.hint": "Archive low-value memories automatically; injection downranks by quality",
@@ -2644,7 +2658,10 @@ window.__ModuleLoader__.load({
     // test/inject-parent-gate.test.js 钉住。
     const FEATURE_CHILDREN = { autoInject: ["injectGuidanceEnabled", "continuityRescueEnabled"] };
     const FEATURE_GROUPS = [
-      { key: "group.core", items: ["autoInject", "autoSummarize", "hotMemoryEnabled", "injectTimePrefix", "memoryQualityFilter.enabled", "llmAudit.enabled", "writeAdmission.enabled", "writeAdmission.enforce", "preInjectGate.enabled", "preInjectGate.enforce", "sensitiveScanEnabled"] },
+      { key: "group.core", items: ["autoInject", "autoSummarize", "hotMemoryEnabled", "injectTimePrefix", "memoryQualityFilter.enabled", "llmAudit.enabled", "writeAdmission.enabled", "writeAdmission.enforce", "preInjectGate.enabled", "preInjectGate.enforce", "sensitiveScanEnabled",
+        // #399 的留存总闸（见下方 distillSub：天数行是它的子块）。放在组末，
+        // 子块才能紧跟在它后面展开——items.map 之后的子块是按组尾渲染的。
+        "distillRecords.enabled"] },
       // v0.9.0 M.O.（beta）：开关挂在 enhance 组。它不是行为开关而是
       // 座位闸门——关=一个座位都不注册（见 apply 内的 M.O. 块）。
       { key: "group.enhance", items: ["entityExtractionEnabled", "codingRetrospect", "rerankEnabled", "resilientModelDownload", "searchSemanticDedup", "bm25SearchEnabled", "heatEnabled", "documentMemoryEnabled", "actionPipelineEnabled"] },
@@ -2659,6 +2676,12 @@ window.__ModuleLoader__.load({
       // Issue #239 第 4 项：错峰时段串（巩固侧与蒸馏侧）。此前只有后端白名单、
       // 面板调不到——两个错峰键一个能调一个不能比都不给更让人困惑。
       "dreamPeakHours", "summarizePeakHours"];
+    // 整数键（blur/Enter 提交，非法值不提交、退回生效值）：
+    // issue #399 的 distillRecords.retentionDays。此前它与 enabled 一样只有
+    // 后端白名单、面板够不着——而 CONFIGURATION.md 明写「面板可启停」。
+    // 其余整数键（429 调速器参数、distillMaxChars、codingBoostFactor）是有意
+    // 不上 UI 的调优噪音，见上方注释，别顺手搬进来。
+    const FEATURE_NUMBERS = ["distillRecords.retentionDays"];
     const EMBED_PROVIDERS = ["openai", "local", "ollama"];
     // 实体抽取思考强度（issue #109）：与后端 FEATURE_FLAG_ENUMS 枚举对齐。
     const ENTITY_REASONING = ["none", "low", "medium", "high"];
@@ -2687,10 +2710,15 @@ window.__ModuleLoader__.load({
     function FeaturesCard({ t }) {
       const [state, setState] = useState(null); // { overrides, effective }
       const [error, setError] = useState("");
+      // 保存失败的提示要单独的座位：上面那个 error 只在首屏加载失败（state 还是
+      // null）时渲染，state 一到手它就永不出现——于是每一次 put 失败都静默，
+      // 草稿留在输入框里，人以为改成功了。
+      const [saveError, setSaveError] = useState("");
       const [busy, setBusy] = useState(false);
       const [savedTick, setSavedTick] = useState(false);
       const [showAdv, setShowAdv] = useState(false);
       const [strs, setStrs] = useState({}); // 字符串输入的本地草稿：key -> string
+      const [nums, setNums] = useState({}); // 数值输入的本地草稿：key -> string（提交时才转整数）
       // 巩固/睡眠模型路由下拉的数据源：GET /llm-providers 探测（云端 v0.7.26+
       // 的插件侧端点）。null = 端点不可用（404/失败）→ 回退纯文本输入，不挡旧后端。
       const [routes, setRoutes] = useState(null);
@@ -2710,6 +2738,9 @@ window.__ModuleLoader__.load({
             const draft = {};
             for (const key of FEATURE_STRINGS) draft[key] = String(e[key] ?? "");
             setStrs(draft);
+            const numDraft = {};
+            for (const key of FEATURE_NUMBERS) numDraft[key] = String(e[key] ?? "");
+            setNums(numDraft);
           })
           .catch(() => { if (!cancelled) setError(t("memory.features.loadFailed")); });
         return () => { cancelled = true; };
@@ -2727,6 +2758,7 @@ window.__ModuleLoader__.load({
 
       const eff = (state && state.effective) || {};
 
+      // 返回值 = 这次写入有没有落库。调用方要据此决定草稿的去留。
       const put = async (patch) => {
         setBusy(true);
         try {
@@ -2735,13 +2767,25 @@ window.__ModuleLoader__.load({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(patch)
           });
-          if (!res.ok) throw new Error("HTTP " + res.status);
+          if (!res.ok) {
+            // 服务端的校验失败把键名与范围写进 error（api.js 里那条 400 的注释
+            // 就是这么设计的），读出来给人看。拿不到 body 才退回状态码——
+            // 总之不能只剩一句「失败」让人猜是哪个开关、错在哪。
+            const detail = await res.json()
+              .then((j) => (j && j.error) || "")
+              .catch(() => "");
+            throw new Error(detail || ("HTTP " + res.status));
+          }
           setState(await res.json());
+          setSaveError("");
           announce(t("memory.features.restartHint"));
           setSavedTick(true);
           setTimeout(() => setSavedTick(false), 1800);
-        } catch {
-          setError(t("memory.features.loadFailed"));
+          return true;
+        } catch (err) {
+          const why = (err && err.message) || String(err);
+          setSaveError(`${t("memory.features.saveFailed")} — ${why}`);
+          return false;
         } finally {
           setBusy(false);
         }
@@ -2749,13 +2793,33 @@ window.__ModuleLoader__.load({
 
       // 字符串项失焦/回车提交：trim 后与生效值相同则回填放弃，否则交给
       // 后端校验（ollamaBaseUrl 的协议、embedProvider 的枚举在后端把关）。
+      // 后端拒了就退回生效值并出声——留着被拒的文本，人以为改成功了。
       const commitString = (key) => {
         const raw = (strs[key] ?? "").trim();
         if (raw === String(eff[key] ?? "")) {
           setStrs((c) => ({ ...c, [key]: String(eff[key] ?? "") }));
           return;
         }
-        put({ [key]: raw });
+        put({ [key]: raw }).then((ok) => {
+          if (!ok) setStrs((c) => ({ ...c, [key]: String(eff[key] ?? "") }));
+        });
+      };
+
+      // 整数项失焦/回车提交。与字符串项同一形状，多三道闸：本地先挡非整数，
+      // 挡不住的交后端（retentionDays 的范围 1–3650 由白名单把关），后端也拒了
+      // 就把草稿退回生效值。前两道退回时也不出声——那是本地的即时反馈；第三道
+      // 必须出声（put 会把原因写进 saveError），否则「框里的数字」与「在用的
+      // 保留天数」会分家，而人看不出来。
+      const commitNumber = (key) => {
+        const raw = (nums[key] ?? "").trim();
+        if (raw === String(eff[key] ?? "")) return;
+        if (!/^\d+$/.test(raw)) {
+          setNums((c) => ({ ...c, [key]: String(eff[key] ?? "") }));
+          return;
+        }
+        put({ [key]: Number(raw) }).then((ok) => {
+          if (!ok) setNums((c) => ({ ...c, [key]: String(eff[key] ?? "") }));
+        });
       };
 
       const boolRow = (k, opts = {}) => h(FeatureRow, {
@@ -2899,6 +2963,22 @@ window.__ModuleLoader__.load({
           onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); }
         }));
 
+      // type 刻意用 text + inputMode 而不是 number：number 输入框在部分内容被
+      // 判非法时 e.target.value 会变成空串，草稿与用户所见脱节；这里要自己拿
+      // 到原文才能挡下非整数并退回生效值。
+      const numRow = (key) => h("div", { className: "mneme-featnum", key },
+        h("span", { className: "mneme-featnumlabel" }, t(`memory.features.${key}`)),
+        h("input", {
+          className: "mneme-numinput",
+          type: "text",
+          inputMode: "numeric",
+          value: nums[key] ?? "",
+          "aria-label": t(`memory.features.${key}`),
+          onChange: (e) => setNums((c) => ({ ...c, [key]: e.target.value })),
+          onBlur: () => commitNumber(key),
+          onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); }
+        }));
+
       // 语义检索路线：provider 下拉即时提交；local/ollama 选中时展开各自
       // 的连接字段，openai 的连接信息由「向量搜索」卡片持有，只给指引。
       const embedSub = h("div", { className: "mneme-featsub" },
@@ -2980,6 +3060,14 @@ window.__ModuleLoader__.load({
         h("div", { className: "mneme-featsubhint" }, t("memory.features.summarizePeakHours.hint"))
       );
 
+      // #399 的留存开关紧跟在蒸馏总闸下：天数行只在留存开着时展开（关着一行
+      // 不写，改天数没有意义）。放在这而不是挂在 flagRow 上，是因为
+      // FEATURE_CHILDREN 只认布尔子项，而这里要的是一个整数输入行。
+      const distillSub = eff["distillRecords.enabled"] && h("div", { className: "mneme-featsub" },
+        numRow("distillRecords.retentionDays"),
+        h("div", { className: "mneme-featsubhint" }, t("memory.features.distillRecords.retentionDays.hint"))
+      );
+
       if (error && !state) return h("section", { className: "mneme-set-card" },
         h("div", { className: "mneme-set-title" }, t("memory.features.title")),
         h("div", { className: "mneme-set-hint" }, error));
@@ -2990,6 +3078,8 @@ window.__ModuleLoader__.load({
           savedTick && h("span", { className: "mneme-saved", style: { marginLeft: 8, fontWeight: 400 } }, t("memory.features.restartHint"))
         ),
         h("div", { className: "mneme-set-desc" }, t("memory.features.desc")),
+        // 见 saveError 的声明处：这条分支不能跟着加载失败那条走。
+        saveError && h("div", { className: "mneme-mainterr" }, saveError),
         h(RuntimeProvisionBlock, { t }),
         state === null && !error
           ? h("div", { className: "mneme-set-hint" }, "…")
@@ -2997,7 +3087,9 @@ window.__ModuleLoader__.load({
               FEATURE_GROUPS.map((g) => h(react.Fragment, { key: g.key },
                 h("div", { className: "mneme-featgroup" }, t(`memory.features.${g.key}`)),
                 g.items.map(flagRow),
-                g.key === "group.core" && h(react.Fragment, null, summarizeSub),
+                // 子块按组尾追加。distillSub 紧跟在 core 组最后一行
+                // （distillRecords.enabled）之后，天数行才贴着它的总闸。
+                g.key === "group.core" && h(react.Fragment, null, distillSub, summarizeSub),
                 g.key === "group.enhance" && h(react.Fragment, null, embedSub, entitySub),
                 g.key === "group.dream" && h(react.Fragment, null, dreamSub, sleepSub)
               )),

@@ -229,13 +229,17 @@ export const apply = (ctx, config) => {
   // 失败表的启动期清理也放在装配之后（此前它在 createStore 之后、装配之前，写死
   // 90 天）。保留期现在是显式配置键 reflectionFailureRetentionDays；等它进面板
   // 白名单的那天，这里读的就是装配后的值，不用再改第二处。best-effort 语义不变：
-  // 清理失败不挡启动，否则一次锁表就能让插件起不来。
+  // 清理失败不挡启动，否则一次锁表就能让插件起不来——但「不挡启动」不等于「可以
+  // 悄悄失败」：这一族的 recall_runs 清理当年就是静默蒸发，表涨到两万余行无人
+  // 察觉，所以本处与 llm_audit / distill_records / recall_runs 三处一样出声。
   try {
     const failureRetentionDays = Number.isInteger(cfg.reflectionFailureRetentionDays)
       ? cfg.reflectionFailureRetentionDays
       : 90;
     store.deleteOldFailures(new Date(Date.now() - failureRetentionDays * 86400000).toISOString());
-  } catch { /* non-fatal */ }
+  } catch (err) {
+    ctx.logger?.warn?.(`[dsh-mneme] failure-table retention purge failed: ${String(err)}`);
+  }
 
   // Bug8 的启动期清理放在装配之后：面板把 llmAudit.* 写进 kv、经 nestedFlags 合进
   // cfg，而写入侧（dream / summarize / 写入准入）读的都是装配后的 cfg——清理若读
@@ -247,7 +251,9 @@ export const apply = (ctx, config) => {
       const retentionMs = Number.isInteger(cfg.llmAudit?.retentionDays) ? cfg.llmAudit.retentionDays : 90;
       store.deleteOldLlmAudits(new Date(Date.now() - retentionMs * 86400000).toISOString());
     }
-  } catch { /* non-fatal */ }
+  } catch (err) {
+    ctx.logger?.warn?.(`[dsh-mneme] llm_audit retention purge failed: ${String(err)}`);
+  }
 
   // #399 的启动期裁剪：与上面同款（读装配后的 cfg，理由同上——面板写的保留期必须
   // 与写入侧取到同一个值）。不同的一点：蒸馏原文留存默认关，而「默认关」在写入侧
@@ -261,7 +267,27 @@ export const apply = (ctx, config) => {
         : 90;
       store.clearDistillRecords(new Date(Date.now() - retentionMs * 86400000).toISOString());
     }
-  } catch { /* non-fatal */ }
+  } catch (err) {
+    ctx.logger?.warn?.(`[dsh-mneme] distill_records retention purge failed: ${String(err)}`);
+  }
+
+  // recall_runs 的滚动清理（v0.7.0 原设计，2026-10-14 找回）：与 llm_audit 同策略，
+  // 按 cfg.recallRetentionDays（默认 90 天）启动时清一次。读装配后的 cfg，理由与上面
+  // 两处一致 —— 写入侧取的是 cfg，清理侧若取 rawCfg，面板改的保留期就不生效。
+  // 这一对曾在 dd0ed78（v0.7.12 发布提交）里被整块弄丢，配置键与文档却一直留着，
+  // 实测 2026-10-13 那天从 16,041 涨到 20,510 行（一天四千余行，只增不减；
+  // 单给一个静态行数会随表腐坏，故带日期的区间才是可核对的说法）。注入行开始写真实 query 之后，这条从「表膨胀」
+  // 升级为「原话无限期留存」，所以必须与那次改动同批交付。
+  // 保留期语义是「天」（函数内部乘 86400000），清理失败只 warn，绝不挡插件启动。
+  try {
+    const recallRetentionDays = Number.isInteger(cfg.recallRetentionDays) ? cfg.recallRetentionDays : 90;
+    store.purgeRecallRunsOlderThan(recallRetentionDays);
+  } catch (err) {
+    // 这里必须真的出声。这一对当初是**静默**蒸发的：函数与调用一起没了、没人发现，
+    // 表就这么涨到两万余行。清理再失败一次而仍然不出声，同样的回归照样看不见——
+    // 「只 warn」不是修辞，是这族清理唯一的事后线索。
+    ctx.logger?.warn?.(`[dsh-mneme] recall_runs retention purge failed: ${String(err)}`);
+  }
 
   // 记忆语言（memory.language）：本实例逐层传入 inject / summarize / dream /
   // sleep / mirror，多实例（如 agent preset 内挂载）互不影响。
