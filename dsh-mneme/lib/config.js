@@ -481,6 +481,13 @@ export const Config = z.object({
   reflectionFailureTracking: z.boolean().default(true),
   reflectionUpdateMaxPerRun: z.natural().min(0).max(5).default(2),
   reflectionUpdateMinAgeHours: z.natural().min(0).max(168).default(24),
+  // failure_memories 的启动期保留期（天）。此前在 index.js 里写死 90，是这一族
+  // 四张启动期清理表里唯一没有键可陈述的一条（#275 伞下的欠账）。形态对齐
+  // recallRetentionDays：顶层扁平键、只从配置文件改；暂不进 settings.js 白名单，
+  // 面板可调是后续的事（那要同时补 api.js 的 NESTED 表与 client.js 的面板行）。
+  // 下限取 1 而非 0：这张表的用途是「挖掘重复出现的纠正模式」，窗口太短就只剩
+  // 最近一次；要彻底停掉清理应当显式关掉 reflectionFailureTracking。
+  reflectionFailureRetentionDays: z.natural().min(1).max(3650).default(90),
 
   // --- conflict freeze: manual review for conflicting memories (v0.2.1) ---
   // Opt-in by default: when true, conflicting memories are not auto-merged

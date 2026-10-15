@@ -175,6 +175,7 @@
 | `reflectionFailureTracking` | `true` | 失败经验追踪 | — |
 | `reflectionUpdateMaxPerRun` | `2` | 单轮 update 上限（0–5） | — |
 | `reflectionUpdateMinAgeHours` | `24` | 可更新记忆的最短年龄（小时，≤168） | — |
+| `reflectionFailureRetentionDays` | `90` | `failure_memories`（失败/纠正记录）的启动期清理保留天数（1–3650） | 只读 bundle 配置：未进 feature_flags 白名单，面板改不了。`dsh-mneme reclaim` 不读这个键（它对三个表用同一条 `--older-than`，本表不在其中）。此前这个 90 天是写死的（#275 伞下的欠账） |
 | `conflictFreezeEnabled` | `false` | 冲突不自动合并、冻结待人工复核 | opt-in |
 | `conflictFreezeMaxPending` | `100` | 冻结队列上限（≤1000） | — |
 

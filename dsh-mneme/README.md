@@ -390,6 +390,7 @@ dsh web
 | `reflectionFailureTracking` | `true` | 失败追踪总开关 |
 | `reflectionUpdateMaxPerRun` | `2` | 每次整理最多 update 数 |
 | `reflectionUpdateMinAgeHours` | `24` | 新建记忆保护期（小时） |
+| `reflectionFailureRetentionDays` | `90` | 失败表（`failure_memories`）启动期清理保留天数（1-3650；此前写死 90） |
 | `codingRetrospect` | `false` | 编码记忆蒸馏（v0.7.13，默认关）：完整转录提炼编码原子记忆（rejected_solution/pitfall/constraint 三类型） |
 | `codingKeywords` | 内置词表 | 编码任务识别词表（读取侧门控）：命中即视为编码类任务，编码记忆才注入 |
 | `codingBoostFactor` | `2` | 编码记忆注入排序的 boost 倍数（1-5） |
