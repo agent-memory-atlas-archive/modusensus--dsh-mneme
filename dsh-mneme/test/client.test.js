@@ -1012,6 +1012,41 @@ test("scope isolation ships panel switches and provenance surfaces (A4)", () => 
   assert.ok(clientSource.includes('t("memory.explorer.detail.occurred")'), "drawer must render occurred row");
 });
 
+// Issue #427：设置面板把折叠线从「冷门」挪到「新手之外」。锁四件事：
+// ①首屏层 = 常用组（3 总开关）+ 作用域组——scope 留在首屏是因为「它记的东西
+// 会不会被别的会话看到」是新用户的必答题，藏进折叠等于没答；②其余组整组收进
+// 「全部设置」（第一层折叠），「高级」降为它内部的第二层；③每条开关挂
+// 「默认 / 已改」徽标，信号取自 overrides（键不在其中 = 仍是 config schema
+// 默认值），面板自判、不加后端字段；④分组与折叠键中英成对。验收口径：首屏
+// 可点项 = 3 总开关 + autoInject 的 2 个子开关 + scope 2 开关 + 「全部设置」
+// 按钮 = 8（≤ 8），由 ①② 的组成正则共同钉死，不另数 DOM。
+test("settings card folds everything beyond the first screen behind All settings (issue #427)", () => {
+  // ① 首屏层组成：两组都要在，且 basic 的成员是从 core/dream 移走的。
+  assert.ok(/const FEATURE_FIRST_SCREEN = \["group\.basic", "group\.scope"\];/.test(clientSource),
+    "the first screen must be exactly the basic and scope groups");
+  assert.ok(/key: "group\.basic", items: \["autoInject", "autoSummarize", "autoDream"\]/.test(clientSource),
+    "group.basic must carry exactly the three master switches");
+  assert.ok(!/key: "group\.core", items: \["autoInject/.test(clientSource) && !/key: "group\.dream", items: \["autoDream/.test(clientSource),
+    "basic members must be MOVED out of their old groups (render-once), not filtered at render time");
+  // ② 两层折叠的接线：restGroups 只在 showAll 展开后渲染；「高级」按钮出现在
+  // 「全部设置」之后（同一渲染分支内），showAdv 展开的条目走第二层。
+  assert.ok(/showAll && h\(react\.Fragment, null,\s*restGroups\.map\(renderGroup\)/.test(clientSource),
+    "the remaining groups must render only behind the All settings fold");
+  const allBtn = clientSource.indexOf('t("memory.features.allToggle")');
+  const advBtn = clientSource.indexOf('t("memory.features.advancedToggle")');
+  assert.ok(allBtn >= 0 && advBtn > allBtn, "the advanced fold must be nested after All settings");
+  assert.equal(clientSource.match(/const FEATURE_ADVANCED_BOOLS = \[([^\]]*)\];/)[1].split(",").filter((s) => s.trim()).length, 7,
+    "the advanced second tier must hold exactly the 7 rarer switches the label promises");
+  // ③ 徽标：两类各一套中英文案；判定读 overrides 本地判，不引入后端字段。
+  for (const key of ["memory.features.tagDefault", "memory.features.tagChanged",
+    "memory.features.group.basic", "memory.features.allToggle", "memory.features.advancedToggle"]) {
+    const occurrences = clientSource.split("\"" + key + "\"").length - 1;
+    assert.ok(occurrences >= 2, `i18n key ${key} must exist in both zh and en (got ${occurrences})`);
+  }
+  assert.ok(clientSource.includes("Object.prototype.hasOwnProperty.call(ovr, k)"),
+    "the default/changed badge must be decided from overrides, not a new backend field");
+});
+
 // v0.8.0 冲突集中处理：状态页的待确认冲突队列（reason + 双方内容对比 +
 // 保留 A/B/仅标记动作），resolveConflictPending 的第一个前端出口。双语齐备。
 test("conflict queue ships a central review surface on the status tab", () => {
