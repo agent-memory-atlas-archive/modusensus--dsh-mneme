@@ -1661,3 +1661,43 @@ test("distill retention switches are reachable from the panel (#399)", () => {
     assert.ok(occurrences >= 2, `i18n key ${key} must exist in both zh and en (got ${occurrences})`);
   }
 });
+
+test("a rejected feature write is visible and reverts the draft", () => {
+  // 锁的是「保存失败从不显示」：错误提示原先只有一个座位、且带 `!state` 条件
+  // （首屏加载失败才渲染）——state 一到手，此后每次写入失败都静默，输入框里
+  // 留着没保存的值。整数项把「越界」变成可达路径后，人能在面板上看到 99999
+  // 却以为它生效了。
+  // 认「座位存在」不能只看 setSaveError 出现几次（函数里调它、渲染处读它，
+  // 两处都在就算命中），要把写入路径与渲染路径分别钉住。
+  assert.ok(
+    clientSource.includes('const [saveError, setSaveError] = useState("");'),
+    "save failures need their own state slot"
+  );
+  // 渲染座位必须在主卡片里（描述行之后、运行时块之前），而不是被 !state 挡住。
+  const descAt = clientSource.indexOf('h("div", { className: "mneme-set-desc" }, t("memory.features.desc"))');
+  const seatAt = clientSource.indexOf('saveError && h("div", { className: "mneme-mainterr" }, saveError)');
+  const provAt = clientSource.indexOf("h(RuntimeProvisionBlock, { t })");
+  assert.ok(descAt > 0 && seatAt > descAt, "the save-error seat must live in the main card body");
+  assert.ok(provAt > seatAt, "the seat must sit in the card header area, before the runtime block");
+  const earlyReturn = clientSource.match(/if \(error && !state\) return[\s\S]{0,300}?error\)\);/);
+  assert.ok(earlyReturn, "the load-failure early return must still be there");
+  assert.ok(!earlyReturn[0].includes("saveError"), "the save-error seat must not ride the load-failure branch");
+
+  // 写入路径：服务端 400 的 body 带着键名与范围（api.js 那条 400 的设计），
+  // 要读出来；失败要能被调用方看见，所以返回值必须是真假。
+  const putBody = clientSource.match(/const put = async \(patch\) => \{([\s\S]*?)\r?\n      \};/);
+  assert.ok(putBody, "put must be declared");
+  assert.ok(putBody[1].includes("const detail = await res.json()"), "the server error body must be read");
+  assert.ok(putBody[1].includes('throw new Error(detail || ("HTTP " + res.status));'), "the body must win over the bare status");
+  assert.ok(putBody[1].includes("return true;") && putBody[1].includes("return false;"), "put must report success");
+  assert.ok(putBody[1].includes("setSaveError(`"), "a rejected write must set the visible error");
+
+  // 两个提交路径都要在同一处退回生效值：只报错不退，框里的值仍与在用的值分家。
+  assert.ok(clientSource.includes("put({ [key]: raw }).then((ok) => {"), "a rejected string draft must be revertible");
+  assert.ok(clientSource.includes("put({ [key]: Number(raw) }).then((ok) => {"), "a rejected number draft must be revertible");
+  assert.ok((clientSource.split("if (!ok) setStrs(").length - 1) >= 1, "the string draft must revert on rejection");
+  assert.ok((clientSource.split("if (!ok) setNums(").length - 1) >= 1, "the number draft must revert on rejection");
+
+  const occurrences = clientSource.split('"memory.features.saveFailed"').length - 1;
+  assert.ok(occurrences >= 2, `i18n key memory.features.saveFailed must exist in both zh and en (got ${occurrences})`);
+});

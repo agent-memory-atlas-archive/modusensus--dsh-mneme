@@ -431,6 +431,7 @@ window.__ModuleLoader__.load({
         "memory.features.advancedToggle": "高级（注入策略 · 反思 · 实验项）",
         "memory.features.restartHint": "重启 DSH 后生效",
         "memory.features.loadFailed": "加载失败",
+        "memory.features.saveFailed": "保存失败",
         "memory.features.autoInject": "自动注入",
         "memory.features.autoInject.hint": "每轮对话自动携带相关记忆",
         "memory.features.injectGuidanceEnabled": "能力说明",
@@ -983,6 +984,7 @@ window.__ModuleLoader__.load({
         "memory.features.advancedToggle": "Advanced (injection · reflection · experimental)",
         "memory.features.restartHint": "Takes effect after restarting DSH",
         "memory.features.loadFailed": "Failed to load",
+        "memory.features.saveFailed": "Failed to save",
         "memory.features.autoInject": "Auto injection",
         "memory.features.autoInject.hint": "Carry relevant memories into every turn",
         "memory.features.injectGuidanceEnabled": "Capability guide",
@@ -2516,6 +2518,10 @@ window.__ModuleLoader__.load({
     function FeaturesCard({ t }) {
       const [state, setState] = useState(null); // { overrides, effective }
       const [error, setError] = useState("");
+      // 保存失败的提示要单独的座位：上面那个 error 只在首屏加载失败（state 还是
+      // null）时渲染，state 一到手它就永不出现——于是每一次 put 失败都静默，
+      // 草稿留在输入框里，人以为改成功了。
+      const [saveError, setSaveError] = useState("");
       const [busy, setBusy] = useState(false);
       const [savedTick, setSavedTick] = useState(false);
       const [showAdv, setShowAdv] = useState(false);
@@ -2560,6 +2566,7 @@ window.__ModuleLoader__.load({
 
       const eff = (state && state.effective) || {};
 
+      // 返回值 = 这次写入有没有落库。调用方要据此决定草稿的去留。
       const put = async (patch) => {
         setBusy(true);
         try {
@@ -2568,13 +2575,25 @@ window.__ModuleLoader__.load({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(patch)
           });
-          if (!res.ok) throw new Error("HTTP " + res.status);
+          if (!res.ok) {
+            // 服务端的校验失败把键名与范围写进 error（api.js 里那条 400 的注释
+            // 就是这么设计的），读出来给人看。拿不到 body 才退回状态码——
+            // 总之不能只剩一句「失败」让人猜是哪个开关、错在哪。
+            const detail = await res.json()
+              .then((j) => (j && j.error) || "")
+              .catch(() => "");
+            throw new Error(detail || ("HTTP " + res.status));
+          }
           setState(await res.json());
+          setSaveError("");
           announce(t("memory.features.restartHint"));
           setSavedTick(true);
           setTimeout(() => setSavedTick(false), 1800);
-        } catch {
-          setError(t("memory.features.loadFailed"));
+          return true;
+        } catch (err) {
+          const why = (err && err.message) || String(err);
+          setSaveError(`${t("memory.features.saveFailed")} — ${why}`);
+          return false;
         } finally {
           setBusy(false);
         }
@@ -2582,18 +2601,23 @@ window.__ModuleLoader__.load({
 
       // 字符串项失焦/回车提交：trim 后与生效值相同则回填放弃，否则交给
       // 后端校验（ollamaBaseUrl 的协议、embedProvider 的枚举在后端把关）。
+      // 后端拒了就退回生效值并出声——留着被拒的文本，人以为改成功了。
       const commitString = (key) => {
         const raw = (strs[key] ?? "").trim();
         if (raw === String(eff[key] ?? "")) {
           setStrs((c) => ({ ...c, [key]: String(eff[key] ?? "") }));
           return;
         }
-        put({ [key]: raw });
+        put({ [key]: raw }).then((ok) => {
+          if (!ok) setStrs((c) => ({ ...c, [key]: String(eff[key] ?? "") }));
+        });
       };
 
-      // 整数项失焦/回车提交。与字符串项同一形状，多两道闸：本地先挡非整数，
-      // 挡不住的交后端（retentionDays 的范围 1–3650 由白名单把关）。被本地挡下
-      // 时把草稿退回生效值——留着非法文本会让人以为改成功了。
+      // 整数项失焦/回车提交。与字符串项同一形状，多三道闸：本地先挡非整数，
+      // 挡不住的交后端（retentionDays 的范围 1–3650 由白名单把关），后端也拒了
+      // 就把草稿退回生效值。前两道退回时也不出声——那是本地的即时反馈；第三道
+      // 必须出声（put 会把原因写进 saveError），否则「框里的数字」与「在用的
+      // 保留天数」会分家，而人看不出来。
       const commitNumber = (key) => {
         const raw = (nums[key] ?? "").trim();
         if (raw === String(eff[key] ?? "")) return;
@@ -2601,7 +2625,9 @@ window.__ModuleLoader__.load({
           setNums((c) => ({ ...c, [key]: String(eff[key] ?? "") }));
           return;
         }
-        put({ [key]: Number(raw) });
+        put({ [key]: Number(raw) }).then((ok) => {
+          if (!ok) setNums((c) => ({ ...c, [key]: String(eff[key] ?? "") }));
+        });
       };
 
       const boolRow = (k, opts = {}) => h(FeatureRow, {
@@ -2860,6 +2886,8 @@ window.__ModuleLoader__.load({
           savedTick && h("span", { className: "mneme-saved", style: { marginLeft: 8, fontWeight: 400 } }, t("memory.features.restartHint"))
         ),
         h("div", { className: "mneme-set-desc" }, t("memory.features.desc")),
+        // 见 saveError 的声明处：这条分支不能跟着加载失败那条走。
+        saveError && h("div", { className: "mneme-mainterr" }, saveError),
         h(RuntimeProvisionBlock, { t }),
         state === null && !error
           ? h("div", { className: "mneme-set-hint" }, "…")
