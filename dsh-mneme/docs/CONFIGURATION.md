@@ -25,7 +25,7 @@
 
 | 键 | 默认 | 作用 | 开启后果 / 冲突 |
 |---|---|---|---|
-| `scopeEnabled` | `false` | 存储层总开关：写入标注 agent_scope / workspace_scope，去重键扩展；检索与注入排序按当前会话作用域加权（命中 ×1.25、他 scope ×0.5 保留可见，issue #339 补齐注入通道） | opt-in；关 = 写入不标注、行为与 A1 前逐字节一致 |
+| `scopeEnabled` | `false` | 存储层总开关：**两条写入路径**（工具调用 `memory_save`/`memory_update`，以及机器提炼·会话蒸馏）都自动标注 agent_scope / workspace_scope（标注只贴**新建行**：并入既有行时不重贴，既有行的归属属于它原来被提炼出来的语境），去重键扩展；检索与注入排序按当前会话作用域加权（命中 ×1.25、他 scope ×0.5 保留可见，issue #339 补齐注入通道） | opt-in；关 = 写入不标注、行为与 A1 前逐字节一致 |
 | `strictScope` | `false` | 硬过滤模式（A3）：他 scope 完全不可见、未标注恒可见（fail-closed）；硬过滤先于软加权执行 | 依赖 `scopeEnabled` 打开才有意义；关 = A2 软隔离（他 scope 降权保留可见，检索与注入同权重） |
 
 ## 审计
@@ -175,6 +175,7 @@
 | `reflectionFailureTracking` | `true` | 失败经验追踪 | — |
 | `reflectionUpdateMaxPerRun` | `2` | 单轮 update 上限（0–5） | — |
 | `reflectionUpdateMinAgeHours` | `24` | 可更新记忆的最短年龄（小时，≤168） | — |
+| `reflectionFailureRetentionDays` | `90` | `failure_memories`（失败/纠正记录）的启动期清理保留天数（1–3650） | 只读 bundle 配置：未进 feature_flags 白名单，面板改不了。`dsh-mneme reclaim` 不读这个键（它对三个表用同一条 `--older-than`，本表不在其中）。此前这个 90 天是写死的（#275 伞下的欠账） |
 | `conflictFreezeEnabled` | `false` | 冲突不自动合并、冻结待人工复核 | opt-in |
 | `conflictFreezeMaxPending` | `100` | 冻结队列上限（≤1000） | — |
 

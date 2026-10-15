@@ -188,17 +188,6 @@ export const apply = (ctx, config) => {
   }
 
   const store = createStore(join(memoryDir, "memory.db"));
-  // Prune reflection failure rows older than 90 days on boot (best-effort, so
-  // the failure table never grows unbounded). "Best-effort" means the cleanup
-  // may fail without blocking boot — not that it may fail invisibly: a purge
-  // that dies quietly is exactly how the recall_runs sibling was lost for
-  // months, so every catch in this boot-time retention family reports through
-  // ctx.logger.warn (this one, llm_audit, distill_records, recall_runs).
-  try {
-    store.deleteOldFailures(new Date(Date.now() - 90 * 86400000).toISOString());
-  } catch (err) {
-    ctx.logger?.warn?.(`[dsh-mneme] failure-table retention purge failed: ${String(err)}`);
-  }
 
   // User-configurable settings (profile, rules, panel mode, standalone API
   // token) share the same SQLite file in dedicated tables, isolated from
@@ -235,6 +224,21 @@ export const apply = (ctx, config) => {
   const cfg = { ...applyLightModePreset({ ...rawCfg, lightMode }), ...flatFlags };
   for (const [objKey, sub] of Object.entries(nestedFlags)) {
     cfg[objKey] = { ...(cfg[objKey] ?? {}), ...sub };
+  }
+
+  // 失败表的启动期清理也放在装配之后（此前它在 createStore 之后、装配之前，写死
+  // 90 天）。保留期现在是显式配置键 reflectionFailureRetentionDays；等它进面板
+  // 白名单的那天，这里读的就是装配后的值，不用再改第二处。best-effort 语义不变：
+  // 清理失败不挡启动，否则一次锁表就能让插件起不来——但「不挡启动」不等于「可以
+  // 悄悄失败」：这一族的 recall_runs 清理当年就是静默蒸发，表涨到两万余行无人
+  // 察觉，所以本处与 llm_audit / distill_records / recall_runs 三处一样出声。
+  try {
+    const failureRetentionDays = Number.isInteger(cfg.reflectionFailureRetentionDays)
+      ? cfg.reflectionFailureRetentionDays
+      : 90;
+    store.deleteOldFailures(new Date(Date.now() - failureRetentionDays * 86400000).toISOString());
+  } catch (err) {
+    ctx.logger?.warn?.(`[dsh-mneme] failure-table retention purge failed: ${String(err)}`);
   }
 
   // Bug8 的启动期清理放在装配之后：面板把 llmAudit.* 写进 kv、经 nestedFlags 合进

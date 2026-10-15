@@ -1565,11 +1565,24 @@ export function createStore(path) {
     // "chrono" is pure newest-first — the stable order paged browsing (month
     // tree, infinite scroll) needs; importance ordering would interleave
     // months across pages.
-    const orderBy = order === "chrono" ? "updated_at DESC, id DESC" : "importance DESC, updated_at DESC, id";
+    // #430：chrono 的 **无界档** 不再追加 id 平局键。updated_at 上有 #202 建的
+    // 索引，而带 id 的第二项排序键用不上它——5k 行实测同一份 SQL 只差这一项：
+    // 100.6ms（带 id，EXPLAIN 多一个 USE TEMP B-TREE）对 23.4ms（纯 updated_at，
+    // 直接走 idx_memories_updated）。分页档位必须留平局键（跨页拼接要求稳定，
+    // 同刻两行在新旧页之间可能漏一条或重复一条）；无界档没有跨页拼接，今天唯一
+    // 的调用方 syncMirror 只用它算覆盖集，与顺序无关。
+    const orderBy = order === "chrono"
+      ? (unbounded ? "updated_at DESC" : "updated_at DESC, id DESC")
+      : "importance DESC, updated_at DESC, id";
+    // Issue #430：与 all() 共用同一份显式列清单（memoryColumns 由 PRAGMA 派生，
+    // 排除 embedding）。toRow 本就不输出向量，SELECT * 只是把全表最重的列拖进
+    // 内存再丢弃——无界档实测 5k 行 263ms → 117ms，窗口档 50ms → 41ms，本函数
+    // 的全部调用方（分页浏览、document 索引、sleep 池、注册器全量扫描）一起受益。
+    const projected = `SELECT ${memoryColumnList} FROM memories`;
     const rows = unbounded
-      ? db.prepare(`SELECT * FROM memories ${where} ORDER BY ${orderBy}`).all(...params)
+      ? db.prepare(`${projected} ${where} ORDER BY ${orderBy}`).all(...params)
       : db.prepare(
-          `SELECT * FROM memories ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`
+          `${projected} ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`
         ).all(...params, lim, off);
     return rows.map(toRow);
   }
@@ -1579,6 +1592,18 @@ export function createStore(path) {
     // 纯属把全表最重的列（9.4 MB TEXT/5k 行）拖进内存再丢弃。
     const rows = db.prepare(`SELECT ${memoryColumnList} FROM memories ORDER BY updated_at DESC`).all();
     return rows.map(toRow);
+  }
+
+  // Issue #430：写路径要的「最近若干条正文」。质量过滤的近重复判定只读 content
+  // 这一列 + 前 20 行，此前写成 all().slice(0, 20) —— 全表逐行 toRow（27 字段、
+  // 三次 JSON 解析）之后只截前 20 条正文；5k 行实测 100ms 级 → 0.06ms 级。
+  // 口径与 all() 的前 N 条严格一致：不加 WHERE（archived/forgotten 仍参与近重复
+  // 判定）、updated_at DESC、同刻顺序未定义。limit 走 sanitizePage，非正整数
+  // 落回 20，调用方不必自己防 0/undefined。
+  function recentContents(limit = 20) {
+    const { limit: lim } = sanitizePage(limit, 0, 20);
+    const rows = db.prepare("SELECT content FROM memories ORDER BY updated_at DESC LIMIT ?").all(lim);
+    return rows.map((row) => row.content ?? "");
   }
 
   /** Set (or clear with null) the embedding vector of a memory. */
@@ -3126,6 +3151,8 @@ export function createStore(path) {
     getUnrecalledSince,
     list,
     all,
+    // #430：有界单列读，写路径（质量过滤）用。
+    recentContents,
     search,
     setEmbedding,
     getEmbeddings,

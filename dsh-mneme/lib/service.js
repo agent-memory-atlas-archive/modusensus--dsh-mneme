@@ -1298,7 +1298,10 @@ export function createService({ store, mirror, config, onWrite, logger, document
     let quality = null;
     if (qf?.enabled === true) {
       try {
-        const recentContents = store.all().slice(0, 20).map((m) => m.content ?? "");
+        // #430：近重复判定只要最近 20 条正文，别再为了 slice(0,20) 先物化整库
+        // （all() + 逐行 toRow，5k 行实测 100ms 级；本查询 0.06ms 级）。口径与
+        // all().slice(0, 20) 一致：不加 WHERE、updated_at DESC、同刻顺序未定义。
+        const recentContents = store.recentContents(20);
         quality = evaluateMemoryQuality(memory, {
           minContentLength: qf.minContentLength ?? 10,
           recentContents
@@ -2164,18 +2167,22 @@ export function createService({ store, mirror, config, onWrite, logger, document
     try {
       // 预先取本次要覆盖的全部活跃行（只读一次）。这里曾经是
       // store.list({ limit: 500 })——活跃集超过 500 时镜像会静默少掉尾部记忆，
-      // 而文件本身没有任何提示（#278 第一批）。store.list 的 limit 默认值只有
-      // 50，比原来显式传的 500 更小，所以改用 all() 并在这里做同一套过滤
-      // （forgotten/archived 都不进镜像，与 includeForgotten:false + 默认
-      // includeArchived:false 等价）。
-      // 代价是全表读，且落在每次业务写后的最热路径上（#202 自记 all() 5k 行
-      // 231ms → ~135ms）。要压这一层得换按 type 分页取，属另一批的事；
-      // 在这里退回任何截断都不行——「宣称覆盖活跃集」与静默截断不能共存。
-      const list = store.all().filter((m) => !m.forgotten && !m.archived
+      // 而文件本身没有任何提示（#278 第一批）。在这里退回任何截断都不行——
+      // 「宣称覆盖活跃集」与静默截断不能共存（这一条不变）。
+      // #430：改成 list 的无界档（limit: null）+ SQL 侧过滤，替掉 all() + 逐行
+      // filter——list 的默认 includeForgotten:false / includeArchived:false 与旧
+      // filter 的 !forgotten && !archived 完全同口径（store.js 里就是这两条
+      // clause），document 闸改由 excludeTypes 在 LIMIT 之前排除。旧写法先物化
+      // 整库（embedding 列 + 逐行 27 字段 toRow）再逐行丢弃：被丢掉的行连带它们
+      // 的物化一起省下了。要再压一层得换按 type 分页取，属另一批的事。
+      const list = store.list({
+        limit: null,
+        order: "chrono",
         // #296 第二批：镜像里的 documents.md 与 index.md 共用 documentMemoryEnabled
         // 闸。关掉时把 document 行也从渲染集里去掉——sync 对「空 type」的既有处理
         // 会把陈旧的 documents.md 删掉，不留一个「看着还在、其实已关」的视图。
-        && (m.type !== "document" || config?.documentMemoryEnabled === true));
+        excludeTypes: config?.documentMemoryEnabled === true ? null : ["document"]
+      });
       for (const memory of list) {
         if (memory?.type && TYPE_FILE[memory.type]) {
           coveredTypes.add(memory.type);
