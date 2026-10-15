@@ -188,11 +188,6 @@ export const apply = (ctx, config) => {
   }
 
   const store = createStore(join(memoryDir, "memory.db"));
-  // Prune reflection failure rows older than 90 days on boot (best-effort, so
-  // the failure table never grows unbounded).
-  try {
-    store.deleteOldFailures(new Date(Date.now() - 90 * 86400000).toISOString());
-  } catch { /* non-fatal */ }
 
   // User-configurable settings (profile, rules, panel mode, standalone API
   // token) share the same SQLite file in dedicated tables, isolated from
@@ -230,6 +225,17 @@ export const apply = (ctx, config) => {
   for (const [objKey, sub] of Object.entries(nestedFlags)) {
     cfg[objKey] = { ...(cfg[objKey] ?? {}), ...sub };
   }
+
+  // 失败表的启动期清理也放在装配之后（此前它在 createStore 之后、装配之前，写死
+  // 90 天）。保留期现在是显式配置键 reflectionFailureRetentionDays；等它进面板
+  // 白名单的那天，这里读的就是装配后的值，不用再改第二处。best-effort 语义不变：
+  // 清理失败不挡启动，否则一次锁表就能让插件起不来。
+  try {
+    const failureRetentionDays = Number.isInteger(cfg.reflectionFailureRetentionDays)
+      ? cfg.reflectionFailureRetentionDays
+      : 90;
+    store.deleteOldFailures(new Date(Date.now() - failureRetentionDays * 86400000).toISOString());
+  } catch { /* non-fatal */ }
 
   // Bug8 的启动期清理放在装配之后：面板把 llmAudit.* 写进 kv、经 nestedFlags 合进
   // cfg，而写入侧（dream / summarize / 写入准入）读的都是装配后的 cfg——清理若读
