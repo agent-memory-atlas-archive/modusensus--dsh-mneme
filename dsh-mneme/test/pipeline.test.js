@@ -475,6 +475,72 @@ test("readPipelineDoc 带上 suggestions（没到阈值时是空数组，不是�
   assert.ok(Array.isArray(doc.suggestions), "字段必须在——缺字段会让面板分不清「没有」和「读不到」");
 });
 
+// ── 字段白名单锁：给「静默掉字段」这个洞装一道闸 ────────────────────────────
+//
+// 为什么需要这道锁：`validatePipeline` 的步骤归一化是**显式字段映射**——白名单外的键
+// 会被无声丢弃，不告警、不报错。所以「往工作流里写一个新字段」的默认结局是「它消失了，
+// 而面板上看不出少了东西」。这正是本仓历史上反复抓到的那一类「声称改了但产物里查不到」。
+//
+// 探针实测过（三面逐个数）：往步骤里塞 `assert` / `onFailure` / `retries`，三个全部消失。
+// 将来真要加字段，就得同时改三处——归一化返回、节点投影、首屏清单——漏掉任何一处，
+// 症状都是「加了但看不见」，且**不会红**。这道锁把那个症状提前到测试里：
+// 谁动了字段集合，这里当场变红，逼人把三处一起改完、并把新集合写进断言。
+//
+// 反面提醒：断言里写的是**全集**而不是「包含」。包含式断言挡不住「多加了一个字段」，
+// 而多出来的字段同样会进投影、同样会被前端与 agent 读到——那也是一种契约变更。
+
+const STEP_KEYS = [
+  "do", "done", "evidence", "gate", "id", "needs", "phase", "risk", "title", "tool", "when", "who", "why"
+];
+const NODE_KEYS = [
+  "action", "counterfactual", "credit", "done", "id", "kind", "phase", "risk", "situation",
+  "source", "state", "title", "tool", "who", "why"
+];
+const AVAILABLE_KEYS = [
+  "contrast", "done", "file", "gates", "id", "project", "scope", "scopeLabel", "states",
+  "status", "steps", "title", "trigger", "version"
+];
+const NODE_STATE_KEYS = ["candidate", "refuted", "stale", "trusted"];
+
+test("字段白名单锁：步骤归一化只留这 13 个键，白名单外的键会被静默丢弃", () => {
+  const norm = validatePipeline(minimal({
+    steps: [{
+      id: "A1", phase: "准备", title: "第一步", when: "有人要跑", do: "做一件事",
+      who: "main", done: "做完了", risk: "R0", needs: [], why: "因为",
+      // 这三个是评测报告点名的「承重字段」：它们今天进不了产品，写进去就消失。
+      assert: ["git tag 已推送"],
+      onFailure: "halt",
+      retries: 0
+    }]
+  }), "lock.json");
+
+  assert.deepEqual(Object.keys(norm.steps[0]).sort(), STEP_KEYS,
+    "步骤键集合变了。若这是有意的：请同时改 pipeline.js 的归一化返回、toPipelineV1 的节点投影、summarizePipeline 的首屏计数，再把这里的集合更新掉。");
+
+  // 明写断言：那三个承重字段今天确实被丢掉——将来若接住了，这条会红，提醒你更新文档与契约。
+  for (const key of ["assert", "onFailure", "retries"]) {
+    assert.equal(Object.prototype.hasOwnProperty.call(norm.steps[0], key), false,
+      `${key} 今天不该出现在归一化结果里；它出现了说明白名单被改过，请一并更新本锁与相关文档`);
+  }
+});
+
+test("字段白名单锁：节点投影 15 个键、首屏清单 14 个键，节点状态恒为四态", () => {
+  const norm = validatePipeline(minimal(), "lock.json");
+  const withOrigin = { ...norm, origin: { scope: "project", label: "demo", dir: "", file: "lock.json" } };
+
+  const v1 = toPipelineV1(withOrigin, {});
+  assert.deepEqual(Object.keys(v1.nodes[0]).sort(), NODE_KEYS,
+    "节点键集合变了——前端与 agent 读的是这一份，改它要同步面板");
+  assert.equal(v1.nodes[0].credit, null,
+    "没有运行记录时 credit 必须是 null——一个「补了默认值的空 credit 对象」会让前端以为「跑过但全是 0」");
+  const doc = readPipelineDoc({ projectRoot: REPO_ROOT });
+  assert.ok(doc.available.length >= 1);
+  assert.deepEqual(Object.keys(doc.available[0]).sort(), AVAILABLE_KEYS,
+    "首屏清单行的键集合变了——面板第一屏读的就是这一份");
+  assert.deepEqual(Object.keys(doc.available[0].states).sort(), NODE_STATE_KEYS,
+    "节点状态只能是这四态；多一态就意味着前端有分支没接");
+});
+
 // ── 候选路由：与工作流路由是两处不同的东西 ──────────────────────────────────
 
 test("路由 /api/dsh-mneme/candidates：读候选层，且把三条边界写进契约", async () => {
