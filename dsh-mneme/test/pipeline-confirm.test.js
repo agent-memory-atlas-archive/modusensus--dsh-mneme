@@ -30,18 +30,19 @@ test("提案：列出流程步骤与观察到的动作，但**不预选任何一
   assert.deepEqual(prop.steps.map((s) => s.id), ["P6", "V2"]);
   // 步骤里带的是"作者写的 tool 原文"，给对照用；没有任何自动勾选
   assert.equal(prop.steps[0].declared, "npm test");
-  assert.equal(prop.steps[0].hint, null, "没给候选时不该有 hint");
+  assert.equal(prop.steps[0].hintCount, 0, "没给候选时次数是 0");
   assert.deepEqual(prop.activities.map((a) => a.key), ["npm test", "git status"]);
-  assert.deepEqual(prop.answers, ["done", "notDone", "unsure"]);
 });
 
-test("提案：候选只作提示，不预选（机器猜不准，不能被当成默认值）", () => {
+test("提案：候选只作提示（一个次数），不预选、不带命令行原文", () => {
   const p = makePipeline();
-  const prop = buildProposal({ pipeline: p, hints: { P6: ["npm test"] } });
-  assert.deepEqual(prop.steps[0].hint, ["npm test"]);
-  // 关键：hint 存在，但没有任何字段表示"已经确认"
+  const prop = buildProposal({ pipeline: p, hints: { P6: 3 } });
+  assert.equal(prop.steps[0].hintCount, 3);
+  // 关键：hintCount 只说明"见到过相近命令"，没有任何字段表示"已经确认"
   assert.equal("answer" in prop.steps[0], false);
   assert.equal("selected" in prop.steps[0], false);
+  // 也不存命令行原文——原文含绝对路径（路径含本机用户名），而这条会进回执
+  assert.equal(JSON.stringify(prop).includes("command"), false);
 });
 
 test("提案：没有工作流时如实拒绝", () => {

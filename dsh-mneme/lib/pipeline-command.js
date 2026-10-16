@@ -130,7 +130,7 @@ function describeStop(result, language) {
   if (result.ok && result.state === "awaiting-confirmation") {
     const prop = result.proposal;
     const lines = prop.steps.map((s, i) => {
-      const hint = s.hint ? `  ← 本次看到 ${s.hint.length} 条相近命令` : "";
+      const hint = s.hintCount ? `  ← 本次看到 ${s.hintCount} 条相近命令` : "";
       return `  ${i + 1}. ${s.id}  ${s.title}${s.declared ? `  [${s.declared}]` : ""}${hint}`;
     });
     const parts = [t.awaiting(prop.pipelineId, prop.steps.length)];

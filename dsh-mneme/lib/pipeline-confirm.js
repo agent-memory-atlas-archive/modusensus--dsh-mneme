@@ -37,7 +37,7 @@
  * - `activities`：**观察到的**业务动作（人在这对照）
  * 两者不做自动配对——那正是被否决的那件事。
  */
-export function buildProposal({ pipeline, activities = [], hints = null, observations = 0 } = {}) {
+export function buildProposal({ pipeline, activities = [], hints = null } = {}) {
   if (!pipeline || !Array.isArray(pipeline.steps)) {
     return { ok: false, reason: "no-pipeline" };
   }
@@ -47,19 +47,18 @@ export function buildProposal({ pipeline, activities = [], hints = null, observa
     title: s.title,
     // 步骤表里人写的 tool 原文——给对照用，不是匹配依据
     declared: typeof s.tool === "string" ? s.tool : "",
-    // 机器给的候选提示（可有可无）。**只是提示**，不预选。
-    hint: Array.isArray(hints?.[s.id]) ? hints[s.id] : null
+    // 机器给的候选提示：**只给一个次数**，不给命令行原文（原文含绝对路径）。
+    // 它只是提示，不预选——人仍然要自己说这一步做没做。
+    hintCount: Number.isFinite(hints?.[s.id]) ? hints[s.id] : 0
   }));
 
   return {
     ok: true,
     pipelineId: pipeline.id,
-    pipelineTitle: pipeline.name,
     steps,
-    activities: activities.map((a) => ({ key: a.key, count: a.count, flags: a.flags || [] })),
-    observations,
-    // 人回答时要用的动作词表——把选项写死，省得每次自由发挥
-    answers: ["done", "notDone", "unsure"]
+    activities: activities.map((a) => ({ key: a.key, count: a.count, flags: a.flags || [] }))
+    // 不返回 answers 词表：命令层有自己的解析表，写死两份只会漂。
+    // 也不返回 pipelineTitle / observations：零消费者（ponytail 复核点名的两处）。
   };
 }
 

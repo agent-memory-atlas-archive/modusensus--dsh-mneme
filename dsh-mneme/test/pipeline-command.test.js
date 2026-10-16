@@ -82,8 +82,8 @@ test("P2：stop 产出待确认清单，明说「还没有写账」并给出步�
         proposal: {
           pipelineId: "demo",
           steps: [
-            { id: "P6", title: "跑测试", declared: "npm test", hint: ["npm test"] },
-            { id: "V2", title: "推分支", declared: "git push", hint: null }
+            { id: "P6", title: "跑测试", declared: "npm test", hintCount: 2 },
+            { id: "V2", title: "推分支", declared: "git push", hintCount: 0 }
           ]
         }
       })

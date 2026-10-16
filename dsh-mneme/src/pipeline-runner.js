@@ -36,7 +36,7 @@
  * `reason:"no-observations"`，而不是写一条空账假装成功。
  */
 
-import { loadPipelines, pipelineSources, projectPipelineDir } from "./pipeline.js";
+import { loadPipelines, pipelineSources } from "./pipeline.js";
 import { appendRun } from "./pipeline-runs.js";
 import { openRun } from "./pipeline-exec.js";
 import { pairObservations } from "./pipeline-observe.js";
@@ -175,38 +175,31 @@ export function createExecutionRecorder({
       // 自动归属只用来产 hint：唯一 exact 的那一步给出来，其余不给。
       // 它不进账——这一版的账只有人能写。
       const hints = {};
-      const autoObserved = new Set();
       for (const observation of observations) {
-        const before = w.run.state().recorded.length;
         const r = w.run.observe(observation);
-        if (r.result === "observed" && r.stepId && !autoObserved.has(r.stepId)) {
-          autoObserved.add(r.stepId);
-          hints[r.stepId] = [observation.command];
+        if (r.result === "observed" && r.stepId) {
+          // hint 只记「这次见到过相近的命令」这个事实，**不存命令行原文**：
+          // 完整命令行含绝对路径（路径含本机用户名），而这条 hint 会流到命令回执里。
+          hints[r.stepId] = (hints[r.stepId] || 0) + 1;
         }
-        // 把自动归属的结果丢掉：窗口的 run 只用来看 hint，不作为任何落盘依据
-        void before;
       }
 
       const activityTally = tallyActivities(observations);
       const proposal = buildProposal({
         pipeline: w.pipeline,
         activities: activityTally.activities,
-        hints,
-        observations: observations.length
+        hints
       });
 
       // 待确认状态挂在会话上：人在下一次调用里回答。
+      // stats 只留**确认阶段真的会渲染**的三个字段（ponytail 复核：另外三个零读取）。
       pending.set(id, {
         pipeline: w.pipeline,
         projectRoot: w.projectRoot,
         proposal,
-        // 下面这些是回执要报的账，与提案一起留着
         stats: {
-          bufferedEvents: w.events.length,
           truncated: w.truncated,
-          observations: observations.length,
           notCommands,
-          dangling: dangling.length,
           shellNoise: activityTally.shellNoise
         }
       });
