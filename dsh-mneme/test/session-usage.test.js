@@ -12,7 +12,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import zlib from "node:zlib";
@@ -206,17 +206,62 @@ test("会话目录默认值由 dshHome 推导，不写死本机路径", () => {
   assert.ok(resolveSessionDir({ dshHome: join(tmpdir(), "x") }).includes("x"));
 });
 
-test("文件发现：只认 session.v4 前缀，且递归子目录", () => {
+test("文件发现：**所有版本**的会话文件都要收（只认 v4 会漏掉一半历史）", () => {
+  // 实测回归：本机同一会话树下并存三种格式——v4（219）、v3（218）、无版本号（72）。
+  // 早期版本只认 `session.v4`，静默漏掉 50 次技能调用（euthyna 44 次），
+  // 导致三个明明用过的技能被报成 candidate。所以只要求「以 session 开头」。
   const base = mkdtempSync(join(tmpdir(), "mneme-usage-find-"));
   try {
     const sessions = join(base, "sessions");
     mkdirSync(join(sessions, "a", "id1"), { recursive: true });
     mkdirSync(join(sessions, "b", "id2"), { recursive: true });
     writeFileSync(join(sessions, "a", "id1", "session.v4.jsonl.zstd"), multiFrameBuffer(["x"]));
-    writeFileSync(join(sessions, "b", "id2", "session.v4.jsonl.zstd"), multiFrameBuffer(["y"]));
+    writeFileSync(join(sessions, "b", "id2", "session.v3.jsonl.zstd"), multiFrameBuffer(["y"]));
+    writeFileSync(join(sessions, "b", "id2", "session.jsonl.zstd"), multiFrameBuffer(["z"]));
     writeFileSync(join(sessions, "a", "id1", "other.jsonl"), "不该被收");
     const found = findSessionFiles(sessions);
-    assert.equal(found.length, 2, "两个 session.v4 文件都要找到，other.jsonl 不要");
+    assert.equal(found.files.length, 3, "v4 / v3 / 无版本号三种都要找到，other.jsonl 不要");
+    assert.equal(found.unreadable.length, 0);
+    assert.equal(found.present, true);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("目录不可读要与「空目录」**可分辨**（不许同形）", () => {
+  // 实测回归：早期版本用 existsSync 定 present、readdirSync 失败直接 return，
+  // 于是 ACL 拒绝的目录产出与「可读空目录」逐字段相同的读数
+  // （present=true, scannedFiles=0, unreadable=[]），清单侧 175 条全 candidate。
+  // 这正是本仓库反复防的那类错：读不到被显示成「读到但没有」。
+  const base = mkdtempSync(join(tmpdir(), "mneme-usage-unreadable-"));
+  try {
+    // ① 不存在的目录：present=false
+    const missing = findSessionFiles(join(base, "nope"));
+    assert.equal(missing.present, false);
+    assert.equal(missing.files.length, 0);
+
+    // ② 存在的空目录：present=true、无 unreadable
+    const empty = join(base, "empty");
+    mkdirSync(empty, { recursive: true });
+    const emptyRes = findSessionFiles(empty);
+    assert.equal(emptyRes.present, true);
+    assert.equal(emptyRes.files.length, 0);
+    assert.equal(emptyRes.unreadable.length, 0, "空目录不该有 unreadable");
+
+    // ③ 悬空符号链接：present=true，但**必须有 unreadable**，与空目录不同形
+    try {
+      symlinkSync(join(base, "no-such-target"), join(empty, "session.dangling.jsonl.zstd"), "junction");
+    } catch (error) {
+      if (error.code === "EPERM" || error.code === "EACCES") return; // 无权限则跳过本断言
+      throw error;
+    }
+    const dangling = findSessionFiles(empty);
+    assert.ok(dangling.unreadable.length > 0, "读不到的项必须留痕，否则与空目录同形");
+    // 而且上层能区分：collectUsage 的 readable 会变 false
+    const c = collectUsage({ sessionDir: empty });
+    assert.equal(c.present, true);
+    assert.equal(c.readable, false, "有读不动的项时 readable 必须为 false");
+    assert.ok(c.unreadable.length > 0, "unreadable 要透到 collectUsage");
   } finally {
     rmSync(base, { recursive: true, force: true });
   }

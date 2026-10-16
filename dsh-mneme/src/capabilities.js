@@ -744,9 +744,15 @@ export function discoverCapabilities(options = {}) {
       mcpCalls: usageCollection?.mcpCalls ?? 0,
       // 对不上名字的调用数（技能没记 name、或 MCP server 名为空）。如实报，不硬凑。
       unmatchedCalls: usageCollection?.unmatched ?? 0,
+      // **读不到要与「没有」可分辨**：`sourcePresent` 只说目录在不在，
+      // `sourceReadable` 说它是不是真能列出来。两者都为 true 而记录为空，
+      // 才是「确实没有调用记录」；任何一个为 false 时，数字都不可信。
+      sourceReadable: usageCollection?.readable === true,
+      // 文件数被上限截断时要报出来，否则「只扫了一部分」看不出来。
+      filesTruncated: usageCollection?.truncated === true,
       staleAfterDays,
       scopeNote:
-        "使用记录只覆盖本机现存的会话日志。`candidate` 的含义是「在这些日志里没有记录」，不是「从未使用」——日志被清理后，久未用的能力会退化成 candidate。",
+        "使用记录只覆盖本机现存的会话日志。`candidate` 的含义是「在这些日志里没有记录」，不是「从未使用」——日志被清理后，久未用的能力会退化成 candidate；反过来，若 sourceReadable 为 false，则所有 candidate 都不可信。",
       unreadable: usageCollection?.unreadable ?? []
     },
     mcp: {

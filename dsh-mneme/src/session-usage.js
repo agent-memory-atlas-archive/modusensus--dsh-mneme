@@ -24,8 +24,19 @@ import zlib from "node:zlib";
 /** zstd 帧头 magic。多帧文件里每帧都以此开头，切帧就靠它。 */
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
 
-/** 会话日志文件名前缀（含分片后缀，如 `session.v4.jsonl.zstd`）。 */
-const SESSION_FILE_PREFIX = "session.v4";
+/**
+ * 会话日志文件名前缀。
+ *
+ * **不是只认 `session.v4`** —— 本机实测同一会话树下并存三种格式：
+ *   · `session.v4.jsonl.zstd`（219 个）
+ *   · `session.v3.jsonl.zstd`（218 个）
+ *   · `session.jsonl.zstd`（72 个，无版本号的最早期形态）
+ * 只认 v4 会**静默漏掉一半以上的历史**（实测漏掉 50 次技能调用，其中 `euthyna` 44 次；
+ * `brainstorming` / `writing-plans` / `subagent-driven-development` 三个技能明明用过
+ * 却被报成 `candidate`）。所以这里只要求「文件名以 `session` 开头」——宁可多读几个
+ * 非会话文件（解析时自然会被 `tool-call` 过滤掉），也不要漏掉真实记录。
+ */
+const SESSION_FILE_PREFIX = "session";
 
 /** 单次扫描最多读多少个文件——目录膨胀时宁可报错，也不要把一次面板刷新变成全盘扫描。 */
 const MAX_SESSION_FILES = 2000;
@@ -90,20 +101,33 @@ export function forEachFrame(buf, onText) {
   return { frames, failed };
 }
 
-/** 递归找出所有会话日志文件。找不到根目录时返回空数组（不是错误）。 */
+/**
+ * 递归找出所有会话日志文件。
+ *
+ * 返回 `{ files, unreadable }`——**目录读不动时必须留痕**。
+ *
+ * 为什么这是关键：早期版本用 `existsSync` 定 `present`、`readdirSync` 失败直接 `return`，
+ * 于是「目录存在但不可读（ACL 拒绝、权限不足）」与「目录存在且为空」产出**逐字段相同**
+ * 的读数（`present=true, scannedFiles=0, unreadable=[]`），清单上 175 条技能全 `candidate`。
+ * 那正是本仓库反复防的那类错：**读不到被显示成「读到但没有」**。所以 readdir 失败要
+ * 记进 `unreadable`，让上层能把它与「空目录」分辨开。
+ */
 export function findSessionFiles(dir) {
-  if (!existsSync(dir)) return [];
-  const out = [];
+  const result = { files: [], unreadable: [], present: false };
+  if (!existsSync(dir)) return result;
+  result.present = true;
   const walk = (current) => {
-    if (out.length >= MAX_SESSION_FILES) return;
+    if (result.files.length >= MAX_SESSION_FILES) return;
     let entries;
     try {
       entries = readdirSync(current, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      // 读不动就说出来——不静默 return（那会与「空目录」同形）。
+      result.unreadable.push({ dir: current, detail: `目录读失败：${error.message}` });
       return;
     }
     for (const entry of entries) {
-      if (out.length >= MAX_SESSION_FILES) return;
+      if (result.files.length >= MAX_SESSION_FILES) return;
       const full = join(current, entry.name);
       // 符号链接要单独认：Dirent 对 symlink 的 isDirectory() 返回 false（踩过一次）。
       let isDir = entry.isDirectory();
@@ -111,15 +135,18 @@ export function findSessionFiles(dir) {
         try {
           isDir = statSync(full).isDirectory();
         } catch {
-          continue; // 悬空链接
+          // 悬空链接：计入 unreadable（目标不可达也是「读不到」的一种）。
+          result.unreadable.push({ dir: full, detail: "符号链接目标不可达" });
+          continue;
         }
       }
       if (isDir) walk(full);
-      else if (entry.name.startsWith(SESSION_FILE_PREFIX)) out.push(full);
+      else if (entry.name.startsWith(SESSION_FILE_PREFIX)) result.files.push(full);
     }
   };
   walk(dir);
-  return out.sort();
+  result.files.sort();
+  return result;
 }
 
 /**
@@ -192,10 +219,17 @@ export function identifyCapability(call) {
  * 由上层投影成清单字段。`unmatched` 记对不上名字的调用数——如实报，不硬凑。
  */
 export function collectUsage({ sessionDir = resolveSessionDir(), maxFiles = MAX_SESSION_FILES } = {}) {
-  const files = findSessionFiles(sessionDir).slice(0, maxFiles);
+  const found = findSessionFiles(sessionDir);
+  const files = found.files.slice(0, maxFiles);
   const result = {
     dir: sessionDir,
-    present: existsSync(sessionDir),
+    // `present` = 目录在；`readable` = 目录真能列出来。**两者必须分开报**，
+    // 否则「不可读」与「空目录」在读数上同形（那正是本仓库反复防的那类错）。
+    present: found.present,
+    readable: found.present && found.unreadable.length === 0,
+    // 文件数被上限截断时要说出来，否则「只扫了一部分」看不出来。
+    truncated: found.files.length > maxFiles,
+    totalFiles: found.files.length,
     scannedFiles: 0,
     frames: 0,
     failedFrames: 0,
@@ -204,7 +238,8 @@ export function collectUsage({ sessionDir = resolveSessionDir(), maxFiles = MAX_
     unmatched: 0,
     skills: new Map(),
     mcp: new Map(),
-    unreadable: []
+    // 目录读不动、悬空链接、单文件读失败都记在这里——**读不到要有痕**。
+    unreadable: [...found.unreadable]
   };
 
   const record = (map, name, time, sessionId) => {
