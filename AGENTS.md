@@ -46,6 +46,7 @@ dsh-mneme 是 DSH 宿主的记忆插件（蒸馏 / 注入 / 检索 / 巩固 / sc
 | 热度 | `src/heat.js` | 纯函数遗忘曲线（opt-in） |
 | 复用统计 | `src/recall-stats.js` | recall_runs 只读聚合（#217，Top-N 召回 + 僵尸率） |
 | 工作流 | `src/pipeline.js` + `.mneme/pipelines/*.json`（项目级） | M.O.（手法）读侧：两层来源（项目层优先、包内 `pipelines/` 为全局兜底）→ `mneme.pipeline/v1` 投影（[docs/WORKFLOWS.md](dsh-mneme/docs/WORKFLOWS.md)） |
+| 绕行与候选 | `src/candidates.js`（+ `<memoryDir>/candidates/<项目键>/`） | M.O. 的出口与草稿层：绕行的分档判定（R0/R1 记账先走、R2/R3 停下问人 + 机械兜底清单 + 闸门保护）、候选的归并/归档/升格（进仓库要人批） |
 | 冷启动 | `src/bootstrap.js` | 从仓库文件反向构建初始记忆（POST /bootstrap） |
 | 配置 | `src/config.js`（schema + lightMode）、`src/settings.js`（feature flags 白名单） | 一切行为开关的家 |
 | API 面 | `src/api.js`（宿主内 /api/dsh-mneme/*）、`src/api-standalone.js`（Bearer 数据面）、`bin/dsh-mneme-mcp.mjs`（MCP stdio）、`src/serve.js` + `bin/dsh-mneme-serve.mjs`（独立服务 daemon，无 LLM 数据面） | 对外四张脸 |
