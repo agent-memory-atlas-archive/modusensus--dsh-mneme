@@ -20,8 +20,12 @@
  * 理由是接那些**跨项目复用**的手法，而跨项目复用是一个要留痕的显式动作。
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { dirname, join, basename } from "node:path";
+import { dirname, join, posix as pathPosix, win32 as pathWin32 } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// 两种路径语义各自指名一次，别让调用点再自己判断平台。
+const basenamePosix = pathPosix.basename;
+const basenameWin32 = pathWin32.basename;
 
 /**
  * **全局层**的家：插件包自带的 `pipelines/`。算法是「本模块所在目录的上一级」——
@@ -48,8 +52,15 @@ export function projectPipelineDir(projectRoot) {
  * 机器要用的完整路径另在 `sources[].dir`，那是数据，不是给人读的。
  */
 export function projectLabel(projectRoot) {
-  const base = basename(projectRoot);
-  return base === "" ? projectRoot : base;
+  const root = String(projectRoot ?? "");
+  // **语义显式指名，不借 path.basename()**：它跟着运行平台走——posix 上 `\` 不是
+  // 分隔符，一条 Windows 路径会被整条当成标签，而面板正是会被截图、被贴进 issue
+  // 的那一面，标签里于是带着本机用户名，恰好是本函数要挡住的东西。
+  // 含反斜杠按 Windows 语义解析，否则按 posix——两个平台的正确结果就此一致。
+  // Windows 腿对旧写法**结构性看不见**（win32.basename 两种分隔符都认，旧实现在
+  // 本机算出来就是对的），所以这条的杀伤力只在 ubuntu 矩阵腿上。
+  const base = root.includes("\\") ? basenameWin32(root) : basenamePosix(root);
+  return base === "" ? root : base;
 }
 
 /**
