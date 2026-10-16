@@ -29,7 +29,21 @@ import { STR } from "./lang.js";
 /** 命令名与用法。名字走本仓的 `COMMAND_NAME` 约定：小写字母起头。 */
 export const MO_RUN_COMMAND = "mo-run";
 
-/** 解析 `/mo-run` 后面的原始输入。只认三种子命令，其余交给用法提示。 */
+/**
+ * 解析 `/mo-run` 后面的原始输入。
+ *
+ * 五个子命令：
+ * - `start <id>`：开窗
+ * - `stop`：结账，**产出待确认清单**（P2 起不再自动落盘）
+ * - `confirm <答案>`：人确认哪几步走了 → 这才写账
+ * - `status`：看状态（不带参数时的默认，最安全）
+ *
+ * `confirm` 的答案格式刻意做成**最短的两种**，避免让人背语法：
+ * - `/mo-run confirm P6 V2` —— 这几步做了（空格分隔）
+ * - `/mo-run confirm P6:* V2:-` —— 带标记：`*` 做了、`-` 没做、`?` 不确定
+ *
+ * 没提到的步骤**什么都不写**（既不是"做了"也不是"没做"）——见 pipeline-confirm 的注释。
+ */
 export function parseMoRunInput(rawInput) {
   const text = typeof rawInput === "string" ? rawInput.trim() : "";
   if (text === "") return { action: "status" }; // 不带参数 = 看状态，最安全
@@ -40,11 +54,44 @@ export function parseMoRunInput(rawInput) {
       return { action: "start", pipelineId: arg };
     case "stop":
       return { action: "stop" };
+    case "confirm":
+      return { action: "confirm", answers: parseConfirmArg(arg) };
     case "status":
       return { action: "status" };
     default:
       return { action: "help", unknown: verb };
   }
+}
+
+/**
+ * `confirm` 的参数 → `{ stepId: "done"|"notDone"|"unsure" }`。
+ *
+ * 两种写法都收：
+ * - `P6`        → done（最常用，直接列做了哪几步）
+ * - `P6:*` / `P6:-` / `P6:?` → done / notDone / unsure
+ *
+ * 解析不了的一律**不放进结果**（宁可少答，不可猜答案）——非法值会在
+ * `runFromAnswers` 那一层被拒，这里只负责拆分。
+ */
+export function parseConfirmArg(arg) {
+  const answers = {};
+  if (typeof arg !== "string" || arg.trim() === "") return answers;
+  for (const token of arg.split(/[\s,]+/u)) {
+    if (token === "") continue;
+    const [idPart, markPart] = token.split(":", 2);
+    const id = idPart.trim();
+    if (id === "") continue;
+    if (markPart === undefined || markPart.trim() === "") {
+      answers[id] = "done";
+      continue;
+    }
+    const mark = markPart.trim();
+    if (mark === "*") answers[id] = "done";
+    else if (mark === "-") answers[id] = "notDone";
+    else if (mark === "?") answers[id] = "unsure";
+    // 其它标记：不放进结果（不是"没做"，是"没答"）
+  }
+  return answers;
 }
 
 /**
@@ -70,35 +117,70 @@ function renderActivities(activities, t, maxRows = 12) {
   return `${t.activities(activities.length)}\n${rows.join("\n")}${more}`;
 }
 
-/** 把一次 `stop()` 的结果翻成人话。**失败要说清为什么**，不许含糊成「完成」。 */
+/**
+ * 把一次 `stop()` 的结果翻成人话。
+ *
+ * P2 起 `stop` **不再写账**，而是产出一份待确认清单。所以这里的重点从
+ * "记了几步"变成"**请你确认哪几步走了**"——并给出步骤表与观察到的动作，供人对照。
+ */
 function describeStop(result, language) {
   const t = STR.moRunStop[language];
-  // 观察清单无论成败都要给——它是这个功能当前最可靠的产出。
   const activityBlock = renderActivities(result.activities, t);
+
+  if (result.ok && result.state === "awaiting-confirmation") {
+    const prop = result.proposal;
+    const lines = prop.steps.map((s, i) => {
+      const hint = s.hint ? `  ← 本次看到 ${s.hint.length} 条相近命令` : "";
+      return `  ${i + 1}. ${s.id}  ${s.title}${s.declared ? `  [${s.declared}]` : ""}${hint}`;
+    });
+    const parts = [t.awaiting(prop.pipelineId, prop.steps.length)];
+    parts.push(lines.join("\n"));
+    if (activityBlock) parts.push(activityBlock);
+    // 「这条命令不是动作」与「没归属上」是两件事，混在一起会让人以为工具坏了
+    if (result.shellNoise) parts.push(t.shellNoise(result.shellNoise));
+    if (result.notCommands) parts.push(t.notCommands(result.notCommands));
+    if (result.truncated) parts.push(t.truncated);
+    parts.push(t.confirmHow(prop.steps.map((s) => s.id).slice(0, 3).join(" ")));
+    return parts.filter(Boolean).join("\n");
+  }
 
   if (result.ok) {
     const parts = [t.ok(result.pipelineId, result.steps)];
     if (activityBlock) parts.push(activityBlock);
-    if (result.unobserved?.length) parts.push(t.unobserved(result.unobserved.length, result.unobserved.join("、")));
-    if (result.unattributed) parts.push(t.unattributed(result.unattributed));
-    if (result.ambiguous) parts.push(t.ambiguous(result.ambiguous));
-    if (result.notCommands) parts.push(t.notCommands(result.notCommands));
     if (result.truncated) parts.push(t.truncated);
     return parts.filter(Boolean).join("\n");
   }
+
   switch (result.reason) {
     case "no-open-window":
       return t.noWindow;
-    case "no-observations":
-      // 这条最要紧：一条观察都没认出来，绝不写成「完成」。
-      return t.nothingObserved(result.bufferedEvents, result.notCommands);
-    case "no-steps": {
-      // 「没归属到步骤」不等于「什么都没干」——清单才是这一版真正的交付物。
-      const parts = [t.noSteps];
-      if (activityBlock) parts.push(activityBlock);
-      if (result.shellNoise) parts.push(t.shellNoise(result.shellNoise));
-      return parts.filter(Boolean).join("\n");
-    }
+    case "write-failed":
+      return t.writeFailed(result.detail);
+    default:
+      return t.failed(result.reason);
+  }
+}
+
+/** 把一次 `confirm()` 的结果翻成人话。 */
+function describeConfirm(result, language) {
+  const t = STR.moRunConfirm[language];
+  if (result.ok) {
+    const parts = [t.ok(result.pipelineId, result.steps)];
+    if (result.notDone?.length) parts.push(t.notDone(result.notDone.join("、")));
+    if (result.unsure?.length) parts.push(t.unsure(result.unsure.join("、")));
+    if (result.unanswered?.length) parts.push(t.unanswered(result.unanswered.join("、")));
+    return parts.filter(Boolean).join("\n");
+  }
+  switch (result.reason) {
+    case "nothing-to-confirm":
+      return t.nothingToConfirm;
+    case "no-answers":
+      // 说了"没做"是记录；什么都没说不是——这条区分很重要。
+      return t.noAnswers(result.notDone?.length ?? 0, result.unsure?.length ?? 0, result.unanswered?.length ?? 0);
+    case "bad-answer-value":
+      return t.badValue(result.stepId, result.value);
+    case "unknown-step":
+      return t.unknownStep(result.stepId);
     case "write-failed":
       return t.writeFailed(result.detail);
     default:
@@ -127,6 +209,7 @@ function describeStart(result, language) {
 
 function describeStatus(status, language) {
   const t = STR.moRunStatus[language];
+  if (status.awaitingConfirmation) return t.awaiting(status.pipelineId, status.steps ?? 0);
   if (!status.open) return t.closed;
   return t.open(status, status.recorded.join("、") || t.none);
 }
@@ -153,6 +236,10 @@ export function createMoRunHandler({ recorder, language = () => "zh" } = {}) {
       }
       if (parsed.action === "stop") {
         return { kind: "success", text: describeStop(recorder.stop({ session }), lang) };
+      }
+      if (parsed.action === "confirm") {
+        const result = recorder.confirm({ session, answers: parsed.answers });
+        return { kind: result.ok ? "success" : "error", text: describeConfirm(result, lang) };
       }
       return { kind: "success", text: describeStatus(recorder.status({ session }), lang) };
     } catch (error) {

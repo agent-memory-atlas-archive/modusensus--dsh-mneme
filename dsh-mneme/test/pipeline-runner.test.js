@@ -74,13 +74,130 @@ test("开窗 → 走一遍 → 结账：产出并落盘一条账", () => {
   assert.equal(started.steps, 1);
 
   for (const e of callAndResult("npm test")) f.emit(session, e);
-  const stopped = rec.stop({ session });
 
+  // P2 契约：stop **不再落盘**，只产出「请你确认」的提案
+  const stopped = rec.stop({ session });
   assert.equal(stopped.ok, true);
-  assert.equal(stopped.steps, 1);
+  assert.equal(stopped.state, "awaiting-confirmation");
   assert.equal(stopped.observations, 1);
+  assert.equal(written, null, "没人确认之前，一个字节都不许落盘");
+
+  // 自动归属的结果只作提示（PIPE 里 P6 的 tool 正是 npm test，所以这里会有 hint）
+  assert.deepEqual(stopped.proposal.steps.map((s) => s.id), ["P6"]);
+
+  // 人确认之后才写账——这是唯一入口
+  const confirmed = rec.confirm({ session, answers: { P6: "done" } });
+  assert.equal(confirmed.ok, true);
+  assert.equal(confirmed.steps, 1);
   assert.equal(written.id, "demo");
   assert.equal(written.root, "C:\\proj");
+  assert.deepEqual(written.run.steps.map((s) => s.id), ["P6"]);
+  assert.equal(written.run.by, "human", "人确认的账，by 应当是人");
+});
+
+test("P2：hint 只是提示，不预选——人不回答就什么都不写", () => {
+  const f = fakeCtx();
+  let written = null;
+  const rec = createExecutionRecorder({
+    ctx: f.ctx,
+    resolvePipeline: () => PIPE,
+    persistRun: (root, id, run) => { written = { id, run }; }
+  });
+  const session = { id: "s1", header: { cwd: "C:\\proj" } };
+  rec.start({ session, pipelineId: "demo" });
+  for (const e of callAndResult("npm test")) f.emit(session, e);
+  rec.stop({ session });
+
+  // 人什么都不说（全没答）→ 不产 run，也不写盘
+  const r = rec.confirm({ session, answers: {} });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "no-answers");
+  assert.deepEqual(r.unanswered, ["P6"]);
+  assert.equal(written, null, "没回答 = 没确认 = 不写");
+});
+
+test("P2：unsure 与 notDone 在落盘结果里必须分得开", () => {
+  const f = fakeCtx();
+  let written = null;
+  const rec = createExecutionRecorder({
+    ctx: f.ctx,
+    resolvePipeline: () => PIPE,
+    persistRun: (root, id, run) => { written = { id, run }; }
+  });
+  const session = { id: "s1", header: { cwd: "C:\\proj" } };
+  rec.start({ session, pipelineId: "demo" });
+  rec.stop({ session });
+
+  const r = rec.confirm({ session, answers: { P6: "unsure" } });
+  // 全 unsure → 无记录可写
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "no-answers");
+  assert.deepEqual(r.unsure, ["P6"]);
+  assert.equal(written, null);
+});
+
+test("P2：非法回答保留待确认状态，让人重答（不丢掉、不静默少记）", () => {
+  const f = fakeCtx();
+  const rec = createExecutionRecorder({ ctx: f.ctx, resolvePipeline: () => PIPE, persistRun: () => {} });
+  const session = { id: "s1", header: { cwd: "C:\\proj" } };
+  rec.start({ session, pipelineId: "demo" });
+  rec.stop({ session });
+
+  const bad = rec.confirm({ session, answers: { P6: "yes" } });
+  assert.equal(bad.reason, "bad-answer-value");
+  // 状态还在，可以重答
+  assert.equal(rec.status({ session }).awaitingConfirmation, true);
+  const ok = rec.confirm({ session, answers: { P6: "done" } });
+  assert.equal(ok.ok, true);
+});
+
+test("P2：没结账就确认 → 说清「没什么可确认的」", () => {
+  const f = fakeCtx();
+  const rec = createExecutionRecorder({ ctx: f.ctx, resolvePipeline: () => PIPE, persistRun: () => {} });
+  const session = { id: "s1", header: { cwd: "C:\\proj" } };
+  rec.start({ session, pipelineId: "demo" });
+  assert.equal(rec.confirm({ session, answers: { P6: "done" } }).reason, "nothing-to-confirm");
+});
+
+test("P2：status 要能分辨「窗口开着」与「等你确认」两种状态", () => {
+  const f = fakeCtx();
+  const rec = createExecutionRecorder({ ctx: f.ctx, resolvePipeline: () => PIPE, persistRun: () => {} });
+  const session = { id: "s1", header: { cwd: "C:\\proj" } };
+  rec.start({ session, pipelineId: "demo" });
+  assert.equal(rec.status({ session }).open, true);
+  assert.equal(rec.status({ session }).awaitingConfirmation, undefined);
+
+  rec.stop({ session });
+  const s = rec.status({ session });
+  assert.equal(s.open, false);
+  assert.equal(s.awaitingConfirmation, true);
+  assert.equal(s.pipelineId, "demo");
+});
+
+test("P2：结账时不再报「没认出来」为失败——认不出只是没 hint，人照样能确认", () => {
+  const f = fakeCtx();
+  let written = null;
+  const rec = createExecutionRecorder({
+    ctx: f.ctx,
+    resolvePipeline: () => PIPE,
+    persistRun: (root, id, run) => { written = { run }; }
+  });
+  const session = { id: "s1", header: { cwd: "C:\\proj" } };
+  rec.start({ session, pipelineId: "demo" });
+
+  // 只有无关命令：认不出任何步骤
+  f.emit(session, { type: "tool/call", data: { callId: "x", name: "read", arguments: '{"file_path":"a.md"}' } });
+  f.emit(session, { type: "tool/result", data: { callId: "x", message: { isError: false } } });
+  const stopped = rec.stop({ session });
+
+  // 这一步和 P1 的不同：认不出**不再是"失败"**，而是"等你自己说"
+  assert.equal(stopped.ok, true);
+  assert.equal(stopped.state, "awaiting-confirmation");
+  assert.equal(stopped.observations, 0);
+  assert.equal(stopped.notCommands, 1);
+  // 人来说"这一步走了"，照样能记
+  const confirmed = rec.confirm({ session, answers: { P6: "done" } });
+  assert.equal(confirmed.ok, true);
   assert.deepEqual(written.run.steps.map((s) => s.id), ["P6"]);
 });
 
@@ -140,7 +257,7 @@ test("拿不到会话工作目录时拒开，而不是硬塞一个别处的项�
   assert.equal(rec.start({ pipelineId: "demo" }).reason, "no-session");
 });
 
-test("一条观察都没认出来：不写空账，reason 说清是「没观察」", () => {
+test("P2：一条观察都没认出来也不写账——但也不再当成失败（等人自己说）", () => {
   const f = fakeCtx();
   let wrote = false;
   const rec = createExecutionRecorder({
@@ -155,12 +272,15 @@ test("一条观察都没认出来：不写空账，reason 说清是「没观察�
   f.emit(session, { type: "tool/call", data: { callId: "x", name: "read", arguments: '{"file_path":"a.md"}' } });
   const stopped = rec.stop({ session });
 
-  assert.equal(stopped.ok, false);
-  assert.equal(stopped.reason, "no-observations");
-  assert.equal(wrote, false, "不写空账假装成功");
+  // 旧行为是 ok:false + reason:no-observations；P2 起认不出不再是"失败"，
+  // 因为账本来就该由人来说，机器的认不出只是"没给 hint"。
+  assert.equal(stopped.ok, true);
+  assert.equal(stopped.state, "awaiting-confirmation");
+  assert.equal(stopped.observations, 0);
+  assert.equal(wrote, false, "仍然不写空账");
 });
 
-test("写盘失败：如实回报，且窗口已摘掉（不留半死窗口挂在那儿）", () => {
+test("P2：写盘失败发生在 confirm 阶段，如实回报且不留悬着的待确认状态", () => {
   const f = fakeCtx();
   const rec = createExecutionRecorder({
     ctx: f.ctx,
@@ -171,11 +291,16 @@ test("写盘失败：如实回报，且窗口已摘掉（不留半死窗口挂�
   rec.start({ session, pipelineId: "demo" });
   for (const e of callAndResult("npm test")) f.emit(session, e);
 
+  // stop 阶段不该碰磁盘——它是"请你确认"，不是"写账"
   const stopped = rec.stop({ session });
-  assert.equal(stopped.ok, false);
-  assert.equal(stopped.reason, "write-failed");
-  assert.match(stopped.detail, /磁盘满/);
-  assert.equal(rec.status({ session }).open, false, "窗口必须已摘掉");
+  assert.equal(stopped.ok, true);
+
+  const confirmed = rec.confirm({ session, answers: { P6: "done" } });
+  assert.equal(confirmed.ok, false);
+  assert.equal(confirmed.reason, "write-failed");
+  assert.match(confirmed.detail, /磁盘满/);
+  // 写失败后不该留一个悬着的待确认状态（否则人会以为还要再确认一次）
+  assert.equal(rec.status({ session }).awaitingConfirmation, undefined);
 });
 
 test("热路径永不抛：listener 内部出错不冒泡到宿主的一步", () => {

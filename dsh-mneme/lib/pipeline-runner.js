@@ -41,6 +41,7 @@ import { appendRun } from "./pipeline-runs.js";
 import { openRun } from "./pipeline-exec.js";
 import { pairObservations } from "./pipeline-observe.js";
 import { tallyActivities } from "./pipeline-activities.js";
+import { buildProposal, runFromAnswers } from "./pipeline-confirm.js";
 
 /** 一个窗口最多缓冲多少条会话事件。忘了 stop 时，这是内存的兜底。 */
 export const MAX_BUFFERED_EVENTS = 4000;
@@ -101,6 +102,8 @@ export function createExecutionRecorder({
   maxBufferedEvents = MAX_BUFFERED_EVENTS
 } = {}) {
   const windows = new Map(); // sessionId → { pipeline, projectRoot, run, events, truncated }
+  // 已结账、等人确认的会话：sessionId → { pipeline, projectRoot, proposal, stats }
+  const pending = new Map();
 
   const unsubscribe = ctx?.on?.("session/event", (session, event) => {
     try {
@@ -150,7 +153,16 @@ export function createExecutionRecorder({
       return { ok: true, pipelineId: pipeline.id, steps: pipeline.steps.length };
     },
 
-    /** 结账。先摘窗口再写盘：即便写失败，也不该留一个半死的窗口挂在那儿。 */
+    /**
+     * 结账：**不再自动写账**，改成产出一份「请你确认哪几步走了」的提案。
+     *
+     * 这是 P2 的契约变更，理由是被实测否决的自动归属（详见 pipeline-confirm 的文件头）：
+     * 机器唯一归属只有 14.2%，而**猜错的代价是把没走过的步骤记成走过**
+     * （`deriveState` 会据此把它染成 trusted）。所以写账这一步必须有人确认。
+     *
+     * 自动归属的结果**降级成 hint**：仍然算出来，但只作提示、不预选、不落盘。
+     * 同时给出 P1 那份「观察到的业务动作清单」，让人对照着勾。
+     */
     stop({ session } = {}) {
       const id = session?.id;
       if (!id) return { ok: false, reason: "no-session" };
@@ -159,45 +171,123 @@ export function createExecutionRecorder({
       windows.delete(id);
 
       const { observations, dangling, notCommands } = pairObservations(w.events);
-      for (const observation of observations) w.run.observe(observation);
-      const closed = w.run.close();
 
-      // 本次窗口**观察到哪些业务动作**——与「能不能归属到步骤」无关。
-      // 这是这一版的重点：自动归属命中率实测只有 14%，所以回执的主要价值
-      // 不再是"我替你对上了哪几步"，而是"我如实告诉你这一遍都干了什么"。
+      // 自动归属只用来产 hint：唯一 exact 的那一步给出来，其余不给。
+      // 它不进账——这一版的账只有人能写。
+      const hints = {};
+      const autoObserved = new Set();
+      for (const observation of observations) {
+        const before = w.run.state().recorded.length;
+        const r = w.run.observe(observation);
+        if (r.result === "observed" && r.stepId && !autoObserved.has(r.stepId)) {
+          autoObserved.add(r.stepId);
+          hints[r.stepId] = [observation.command];
+        }
+        // 把自动归属的结果丢掉：窗口的 run 只用来看 hint，不作为任何落盘依据
+        void before;
+      }
+
       const activityTally = tallyActivities(observations);
+      const proposal = buildProposal({
+        pipeline: w.pipeline,
+        activities: activityTally.activities,
+        hints,
+        observations: observations.length
+      });
 
-      const common = {
-        pipelineId: w.pipeline.id,
+      // 待确认状态挂在会话上：人在下一次调用里回答。
+      pending.set(id, {
+        pipeline: w.pipeline,
+        projectRoot: w.projectRoot,
+        proposal,
+        // 下面这些是回执要报的账，与提案一起留着
+        stats: {
+          bufferedEvents: w.events.length,
+          truncated: w.truncated,
+          observations: observations.length,
+          notCommands,
+          dangling: dangling.length,
+          shellNoise: activityTally.shellNoise
+        }
+      });
+
+      return {
+        ok: true,
+        state: "awaiting-confirmation",
+        proposal,
+        activities: activityTally.activities,
+        shellNoise: activityTally.shellNoise,
         bufferedEvents: w.events.length,
         truncated: w.truncated,
         observations: observations.length,
         notCommands,
-        dangling: dangling.length,
-        unattributed: closed.unattributed.length,
-        ambiguous: closed.ambiguous.length,
-        unobserved: closed.unobserved,
-        activities: activityTally.activities,
-        shellNoise: activityTally.shellNoise
+        dangling: dangling.length
       };
-
-      // 一条观察都没认出来：如实说，不写空账。这同时是「实时通道到底带不带工具事件」
-      // 的探针——接线后第一次开窗走一遍，看这里是不是 0。
-      if (closed.run === null) {
-        return { ok: false, reason: observations.length === 0 ? "no-observations" : closed.reason, ...common };
-      }
-
-      try {
-        persistRun(w.projectRoot, w.pipeline.id, closed.run);
-      } catch (error) {
-        return { ok: false, reason: "write-failed", detail: String(error?.message ?? error), ...common };
-      }
-      return { ok: true, steps: closed.run.steps.length, ...common };
     },
 
-    /** 只看状态，不结账。窗口开着时也能回答「走到哪了」。 */
+    /**
+     * 人确认后落盘。**这是唯一会写账的入口。**
+     *
+     * `answers` 形如 `{ "P6": "done", "V2": "notDone" }`；未提到的步骤什么都不写
+     * （"没确认"不等于"没发生"，见 pipeline-confirm 的注释）。
+     */
+    confirm({ session, answers } = {}) {
+      const id = session?.id;
+      if (!id) return { ok: false, reason: "no-session" };
+      const p = pending.get(id);
+      if (!p) return { ok: false, reason: "nothing-to-confirm" };
+
+      const result = runFromAnswers({
+        pipeline: p.pipeline,
+        answers,
+        by: "human",
+        triggeredBy: String(p.pipeline.id ?? ""),
+        now
+      });
+
+      if (result.kind === "error") {
+        // 回答非法：**保留待确认状态**，让人重答，而不是把它丢掉。
+        return { ok: false, reason: result.reason, stepId: result.stepId, value: result.value, ...p.stats };
+      }
+
+      if (result.kind === "nothing") {
+        // 什么都没确认：没有信息可记，如实说，且不留一个悬着的待确认状态。
+        pending.delete(id);
+        return {
+          ok: false,
+          reason: "no-answers",
+          notDone: result.notDone,
+          unanswered: result.unanswered,
+          unsure: result.unsure,
+          ...p.stats
+        };
+      }
+
+      pending.delete(id);
+      try {
+        persistRun(p.projectRoot, p.pipeline.id, result.run);
+      } catch (error) {
+        return { ok: false, reason: "write-failed", detail: String(error?.message ?? error), ...p.stats };
+      }
+      return {
+        ok: true,
+        pipelineId: p.pipeline.id,
+        steps: result.run.steps.length,
+        // 三类如实分开：「确认没做」「说不知道」「压根没答」是三种不同的信息
+        notDone: result.notDone,
+        unsure: result.unsure,
+        unanswered: result.unanswered,
+        ...p.stats
+      };
+    },
+
+    /** 只看状态，不结账。要能分辨「窗口开着」与「等你确认」两种状态。 */
     status({ session } = {}) {
       const id = session?.id;
+      if (pending.has(id)) {
+        const p = pending.get(id);
+        return { open: false, awaitingConfirmation: true, pipelineId: p.pipeline.id, steps: p.proposal.steps.length, ...p.stats };
+      }
       const w = windows.get(id);
       if (!w) return { open: false };
       return { ...w.run.state(), bufferedEvents: w.events.length, truncated: w.truncated };
@@ -210,6 +300,7 @@ export function createExecutionRecorder({
         /* 重复 dispose 不报错 */
       }
       windows.clear();
+      pending.clear();
     }
   };
 }

@@ -20,11 +20,13 @@ test("解析：三种子命令 + 默认看状态 + 不认识的词给用法", ()
 });
 
 /** 造一个受控的假记录器，回执里只看它返回的东西怎么被翻译。 */
-function fakeRecorder({ start, stop, status } = {}) {
+function fakeRecorder({ start, stop, status, confirm } = {}) {
   return {
     start: start ?? (() => ({ ok: true, pipelineId: "demo", steps: 3 })),
     stop: stop ?? (() => ({ ok: true, pipelineId: "demo", steps: 2 })),
-    status: status ?? (() => ({ open: false }))
+    // P2 起 stop 不再落盘，默认返回"待确认"
+    status: status ?? (() => ({ open: false })),
+    confirm: confirm ?? (() => ({ ok: true, pipelineId: "demo", steps: 1, notDone: [], unsure: [], unanswered: [] }))
   };
 }
 
@@ -71,33 +73,95 @@ test("start 读不出来与没有这条是两种话——不许合并成同一�
   assert.match(unreadable(invocation("start demo")).text, /坏 JSON/);
 });
 
-test("stop 成功：报步数，并把「没观察到」与「认不出」「歧义」「非命令」分开说", () => {
+test("P2：stop 产出待确认清单，明说「还没有写账」并给出步骤表", () => {
   const h = createMoRunHandler({
     recorder: fakeRecorder({
       stop: () => ({
-        ok: true, pipelineId: "demo", steps: 2,
-        unobserved: ["A3"], unattributed: 1, ambiguous: 2, notCommands: 5, truncated: false
+        ok: true, state: "awaiting-confirmation", notCommands: 5, truncated: false,
+        activities: [{ key: "npm test", count: 3, flags: [] }],
+        proposal: {
+          pipelineId: "demo",
+          steps: [
+            { id: "P6", title: "跑测试", declared: "npm test", hint: ["npm test"] },
+            { id: "V2", title: "推分支", declared: "git push", hint: null }
+          ]
+        }
       })
     }),
     language: () => "zh"
   });
   const r = h(invocation("stop"));
-  assert.match(r.text, /落盘/);
-  assert.match(r.text, /2 步/);
-  assert.match(r.text, /A3/, "没观察到的步骤要点名");
-  assert.match(r.text, /1 次动作认不出/);
-  assert.match(r.text, /2 次动作有多个候选/);
-  assert.match(r.text, /5 次调用不是命令执行器/);
+  assert.match(r.text, /还没有写账/, "必须明确说这一版不自动落盘");
+  assert.match(r.text, /P6/, "步骤表要给出来供人勾");
+  assert.match(r.text, /V2/);
+  assert.match(r.text, /confirm/, "要给出怎么写确认");
+  assert.match(r.text, /npm test ×3/, "观察到的动作清单也要给");
 });
 
-test("stop 的关键一条：一条观察都没认出来时，明说没落盘，不许含糊成完成", () => {
+test("P2：confirm 成功 → 报步数，并把「没做」「不确定」「没提到」分开", () => {
   const h = createMoRunHandler({
-    recorder: fakeRecorder({ stop: () => ({ ok: false, reason: "no-observations", bufferedEvents: 12, notCommands: 12 }) }),
+    recorder: fakeRecorder({
+      confirm: () => ({ ok: true, pipelineId: "demo", steps: 1, notDone: ["V2"], unsure: [], unanswered: ["A3"] })
+    }),
     language: () => "zh"
   });
-  const r = h(invocation("stop"));
+  const r = h(invocation("confirm P6"));
+  assert.equal(r.kind, "success");
+  assert.match(r.text, /记入账本/);
+  assert.match(r.text, /V2/);
+  assert.match(r.text, /A3/);
+});
+
+test("P2：confirm 的关键一条——什么都没确认时明说没落盘，不许含糊成完成", () => {
+  const h = createMoRunHandler({
+    recorder: fakeRecorder({
+      confirm: () => ({ ok: false, reason: "no-answers", notDone: 0, unsure: 1, unanswered: 1 })
+    }),
+    language: () => "zh"
+  });
+  const r = h(invocation("confirm P6:?"));
+  assert.equal(r.kind, "error");
   assert.match(r.text, /没有落盘/, "必须明确说没写账");
-  assert.match(r.text, /12/, "要把缓冲条数与其中非命令的条数给出来，便于判断是通道问题还是用法问题");
+});
+
+test("P2：confirm 解析——`P6` 表示做了，`V2:-` 没做，`A3:?` 不确定", () => {
+  const seen = [];
+  const h = createMoRunHandler({
+    recorder: fakeRecorder({ confirm: (arg) => { seen.push(arg.answers); return { ok: true, pipelineId: "d", steps: 1, notDone: [], unsure: [], unanswered: [] }; } }),
+    language: () => "zh"
+  });
+  h(invocation("confirm P6 V2:- A3:?"));
+  assert.deepEqual(seen[0], { P6: "done", V2: "notDone", A3: "unsure" });
+  // 非法标记不放进结果（不是「没做」，是「没答」）
+  h(invocation("confirm P6:xyz"));
+  assert.deepEqual(seen[1], {});
+  // 逗号也当分隔符
+  h(invocation("confirm P6,V2"));
+  assert.deepEqual(seen[2], { P6: "done", V2: "done" });
+});
+
+test("P2：没待确认清单时 confirm 说清先做什么", () => {
+  const h = createMoRunHandler({
+    recorder: fakeRecorder({ confirm: () => ({ ok: false, reason: "nothing-to-confirm" }) }),
+    language: () => "zh"
+  });
+  const r = h(invocation("confirm P6"));
+  assert.match(r.text, /没有待确认/);
+  assert.match(r.text, /mo-run start/);
+});
+
+test("P2：非法回答/未知步骤各自说清", () => {
+  const bad = createMoRunHandler({
+    recorder: fakeRecorder({ confirm: () => ({ ok: false, reason: "bad-answer-value", stepId: "P6", value: "yes" }) }),
+    language: () => "zh"
+  });
+  assert.match(bad(invocation("confirm P6:yes")).text, /不合法/);
+
+  const unknown = createMoRunHandler({
+    recorder: fakeRecorder({ confirm: () => ({ ok: false, reason: "unknown-step", stepId: "NOPE" }) }),
+    language: () => "zh"
+  });
+  assert.match(unknown(invocation("confirm NOPE")).text, /NOPE/);
 });
 
 test("stop 没有开着窗口 / 写盘失败：各自说清，不混为一谈", () => {
@@ -114,9 +178,12 @@ test("stop 没有开着窗口 / 写盘失败：各自说清，不混为一谈", 
   assert.notEqual(none(invocation("stop")).text, failed(invocation("stop")).text);
 });
 
-test("status：关着与开着说不同的话，开着的要把进度说清", () => {
+test("status：要能分辨「关着」「开着」「等你确认」三种状态", () => {
   const closed = createMoRunHandler({ recorder: fakeRecorder({ status: () => ({ open: false }) }), language: () => "zh" });
   assert.match(closed(invocation("status")).text, /没有开着/);
+
+  const awaiting = createMoRunHandler({ recorder: fakeRecorder({ status: () => ({ open: false, awaitingConfirmation: true, pipelineId: "demo", steps: 3 }) }), language: () => "zh" });
+  assert.match(awaiting(invocation("status")).text, /等你在确认|确认/, "等待确认是一个独立状态");
 
   const open = createMoRunHandler({
     recorder: fakeRecorder({
@@ -132,10 +199,10 @@ test("status：关着与开着说不同的话，开着的要把进度说清", ()
 
 test("英文实例：同一组结果翻成英文，不落回中文", () => {
   const h = createMoRunHandler({
-    recorder: fakeRecorder({ stop: () => ({ ok: false, reason: "no-observations", bufferedEvents: 3, notCommands: 3 }) }),
+    recorder: fakeRecorder({ confirm: () => ({ ok: false, reason: "no-answers", notDone: 0, unsure: 1, unanswered: 1 }) }),
     language: () => "en"
   });
-  const r = h(invocation("stop"));
+  const r = h(invocation("confirm P6:?"));
   assert.match(r.text, /nothing was persisted/i);
 });
 
