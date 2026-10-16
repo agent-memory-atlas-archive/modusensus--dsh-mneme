@@ -223,6 +223,86 @@ export const STR = {
     en: (name) => `Failed to submit command ${name}; see logs`
   },
 
+  // --- pipeline-command.js：/mo-run 的开窗命令 -----------------------------------
+  // 回执是这个功能唯一的对外窗口（面板侧还没做），所以每一条都要说清「发生了什么、
+  // 为什么」——尤其失败时不许含糊成「完成」。
+  moRunDescription: {
+    zh: "M.O. 记账：显式开一次执行窗口，之后跑过的命令才可能被记下来",
+    en: "M.O. ledger: explicitly open an execution window; only commands run inside it can be recorded"
+  },
+  moRunInputHint: {
+    zh: "start <工作流 id> | stop | status",
+    en: "start <pipeline id> | stop | status"
+  },
+  moRunUsage: {
+    zh: "用法：/mo-run start <工作流 id> → 走一遍 → /mo-run stop\n不带参数或 /mo-run status 只查看当前窗口。\n不会自己判断「你是不是在走某条流程」——必须显式开窗，这是为了不把没跑过的流程记成跑过。",
+    en: "Usage: /mo-run start <pipeline id> → walk through it → /mo-run stop\nNo argument (or /mo-run status) just reports the current window.\nIt never guesses \"are you walking some workflow\" — the window must be opened explicitly, so an unrun workflow is never recorded as run."
+  },
+  moRunStart: {
+    zh: {
+      ok: (id, steps) => `已开窗：${id}（${steps} 步）。这一轮里的命令会按步骤表归属，认不出来的一律不写进账。`,
+      alreadyOpen: (id) => `这个会话已经开着窗口了：${id}。先用 /mo-run stop 结账，再开新的。`,
+      notFound: (ids) => `找不到这条工作流。可用：${ids}`,
+      noneAvailable: "（当前项目里没有读到任何工作流）",
+      unreadable: (detail) => `工作流读不出来：${detail}`,
+      noProject: "拿不到这个会话的工作目录，无法定位工作流。",
+      noSession: "拿不到会话身份，无法记账。",
+      failed: (reason) => `开窗失败：${reason}`
+    },
+    en: {
+      ok: (id, steps) => `Window opened: ${id} (${steps} steps). Commands in this pass are attributed by the step table; anything unrecognized is never written to the ledger.`,
+      alreadyOpen: (id) => `This session already has an open window: ${id}. Run /mo-run stop first.`,
+      notFound: (ids) => `No such workflow. Available: ${ids}`,
+      noneAvailable: "(no workflow found in this project)",
+      unreadable: (detail) => `Workflow unreadable: ${detail}`,
+      noProject: "Cannot determine this session's working directory, so the workflow cannot be located.",
+      noSession: "No session identity available; nothing can be recorded.",
+      failed: (reason) => `Failed to open window: ${reason}`
+    }
+  },
+  moRunStop: {
+    zh: {
+      ok: (id, steps) => `已结账并落盘：${id}，记下 ${steps} 步。`,
+      unobserved: (n, list) => `另有 ${n} 步没被观察到（不等于跳过，只是这次没有对应动作）：${list}`,
+      unattributed: (n) => `${n} 次动作认不出是哪一步，没有写进账。`,
+      ambiguous: (n) => `${n} 次动作有多个候选，留给你确认，没有自动记账。`,
+      notCommands: (n) => `${n} 次调用不是命令执行器（读文件、检索这类），与工作流步骤无关。`,
+      truncated: "⚠️ 事件缓冲到上限被截断，这次记账可能不完整。",
+      noWindow: "这个会话没有开着窗口，没什么可结账的。",
+      nothingObserved: (buffered, notCommands) =>
+        `这一轮一条都没认出来，**没有落盘**。缓冲到 ${buffered} 条事件，其中 ${notCommands} 条不是命令执行器。\n若你确实走过这条流程，说明实时事件通道没带工具调用——请把这条回执留着。`,
+      noSteps: "这一轮没有认出的步骤，按「不许编造」的规矩没有落盘。",
+      writeFailed: (detail) => `认出来了但写盘失败：${detail}`,
+      failed: (reason) => `结账失败：${reason}`
+    },
+    en: {
+      ok: (id, steps) => `Closed and persisted: ${id}, ${steps} step(s) recorded.`,
+      unobserved: (n, list) => `${n} step(s) were not observed (not the same as skipped — there was simply no matching action): ${list}`,
+      unattributed: (n) => `${n} action(s) could not be attributed to any step; not written to the ledger.`,
+      ambiguous: (n) => `${n} action(s) matched multiple candidates; left for you to confirm, not auto-recorded.`,
+      notCommands: (n) => `${n} call(s) were not command executors (file reads, searches) and are irrelevant to workflow steps.`,
+      truncated: "⚠️ Event buffer hit its cap and was truncated; this record may be incomplete.",
+      noWindow: "No window is open for this session, so there is nothing to close.",
+      nothingObserved: (buffered, notCommands) =>
+        `Nothing was recognized this pass; **nothing was persisted**. ${buffered} event(s) were buffered, ${notCommands} of which were not command executors.\nIf you really walked this workflow, the live event channel is not carrying tool calls — please keep this receipt.`,
+      noSteps: "No step was recognized this pass; per the no-fabrication rule nothing was persisted.",
+      writeFailed: (detail) => `Recognized but failed to write: ${detail}`,
+      failed: (reason) => `Failed to close: ${reason}`
+    }
+  },
+  moRunStatus: {
+    zh: {
+      closed: "当前没有开着的执行窗口。用 /mo-run start <工作流 id> 开一个。",
+      open: (s, recorded) => `窗口开着：${s.pipelineId}\n开始于 ${s.startedAt}\n已缓冲 ${s.bufferedEvents} 条事件，识别出 ${recorded} 步${s.truncated ? "（缓冲已截断）" : ""}\n认不出 ${s.unattributed}，待确认 ${s.ambiguous}`,
+      none: "（还没有）"
+    },
+    en: {
+      closed: "No execution window is open. Open one with /mo-run start <pipeline id>.",
+      open: (s, recorded) => `Window open: ${s.pipelineId}\nStarted ${s.startedAt}\n${s.bufferedEvents} event(s) buffered, ${recorded} step(s) recognized${s.truncated ? " (buffer truncated)" : ""}\nUnattributed ${s.unattributed}, ambiguous ${s.ambiguous}`,
+      none: "(none yet)"
+    }
+  },
+
   // --- mirror.js：镜像文件标签（渲染随实例语言；解析两种语言都认） ----------------
   mirrorLabel: {
     zh: { type: "类型", importance: "重要性", tags: "标签", updated: "更新时间", source: "来源", scope: "作用域", sensitivity: "敏感度" },

@@ -146,7 +146,11 @@ const FEATURE_FLAG_BOOLEANS = [
   // 决定是否注册座位（会话头图标 / 浮层 / 右栏 / 对话行卡片），服务端只负责把
   // 这个键稳定暴露出来——键若不在 effective 里，客户端静默少键、一个座位都不注册。
   // 默认关（beta、opt-in）；顶层扁平键，因此不需要 NESTED_FLAG_PATHS 条目。
-  "actionPipelineEnabled"
+  "actionPipelineEnabled",
+  // v0.9.0 第二批：M.O. 执行记账（`/mo-run` 开窗 → 窗口内命令被记成一条 run）。
+  // 与上面那个键分开：那个管「看图的座位」，这个管「往账本里写」。默认关（beta、
+  // opt-in），顶层扁平键，不需要 NESTED_FLAG_PATHS 条目。
+  "actionRunEnabled"
 ];
 // 整数开关的闭区间，与 config.js 里 z.natural().min().max() 对齐。
 const FEATURE_FLAG_INT_RANGES = {
