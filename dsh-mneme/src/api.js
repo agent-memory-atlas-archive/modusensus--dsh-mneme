@@ -13,6 +13,7 @@ import { hostModulesDir, provisionRuntime } from "./runtime/provision.js";
 import { classify, fetchLatestVersion, PACKAGE_VERSION } from "./version-check.js";
 import { parseReclaimQuery, parseReclaimJson, readReclaimFields, reclaimReply, RECLAIM_UNAVAILABLE } from "./reclaim-http.js";
 import { readPipelineDoc } from "./pipeline.js";
+import { readCandidateDoc } from "./candidates.js";
 
 // headers：少数端点（/export 附件下载）需要追加 Content-Disposition 等响应头。
 function sendJson(res, status, payload, headers = {}) {
@@ -1676,8 +1677,43 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
     }
   });
 
+  // --- M.O. 候选层（绕行走出来、还没进仓库的那些路） ---
+  // 和 /pipeline 读的是两处不同的东西，别混：
+  //   /pipeline    定稿，住**仓库**（<项目>/.mneme/pipelines/），可提交、可 review
+  //   /candidates  候选，住**本地**（<memoryDir>/candidates/<项目键>/），随时长、随时扔
+  // 分开是刻意的：候选是草稿，一天可能长十条死九条，进仓库就是垃圾；
+  // 而定稿只放人亲手批过的东西——候选是定稿的唯一入口。
+  //
+  // 这一刀只给**读**：提议与批准的动作还没有落点（那要等执行侧）。
+  // 契约里显式写着 boundaries.autoPromote/autoApprove/injectIntoMemory 三个 false，
+  // 免得以后有人以为忘了做。
+  register({
+    kind: "exact",
+    path: "/api/dsh-mneme/candidates",
+    handler(req, res) {
+      try {
+        const url = new URL(req.url, "http://localhost");
+        const project = url.searchParams.get("project");
+        if (project !== null && !isAbsolute(project)) {
+          sendJson(res, 400, { error: "project-not-absolute", detail: project });
+          return;
+        }
+        // memoryDir 从 config 拿（与 store 同源）；取不到就退回默认，与 config.js 的默认值一致。
+        const memoryDir = (config && typeof config.memoryDir === "string" && config.memoryDir.trim())
+          ? config.memoryDir
+          : "~/.dsh/memory";
+        sendJson(res, 200, readCandidateDoc({ memoryDir, projectRoot: project }));
+      } catch (error) {
+        sendJson(res, 500, {
+          error: "candidates-unreadable",
+          detail: String((error && error.message) || error)
+        });
+      }
+    }
+  });
+
   return {
-    routes: 35,
+    routes: 36,
     dispose: () => {
       for (const dispose of disposers) dispose();
     }

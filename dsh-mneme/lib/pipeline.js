@@ -20,8 +20,12 @@
  * 理由是接那些**跨项目复用**的手法，而跨项目复用是一个要留痕的显式动作。
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { dirname, join, basename } from "node:path";
+import { dirname, join, posix as pathPosix, win32 as pathWin32 } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// 两种路径语义各自指名一次，别让调用点再自己判断平台。
+const basenamePosix = pathPosix.basename;
+const basenameWin32 = pathWin32.basename;
 
 /**
  * **全局层**的家：插件包自带的 `pipelines/`。算法是「本模块所在目录的上一级」——
@@ -48,8 +52,15 @@ export function projectPipelineDir(projectRoot) {
  * 机器要用的完整路径另在 `sources[].dir`，那是数据，不是给人读的。
  */
 export function projectLabel(projectRoot) {
-  const base = basename(projectRoot);
-  return base === "" ? projectRoot : base;
+  const root = String(projectRoot ?? "");
+  // **语义显式指名，不借 path.basename()**：它跟着运行平台走——posix 上 `\` 不是
+  // 分隔符，一条 Windows 路径会被整条当成标签，而面板正是会被截图、被贴进 issue
+  // 的那一面，标签里于是带着本机用户名，恰好是本函数要挡住的东西。
+  // 含反斜杠按 Windows 语义解析，否则按 posix——两个平台的正确结果就此一致。
+  // Windows 腿对旧写法**结构性看不见**（win32.basename 两种分隔符都认，旧实现在
+  // 本机算出来就是对的），所以这条的杀伤力只在 ubuntu 矩阵腿上。
+  const base = root.includes("\\") ? basenameWin32(root) : basenamePosix(root);
+  return base === "" ? root : base;
 }
 
 /**
@@ -81,6 +92,50 @@ export const NODE_STATES = ["candidate", "trusted", "stale", "refuted"];
 
 /** 单层最多读多少条。目录被人塞满时宁可报错，也不要把一次面板刷新变成磁盘扫描。 */
 const MAX_PIPELINES = 200;
+
+/**
+ * 提议的阈值：跳过/绕开多少次就该提一句。
+ * 3 这个数来自标本 E2/E3——「某步跳过 ≥3 次 → 提议删掉；某动作你手动补过 ≥2 次 → 提议升成正式步骤」。
+ */
+export const RETIRE_AFTER_SKIPS = 3;
+export const RETIRE_AFTER_DETOURS = 3;
+
+/**
+ * 从运行记录里算出「该提议什么」。这是**图的自我精简**——不是人定期巡检，
+ * 而是计数到了就冒出来：
+ *   跳过 ≥3 次  → 提议删掉**这一步**（这一步对这条流程没用了）
+ *   绕开 ≥3 次  → 提议这条**路径**过时了（从这里岔出去成了常态，图该重画）
+ *
+ * 两者的区别是这一版的核心：**跳过 = 这次不用；绕开 = 这条路整个不对。**
+ * 只有绕开才动「路径」这一层。
+ */
+export function suggestRetirements(pipeline, { runs = [], now = Date.now() } = {}) {
+  const credit = tallyRuns(runs);
+  const out = [];
+  for (const step of pipeline.steps) {
+    const c = credit.get(step.id);
+    if (!c) continue;
+    if ((c.skipped || 0) >= RETIRE_AFTER_SKIPS) {
+      out.push({
+        kind: "drop-step",
+        stepId: step.id,
+        title: step.title,
+        because: `被跳过 ${c.skipped} 次`,
+        effect: "提议删掉这一步——对这条流程它可能已经没用了"
+      });
+    }
+    if ((c.detoured || 0) >= RETIRE_AFTER_DETOURS) {
+      out.push({
+        kind: "rework-path",
+        stepId: step.id,
+        title: step.title,
+        because: `被绕开 ${c.detoured} 次`,
+        effect: "提议重看这条路径——从这一步岔出去已经成了常态，图该重画"
+      });
+    }
+  }
+  return out;
+}
 
 const ID_RE = /^[a-z0-9][a-z0-9._-]*$/;
 const STEP_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -258,19 +313,33 @@ export function loadPipelines(dir, { scope = "global", label = null } = {}) {
   return out;
 }
 
-/** 从一条运行记录里数出「这次走过哪几步」——结算用。 */
+/**
+ * 从一条运行记录里数出「这次走过哪几步」——结算用。
+ *
+ * 每一步有三种处置，**计数必须分开**，因为它们驱动的判断完全不同：
+ *   uses     照图走了（或走了但被推翻）
+ *   skipped  这一步这次不用（图上还在）→ 跳过 ≥3 次就提议删掉这一步
+ *   detoured 从这里岔出去走了图上没有的路 → 被绕开 ≥3 次说明这条路径过时了
+ *
+ * 「跳过」与「绕开」不是一回事：**跳过 = 这次不用这一步；绕开 = 这条路整个不对**。
+ * 混在一起数，两种提议就都发不出来了。
+ */
 function tallyRuns(runs) {
   const perStep = new Map();
   for (const run of runs || []) {
     for (const step of run.steps || []) {
       const cur = perStep.get(step.id) || { uses: 0, refuted: 0, lastUsedAt: null };
       perStep.set(step.id, cur);
-      if (step.skipped) {
-        // 跳过不是使用：E2 那条「跳过 ≥3 次就提议删掉」要的正是这个计数。
-        cur.skipped = (cur.skipped || 0) + 1;
-      } else {
-        cur.uses += 1;
-      }
+      // 三种处置**各自独立累加**，谁也不吃谁：
+      // 一次绕行很可能同时是「这一步这次没用」+「从这里岔出去了」——
+      // 这两件事驱动的提议不同（删这一步 / 重画这条路径），吞掉一个就少一条提议。
+      // 第一版写成 if/else if，于是绕行把跳过吃掉了。
+      const detoured = step.detoured === true || step.kind === "detour";
+      const skipped = step.skipped === true;
+      if (detoured) cur.detoured = (cur.detoured || 0) + 1;
+      if (skipped) cur.skipped = (cur.skipped || 0) + 1;
+      // 只有「既没跳过也没绕行」才算真走了这一步——两种偏离都不是使用。
+      if (!detoured && !skipped) cur.uses += 1;
       if (step.refuted) cur.refuted += 1;
       if (step.at && (!cur.lastUsedAt || step.at > cur.lastUsedAt)) cur.lastUsedAt = step.at;
     }
@@ -282,6 +351,10 @@ function tallyRuns(runs) {
  * 节点状态由**对照数据**推出来，不由作者写死：
  * 被推翻过 → refuted；用过没用砸 → trusted；有记录但久未使用 → stale；没有记录 → candidate。
  * 没有运行记录时全体是 candidate —— 这是实话，也正是面板上那句 beta 免责必须摆在脸上的原因。
+ *
+ * 绕行不改变状态、只累加计数：**被绕开不等于这一步坏了**（可能只是这次不需要），
+ * 它推动的是「这条路径该重看了」这种**提议**，不是把节点染红。
+ * 染色要留给真正被推翻过的（refuted）——那是唯一有硬判据的信号。
  */
 function deriveState(credit, now, staleAfterDays = 90) {
   if (!credit || credit.uses === 0) return credit && credit.skipped ? "stale" : "candidate";
@@ -354,7 +427,7 @@ export function toPipelineV1(pipeline, { runs = [], now = Date.now(), memoryLink
       done: step.done,
       risk: step.risk,
       state: deriveState(c, now),
-      credit: c ? { uses: c.uses, refuted: c.refuted, skipped: c.skipped || 0, lastUsedAt: c.lastUsedAt } : null,
+      credit: c ? { uses: c.uses, refuted: c.refuted, skipped: c.skipped || 0, detoured: c.detoured || 0, lastUsedAt: c.lastUsedAt } : null,
       // 反事实对照是**准入判据**的载体（「没有它这次会不会失败」），不是备注：
       // 答不出来的步骤在图上要显得比答得出来的虚。
       counterfactual: step.evidence.length
@@ -451,6 +524,11 @@ export function readPipelineDoc({
     unreadable
   };
 
-  if (!chosen) return { ...base, pipeline: null, nodes: [], edges: [], runs: [] };
-  return { ...toPipelineV1(chosen, { runs: runsById[chosen.id] || [], now, memoryLinks }), ...base };
+  if (!chosen) return { ...base, pipeline: null, nodes: [], edges: [], runs: [], suggestions: [] };
+  return {
+    ...toPipelineV1(chosen, { runs: runsById[chosen.id] || [], now, memoryLinks }),
+    ...base,
+    // 图的自我精简：计数到了就把提议冒出来，不用人等巡检。
+    suggestions: suggestRetirements(chosen, { runs: runsById[chosen.id] || [], now })
+  };
 }
