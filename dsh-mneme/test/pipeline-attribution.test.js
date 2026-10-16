@@ -4,7 +4,7 @@ import {
   normalizeCommand,
   commandParts,
   attributionCandidates,
-  attributionReport,
+  unattributableSteps,
   normalizeObservation
 } from "../src/pipeline-attribution.js";
 
@@ -30,8 +30,7 @@ test("归一化：大小写、占位符、多余空白都不影响比较", () =>
   assert.equal(normalizeCommand("  NPM   Test  "), "npm test");
   // 占位符是给人的读法，不是字面量——留着它会让 `git push <tag>` 谁都匹配不上。
   assert.equal(normalizeCommand("git push <tag>"), "git push");
-  assert.equal(normalizeCommand("node script.mjs {version}"), "node script.mjs");
-  assert.equal(normalizeCommand("gh pr list [branch]"), "gh pr list");
+  assert.equal(normalizeCommand("node script.mjs <版本>"), "node script.mjs");
 });
 
 test("占位符去掉而不是换成通配：不许宽到能匹配一切", () => {
@@ -147,49 +146,14 @@ test("弱匹配受得住真实工作流的规模：一次 git push 不会把六�
   assert.ok(ids.length < real.steps.length, "候选数必须少于总步数，否则等于没筛");
 });
 
-// ── 报告的三桶 ────────────────────────────────────────────────────────────────
+// ── 结构性不可归属 ────────────────────────────────────────────────────────────
 
-test("报告分三桶：有候选 / 认不出来 / 拼不出命令行，且各自可分辨", () => {
-  const p = pipeline([
-    { id: "P6", tool: "npm test" },
-    { id: "P4", tool: "" }
-  ]);
-  const report = attributionReport([
-    { tool: "bash", command: "npm test" },        // 有候选
-    { tool: "bash", command: "docker ps" },       // 认不出来
-    { tool: "bash" }                              // 拼不出命令行
-  ], p);
-
-  assert.equal(report.matched.length, 1);
-  assert.equal(report.matched[0].candidates[0].stepId, "P6");
-  assert.equal(report.matched[0].ambiguous, false);
-
-  assert.equal(report.unmatched.length, 1);
-  assert.equal(report.unmatched[0].observation.command, "docker ps");
-
-  assert.equal(report.skipped.length, 1);
-  // 三桶必须分开报：「认不出来」与「这次什么也没做」长得一样的话，报告会被读反。
-  assert.notEqual(report.matched.length, report.unmatched.length + report.skipped.length);
-
-  // 结构性不可归属的步骤要单独列出来——它是「为什么这一步永远没账」的答案。
-  assert.deepEqual(report.unattributableSteps, ["P4"]);
-});
-
-test("报告把多条候选标成 ambiguous，好让上游去提问而不是自己决定", () => {
-  const p = pipeline([{ id: "A1", tool: "npm test" }, { id: "A2", tool: "npm test" }]);
-  const report = attributionReport([{ tool: "bash", command: "npm test" }], p);
-  assert.equal(report.matched.length, 1);
-  assert.equal(report.matched[0].ambiguous, true);
-});
-
-test("空输入与坏输入都不抛：返回空报告而不是崩", () => {
-  const p = pipeline([{ id: "A1", tool: "npm test" }]);
-  for (const bad of [null, undefined, [], [{}, null, 0]]) {
-    const r = attributionReport(bad, p);
-    assert.equal(Array.isArray(r.matched), true);
-  }
-  assert.deepEqual(attributionCandidates(null, p), []);
-  assert.deepEqual(attributionCandidates({ command: "x" }, null), []);
+test("空 tool 的步骤被单独列出来：它是「为什么这一步永远没账」的答案", () => {
+  const p = pipeline([{ id: "P6", tool: "npm test" }, { id: "P4", tool: "" }]);
+  assert.deepEqual(unattributableSteps(p), ["P4"],
+    "没写 tool 的步骤永远不会拿到账——它与「还没跑过」必须分得开");
+  assert.deepEqual(unattributableSteps({ steps: [{ id: "X", tool: "   " }] }), ["X"], "空白 tool 同样不可归属");
+  assert.deepEqual(unattributableSteps(null), [], "坏输入返回空数组，不抛");
 });
 
 // ── 观察对象的形状 ────────────────────────────────────────────────────────────
@@ -200,4 +164,12 @@ test("观察的三态 ok 必须保住：「失败」不能与「不知道」折�
   // 宿主没给成败时留 null——把它当 false 会让「跑失败」与「没记录」不可分。
   assert.equal(normalizeObservation({ command: "npm test" }).ok, null);
   assert.equal(normalizeObservation({ tool: "bash" }), null, "拼不出命令行的观察不进归属");
+});
+
+test("坏输入都不抛：没有 pipeline、没有观察、空对象一律返回空数组", () => {
+  const p = pipeline([{ id: "A1", tool: "npm test" }]);
+  for (const bad of [null, undefined, {}, { command: "" }, 0]) {
+    assert.deepEqual(attributionCandidates(bad, p), [], `观察 ${JSON.stringify(bad)} 该返回空数组而不是抛`);
+  }
+  assert.deepEqual(attributionCandidates({ command: "x" }, null), []);
 });

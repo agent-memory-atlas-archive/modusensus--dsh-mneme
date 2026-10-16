@@ -23,17 +23,29 @@
  *
  * 同一档内出现多条候选时，**全部返回**、不挑一个——挑一个就等于替人做了决定，而
  * 「两条工作流步骤长得一样」这件事该由人看着消歧。
+ *
+ * ## 调用方要自己分的三桶
+ *
+ * 本模块只给 `attributionCandidates` 一个入口；把一批观察归类是调用方的事，但要照这条口径分：
+ *   matched   有候选（可能多条，由人消歧）
+ *   unmatched 命令拼得出来，但没有任何步骤对得上
+ *   skipped   命令行都拼不出来，归属无从谈起
+ *
+ * **「认不出来」与「没有这一步」必须长得不一样**，否则一份全是 unmatched 的报告会被读成
+ * 「这次什么也没做」——与账本那边「缺账」和「坏账」要分开是同一条纪律。
  */
 
-/** 命令里的占位符：`<tag>` / `<版本>` / `{version}` / `[branch]`。它们不是字面量，不该参与比较。 */
-const PLACEHOLDER_RE = /<[^>]*>|\{[^}]*\}|\[[^\]]*\]/gu;
+/** 命令里的占位符：`<tag>` / `<版本>`。它们不是字面量，不该参与比较。
+ *  实测真实工作流只用尖括号这一种形态（`{}` 与 `[]` 各 0 次），不为假想的写法留分支。 */
+const PLACEHOLDER_RE = /<[^>]*>/gu;
 
 /**
  * 命令分隔符：一人写的 `tool` 里常见 `git log / gh pr list` 这种并列写法。
  * 用 `/` 分隔有歧义（路径里也有 `/`），所以只在**两侧有空白**时才当分隔符，
  * 否则 `/` 属于参数的一部分（`gh workflow run release-prep.yml` 不能被切碎）。
+ * 实测真实工作流只出现这一种（`|` / `;` / `&&` 各 0 次），同样不留假想分支。
  */
-const SEPARATOR_RE = /\s+(?:\/|\||;|&&|\n)\s+/u;
+const SEPARATOR_RE = /\s+\/\s+/u;
 
 /** 归一化：小写、去占位符、折叠空白。占位符去掉而不是替换成通配，否则 `git push <tag>` 会宽到能匹配一切。 */
 export function normalizeCommand(text) {
@@ -90,9 +102,7 @@ export function normalizeObservation(raw) {
   return {
     tool: typeof raw.tool === "string" ? raw.tool : "",
     command,
-    ok: raw.ok === true ? true : raw.ok === false ? false : null, // 三态：真 / 假 / 不知道
-    at: typeof raw.at === "string" ? raw.at : null,
-    actor: typeof raw.actor === "string" ? raw.actor : ""
+    ok: raw.ok === true ? true : raw.ok === false ? false : null // 三态：真 / 假 / 不知道
   };
 }
 
@@ -143,47 +153,13 @@ export function attributionCandidates(observation, pipeline) {
 }
 
 /**
- * 把一批观察归成「候选归属清单」——给**人看**的形态，不是给机器用的结论。
+ * 结构性不可归属的步骤：作者没写 `tool`，所以它**永远不会**拿到账。
  *
- * 输出刻意分三桶：
- *   matched   有候选（可能多条，由人消歧）
- *   unmatched 认不出来（命令拼得出来，但没有任何步骤对得上）
- *   skipped   命令行都拼不出来，归属无从谈起
- *
- * 三桶分开报的理由与账本那边一致：**「认不出来」与「没有这一步」必须长得不一样**，
- * 否则一份全是 unmatched 的报告会被读成「这次什么也没做」。
+ * 单独给一个入口，是为了让「为什么这一步永远没账」有据可查——否则它看起来只是
+ * 「还没跑过」，而真相是这条工作流根本没写明它怎么跑。
  */
-export function attributionReport(observations, pipeline) {
-  const matched = [];
-  const unmatched = [];
-  const skipped = [];
-
-  for (const raw of observations || []) {
-    const obs = normalizeObservation(raw);
-    if (!obs) {
-      skipped.push({ raw: raw && typeof raw === "object" ? { tool: raw.tool ?? "" } : { tool: "" }, why: "拼不出命令行" });
-      continue;
-    }
-    const candidates = attributionCandidates(obs, pipeline);
-    if (candidates.length === 0) {
-      unmatched.push({ observation: obs, why: "没有任何步骤的命令与它相近" });
-      continue;
-    }
-    matched.push({
-      observation: obs,
-      candidates,
-      // 多条候选是**要人消歧**的状态，不是「随便挑一条」。单列出来好让上游据此提问。
-      ambiguous: candidates.filter((c) => c.confidence === candidates[0].confidence).length > 1
-    });
-  }
-
-  return {
-    matched,
-    unmatched,
-    skipped,
-    // 结构性不可归属的步骤：作者没写 tool，或写了两条以上并列命令（后者要人先拆）。
-    unattributableSteps: (pipeline && pipeline.steps ? pipeline.steps : [])
-      .filter((s) => commandParts(s.tool).length === 0)
-      .map((s) => s.id)
-  };
+export function unattributableSteps(pipeline) {
+  return (pipeline && Array.isArray(pipeline.steps) ? pipeline.steps : [])
+    .filter((s) => commandParts(s.tool).length === 0)
+    .map((s) => s.id);
 }
