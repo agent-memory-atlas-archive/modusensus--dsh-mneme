@@ -47,11 +47,38 @@ export function parseMoRunInput(rawInput) {
   }
 }
 
+/**
+ * 把「本次观察到哪些业务动作」渲染成几行。
+ *
+ * 这是这一版回执的**主菜**：自动归属的命中率实测只有 14%，所以回执不再声称
+ * "我替你对上了哪几步"，而是如实列出"这一遍你干了什么"，由人决定它对不对得上。
+ *
+ * 只显示 `动词 子命令 ×次数`（可带旗标）——**位置参数在分桶层就被丢弃了**，
+ * 因为完整命令行含绝对路径（路径含本机用户名），而这条回执会显示在界面上。
+ * 那也是 pipeline-activities.js 存在的第二个理由。
+ */
+function renderActivities(activities, t, maxRows = 12) {
+  if (!Array.isArray(activities) || activities.length === 0) return "";
+  const rows = activities.slice(0, maxRows).map((a) => {
+    // 键在没有子命令时用的是第一个旗标（`node --test`）——那种情况下别再把同一个旗标
+    // 追加一遍，否则会渲染成 `node --test --test`（端到端复验时抓到的重复）。
+    const shown = (a.flags || []).filter((f) => !a.key.endsWith(f));
+    const flags = shown.length ? ` ${shown.join(" ")}` : "";
+    return `  ${a.key}${flags} ×${a.count}`;
+  });
+  const more = activities.length > maxRows ? `\n  …另有 ${activities.length - maxRows} 种` : "";
+  return `${t.activities(activities.length)}\n${rows.join("\n")}${more}`;
+}
+
 /** 把一次 `stop()` 的结果翻成人话。**失败要说清为什么**，不许含糊成「完成」。 */
 function describeStop(result, language) {
   const t = STR.moRunStop[language];
+  // 观察清单无论成败都要给——它是这个功能当前最可靠的产出。
+  const activityBlock = renderActivities(result.activities, t);
+
   if (result.ok) {
     const parts = [t.ok(result.pipelineId, result.steps)];
+    if (activityBlock) parts.push(activityBlock);
     if (result.unobserved?.length) parts.push(t.unobserved(result.unobserved.length, result.unobserved.join("、")));
     if (result.unattributed) parts.push(t.unattributed(result.unattributed));
     if (result.ambiguous) parts.push(t.ambiguous(result.ambiguous));
@@ -65,8 +92,13 @@ function describeStop(result, language) {
     case "no-observations":
       // 这条最要紧：一条观察都没认出来，绝不写成「完成」。
       return t.nothingObserved(result.bufferedEvents, result.notCommands);
-    case "no-steps":
-      return t.noSteps;
+    case "no-steps": {
+      // 「没归属到步骤」不等于「什么都没干」——清单才是这一版真正的交付物。
+      const parts = [t.noSteps];
+      if (activityBlock) parts.push(activityBlock);
+      if (result.shellNoise) parts.push(t.shellNoise(result.shellNoise));
+      return parts.filter(Boolean).join("\n");
+    }
     case "write-failed":
       return t.writeFailed(result.detail);
     default:

@@ -272,6 +272,8 @@ export const STR = {
       nothingObserved: (buffered, notCommands) =>
         `这一轮一条都没认出来，**没有落盘**。缓冲到 ${buffered} 条事件，其中 ${notCommands} 条不是命令执行器。\n若你确实走过这条流程，说明实时事件通道没带工具调用——请把这条回执留着。`,
       noSteps: "这一轮没有认出的步骤，按「不许编造」的规矩没有落盘。",
+      activities: (n) => `本次观察到 ${n} 种业务动作（只留动作与旗标，位置参数略去）：`,
+      shellNoise: (n) => `另有 ${n} 段是 shell 语法（赋值、管道、输出），不是工作流的一步。`,
       writeFailed: (detail) => `认出来了但写盘失败：${detail}`,
       failed: (reason) => `结账失败：${reason}`
     },
@@ -286,6 +288,8 @@ export const STR = {
       nothingObserved: (buffered, notCommands) =>
         `Nothing was recognized this pass; **nothing was persisted**. ${buffered} event(s) were buffered, ${notCommands} of which were not command executors.\nIf you really walked this workflow, the live event channel is not carrying tool calls — please keep this receipt.`,
       noSteps: "No step was recognized this pass; per the no-fabrication rule nothing was persisted.",
+      activities: (n) => `${n} kind(s) of business action observed this pass (actions and flags only; positional arguments omitted):`,
+      shellNoise: (n) => `Another ${n} segment(s) were shell syntax (assignments, pipes, output), not steps of a workflow.`,
       writeFailed: (detail) => `Recognized but failed to write: ${detail}`,
       failed: (reason) => `Failed to close: ${reason}`
     }

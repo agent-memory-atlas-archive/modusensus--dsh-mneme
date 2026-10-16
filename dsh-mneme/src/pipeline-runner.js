@@ -40,6 +40,7 @@ import { loadPipelines, pipelineSources, projectPipelineDir } from "./pipeline.j
 import { appendRun } from "./pipeline-runs.js";
 import { openRun } from "./pipeline-exec.js";
 import { pairObservations } from "./pipeline-observe.js";
+import { tallyActivities } from "./pipeline-activities.js";
 
 /** 一个窗口最多缓冲多少条会话事件。忘了 stop 时，这是内存的兜底。 */
 export const MAX_BUFFERED_EVENTS = 4000;
@@ -161,6 +162,11 @@ export function createExecutionRecorder({
       for (const observation of observations) w.run.observe(observation);
       const closed = w.run.close();
 
+      // 本次窗口**观察到哪些业务动作**——与「能不能归属到步骤」无关。
+      // 这是这一版的重点：自动归属命中率实测只有 14%，所以回执的主要价值
+      // 不再是"我替你对上了哪几步"，而是"我如实告诉你这一遍都干了什么"。
+      const activityTally = tallyActivities(observations);
+
       const common = {
         pipelineId: w.pipeline.id,
         bufferedEvents: w.events.length,
@@ -170,7 +176,9 @@ export function createExecutionRecorder({
         dangling: dangling.length,
         unattributed: closed.unattributed.length,
         ambiguous: closed.ambiguous.length,
-        unobserved: closed.unobserved
+        unobserved: closed.unobserved,
+        activities: activityTally.activities,
+        shellNoise: activityTally.shellNoise
       };
 
       // 一条观察都没认出来：如实说，不写空账。这同时是「实时通道到底带不带工具事件」
