@@ -511,6 +511,13 @@ window.__ModuleLoader__.load({
         "memory.actions.state.refuted": "被推翻",
         "memory.actions.gate.has": "有闸门证据",
         "memory.actions.gate.none": "还没闸门",
+        "memory.actions.gate.tag": "闸",
+        "memory.actions.who.main": "主",
+        "memory.actions.who.human": "人",
+        "memory.actions.who.ci": "CI",
+        "memory.actions.ov.done": "完成判据",
+        "memory.actions.ov.trigger": "何时触发",
+        "memory.actions.band.count": "{n} 步",
         "memory.actions.legend.states": "状态",
         "memory.actions.detail.situation": "情形",
         "memory.actions.detail.action": "动作",
@@ -1131,6 +1138,13 @@ window.__ModuleLoader__.load({
         "memory.actions.state.refuted": "refuted",
         "memory.actions.gate.has": "has counterfactual",
         "memory.actions.gate.none": "no gate yet",
+        "memory.actions.gate.tag": "GATE",
+        "memory.actions.who.main": "main",
+        "memory.actions.who.human": "human",
+        "memory.actions.who.ci": "CI",
+        "memory.actions.ov.done": "Done when",
+        "memory.actions.ov.trigger": "Triggered by",
+        "memory.actions.band.count": "{n} steps",
         "memory.actions.legend.states": "States",
         "memory.actions.detail.situation": "Situation",
         "memory.actions.detail.action": "Action",
@@ -2138,6 +2152,22 @@ window.__ModuleLoader__.load({
       ".mneme-pipe-pill--refuted{color:var(--mneme-danger);border-color:color-mix(in srgb,var(--mneme-danger) 55%,transparent);background:color-mix(in srgb,var(--mneme-danger) 10%,transparent)}",
       ".mneme-pipe-gate{flex:none;width:10px;height:10px;border-radius:5px;border:1.5px solid var(--mneme-graphic-dim)}",
       ".mneme-pipe-gate--has{border-color:var(--mneme-ok);background:var(--mneme-ok)}",
+      // 阶段带（2026-10-16）：段底用宿主 hover 层而不是自造色——对比度锁不认识
+      // 「SVG 文字底下还有一层 rect」，所以段底必须淡到不参与文字对比度。
+      ".mneme-pipe-bandbg{fill:var(--dsw-alias-interactive-bg-hover)}",
+      ".mneme-pipe-bandline{stroke:var(--dsw-alias-border-l2);stroke-width:1}",
+      ".mneme-pipe-bandT{fill:var(--dsw-alias-label-primary);font-size:12px;font-weight:600}",
+      // 闸门节点与风险条：颜色只做冗余，信息本体在文本（闸 / R0-R3）里——
+      // 不许靠单一色相区分（AGENTS.md 自查清单第 9 条）。
+      ".mneme-pipe-node--gate{stroke:var(--mneme-warn);stroke-width:2}",
+      ".mneme-pipe-gatetag{fill:var(--mneme-warn);font-size:9px;font-weight:600}",
+      ".mneme-pipe-risk--r0{stroke:var(--mneme-graphic-dim)}",
+      ".mneme-pipe-risk--r1{stroke:var(--mneme-accent)}",
+      ".mneme-pipe-risk--r2{stroke:var(--mneme-warn)}",
+      ".mneme-pipe-risk--r3{stroke:var(--mneme-danger)}",
+      // 流程概览带：读投影里 pipeline.done 与 pipeline.trigger，回答「这条流程
+      // 在干什么、何时起跑」。正文用 label-secondary（与节点详情屏同档）。
+      ".mneme-pipe-overview{flex:none;padding:8px 14px 6px;border-bottom:1px solid var(--dsw-alias-border-l1);font-size:12px;line-height:17px;color:var(--dsw-alias-label-secondary);display:flex;flex-direction:column;gap:3px}",
       // 节点详情（宽态点选展开 / 窄态 details 手风琴共用）。
       ".mneme-pipe-detail{flex:none;border-top:1px solid var(--dsw-alias-border-l1);padding:8px 14px 10px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);max-height:180px;overflow:auto}",
       ".mneme-pipe-detailTitle{font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary);margin-bottom:2px}",
@@ -6825,6 +6855,60 @@ window.__ModuleLoader__.load({
       return { layer, layers: layers.map((l) => l || []) };
     }
 
+    // 阶段带布局（2026-10-16）：layoutDag 只按 DAG 深度分层、不读 phase，把 5 段
+    // 19 步排成 18 层的单列长链（固有 354×1902px），第一屏既看不出「分几段」也
+    // 读不出「谁在做」。这里按 step.phase 分组（保持作者书写顺序——phase 是人手
+    // 写的分类词，不能按字母重排）、段内左到右每行两列换行：画布固有宽度落回
+    // 354px（右栏 400px 不缩放就能读），高度从 1902 腰斩到 ~836。
+    // 纯函数、不碰 DOM：探针 .scratch/mo-ux-probe-layout.mjs 会把它抠出来真跑，
+    // 改签名或引用外部变量都会让那条可重跑核算失明。
+    function layoutPipelineBands(nodes, edges, C) {
+      const NW = (C && C.NW) || 150;
+      const NH = (C && C.NH) || 54;
+      const GX = (C && C.GX) || 30;
+      const PAD = (C && C.PAD) || 12;
+      const COLS = 2, ROW_GAP = 14, BAND_HEAD = 26, BAND_GAP = 18;
+      const order = [];
+      const byPhase = {};
+      for (const n of nodes) {
+        const ph = n.phase || "";
+        if (!byPhase[ph]) { byPhase[ph] = []; order.push(ph); }
+        byPhase[ph].push(n.id);
+      }
+      const pos = {};
+      const bands = [];
+      const bandRects = [];
+      const W = PAD * 2 + COLS * NW + (COLS - 1) * GX;
+      let y = PAD;
+      for (const ph of order) {
+        const ids = byPhase[ph];
+        const rows = Math.ceil(ids.length / COLS);
+        const top = y;
+        y += BAND_HEAD;
+        ids.forEach((id, i) => {
+          const r = Math.floor(i / COLS), c = i % COLS;
+          pos[id] = { x: PAD + c * (NW + GX), y: y + r * (NH + ROW_GAP) };
+        });
+        y += rows * NH + (rows - 1) * ROW_GAP;
+        bands.push({ name: ph, count: ids.length, top, bottom: y });
+        bandRects.push({ name: ph, count: ids.length, x: PAD - 6, y: top, w: W - 2 * (PAD - 6), h: y - top });
+        y += BAND_GAP;
+      }
+      const H = y - BAND_GAP + PAD;
+      return { pos, W, H, bands, bandRects };
+    }
+
+    // 标题两行拆分：pipeClip 一刀截 11 字把「定版本号与发布范围」截成「…发布范…」。
+    // 节点加高到 54px 后装得下两行——标本 19 个标题里 7 个超 11 字、最长 22 字，
+    // 恰好两行放全；超长兜底仍留省略号。
+    function pipeTitleLines(s, n) {
+      const str = String(s || "");
+      if (str.length <= n) return [str];
+      const head = str.slice(0, n);
+      const rest = str.slice(n);
+      return [head, rest.length > n ? rest.slice(0, n - 1) + "…" : rest];
+    }
+
     function pipeFmtWhen(iso) {
       if (!iso) return "";
       const d = new Date(iso);
@@ -6861,7 +6945,8 @@ window.__ModuleLoader__.load({
       );
     }
 
-    // 宽态 DAG：竖排分层 SVG，一次运行 = 一条高亮路径（trace viewer 读法）。
+    // 宽态 DAG：按 phase 分阶段带的 SVG，一次运行 = 一条高亮路径（trace viewer 读法）。
+    // 分组与几何来自 layoutPipelineBands（纯函数，探针真跑它），这里只管画。
     function PipelineGraphSvg(props) {
       const { t, data, run, selectedNodeId, onSelectNode } = props;
       const nodes = data.nodes || [];
@@ -6881,18 +6966,11 @@ window.__ModuleLoader__.load({
       if (run && Array.isArray(run.usedNodeIds)) {
         for (const id of run.usedNodeIds) usedSet[id] = true;
       }
-      const NW = 150, NH = 42, GX = 30, GY = 66, PAD = 12;
-      const { layer, layers } = layoutDag(nodes, edges);
-      const pos = {};
-      let maxCols = 1;
-      layers.forEach((col, L) => {
-        maxCols = Math.max(maxCols, col.length);
-        col.forEach((id, i) => {
-          pos[id] = { x: PAD + i * (NW + GX), y: PAD + L * (NH + GY) };
-        });
-      });
-      const W = PAD * 2 + maxCols * NW + (maxCols - 1) * GX;
-      const Hh = PAD * 2 + layers.length * NH + (layers.length - 1) * GY;
+      const NW = 150, NH = 54, GX = 30, GY = 66, PAD = 12;
+      const laid = layoutPipelineBands(nodes, edges, { NW, NH, GX, GY, PAD });
+      const pos = laid.pos;
+      const W = laid.W;
+      const Hh = laid.H;
       const KIND_RX = { step: 8, gate: 4, branch: 16, artifact: 21 };
       return h("svg", {
         className: "mneme-pipe-svg",
@@ -6902,17 +6980,43 @@ window.__ModuleLoader__.load({
         role: "img",
         "aria-label": t("memory.actions.title")
       },
+        // 阶段带：段底 + 段名与该段步数。分段信息画在节点之下、边之下——
+        // 它是背景不是主角，但必须先上屏，第一屏才读得出「分几段」。
+        laid.bandRects.map((b, i) => h("g", { key: "band" + i },
+          h("rect", {
+            className: "mneme-pipe-bandbg",
+            x: b.x, y: b.y, width: b.w, height: b.h, rx: 10
+          }),
+          i > 0 ? h("line", {
+            className: "mneme-pipe-bandline",
+            x1: PAD, x2: W - PAD, y1: b.y - 9, y2: b.y - 9
+          }) : null,
+          h("text", {
+            className: "mneme-pipe-bandT",
+            x: PAD + 4, y: b.y + 17
+          }, (b.name || "") + " · " + t("memory.actions.band.count").replace("{n}", String(b.count)))
+        )),
         edges.map((e) => {
           const a = pos[e.from];
           const b = pos[e.to];
           if (!a || !b) return null;
-          const x1 = a.x + NW / 2, y1 = a.y + NH, x2 = b.x + NW / 2, y2 = b.y;
           const st = edgeState[e.from + ">" + e.to];
           const cls = st === "fail" ? "mneme-pipe-edgeFail" : st === "on" ? "mneme-pipe-edgeOn" : "mneme-pipe-edge";
+          // 同行相邻（蛇形读法）：右缘出、左缘进，短水平贝塞尔；
+          // 跨行/跨段仍走「底出顶进」的竖向贝塞尔。同行旧画法会把线甩出段外
+          // （真机截图验出），横连读起来就是「往下一段走」。
+          let d;
+          if (b.y === a.y && b.x > a.x) {
+            const ym = a.y + NH / 2;
+            d = `M ${a.x + NW} ${ym} C ${a.x + NW + GX / 2} ${ym}, ${b.x - GX / 2} ${ym}, ${b.x} ${ym}`;
+          } else {
+            const x1 = a.x + NW / 2, y1 = a.y + NH, x2 = b.x + NW / 2, y2 = b.y;
+            d = `M ${x1} ${y1} C ${x1} ${y1 + 26}, ${x2} ${y2 - 26}, ${x2} ${y2}`;
+          }
           return h("path", {
             key: e.id || (e.from + ">" + e.to),
             className: cls,
-            d: `M ${x1} ${y1} C ${x1} ${y1 + 26}, ${x2} ${y2 - 26}, ${x2} ${y2}`
+            d
           }, e.label ? h("title", null, e.label) : null);
         }),
         nodes.map((n) => {
@@ -6920,7 +7024,18 @@ window.__ModuleLoader__.load({
           if (!p) return null;
           const rx = KIND_RX[n.kind] != null ? KIND_RX[n.kind] : 8;
           const on = !!(run && pathSet[n.id]);
-          const cls = "mneme-pipe-node mneme-pipe-node--" + (n.state || "candidate") + (usedSet[n.id] ? " mneme-pipe-node--onpath" : "");
+          const gate = n.kind === "gate";
+          const cls = "mneme-pipe-node mneme-pipe-node--" + (n.state || "candidate")
+            + (usedSet[n.id] ? " mneme-pipe-node--onpath" : "")
+            + (gate ? " mneme-pipe-node--gate" : "");
+          const lines = pipeTitleLines(n.title, 10);
+          // meta 行三段：状态（四态）· who（主/人/CI）· risk（R0-R3）。
+          // who/risk 都是投影自带字段，此前一个都没上屏；risk 缺失按 R0 兜底。
+          const meta = [
+            t("memory.actions.state." + (n.state || "candidate")),
+            n.who ? t("memory.actions.who." + n.who) : null,
+            n.risk || "R0"
+          ].filter(Boolean).join(" · ");
           return h("g", {
             key: n.id,
             onClick: () => onSelectNode && onSelectNode(n.id),
@@ -6930,22 +7045,45 @@ window.__ModuleLoader__.load({
               className: cls,
               x: p.x, y: p.y, width: NW, height: NH, rx
             }),
+            // 风险色条：左缘一条竖线做冗余编码，信息本体在 meta 行的 R 文本里。
+            h("line", {
+              className: "mneme-pipe-risk--" + String(n.risk || "R0").toLowerCase(),
+              x1: p.x + 3, y1: p.y + 8, x2: p.x + 3, y2: p.y + NH - 8,
+              "stroke-width": 3, "stroke-linecap": "round"
+            }),
+            // 闸门角标：gate 步会「停下等批准」，与反事实圈同列放右上、圈在其上方——
+            // 左上角压 risk 色条（真机截图验出的布局冲突）。
+            gate ? h("text", {
+              className: "mneme-pipe-gatetag",
+              x: p.x + NW - 12, y: p.y + 24, textAnchor: "middle"
+            }, t("memory.actions.gate.tag")) : null,
             // 反事实标记：空心圈 = 还没闸门（counterfactual 为 null），
             // 实心圈 = 有对照证据。做在右上角，一眼区分。
             h("circle", {
-              cx: p.x + NW - 11, cy: p.y + 11, r: 4,
+              cx: p.x + NW - 12, cy: p.y + 11, r: 4,
               fill: n.counterfactual ? "var(--mneme-ok)" : "none",
               stroke: n.counterfactual ? "var(--mneme-ok)" : "var(--mneme-graphic-dim)",
               "stroke-width": 1.5
             }, h("title", null, n.counterfactual ? t("memory.actions.gate.has") : t("memory.actions.gate.none"))),
-            h("text", {
-              className: "mneme-pipe-nodeT",
-              x: p.x + NW / 2, y: p.y + 19, textAnchor: "middle"
-            }, pipeClip(n.title, 11)),
+            lines.length === 1
+              ? h("text", {
+                  className: "mneme-pipe-nodeT",
+                  x: p.x + NW / 2, y: p.y + 24, textAnchor: "middle"
+                }, lines[0])
+              : [
+                  h("text", {
+                    key: "t1", className: "mneme-pipe-nodeT",
+                    x: p.x + NW / 2, y: p.y + 18, textAnchor: "middle"
+                  }, lines[0]),
+                  h("text", {
+                    key: "t2", className: "mneme-pipe-nodeT",
+                    x: p.x + NW / 2, y: p.y + 31, textAnchor: "middle"
+                  }, lines[1])
+                ],
             h("text", {
               className: "mneme-pipe-nodeS",
-              x: p.x + NW / 2, y: p.y + 33, textAnchor: "middle"
-            }, t("memory.actions.state." + (n.state || "candidate"))),
+              x: p.x + NW / 2, y: p.y + 46, textAnchor: "middle"
+            }, meta),
             h("title", null, n.situation || n.title)
           );
         })
@@ -7122,8 +7260,9 @@ window.__ModuleLoader__.load({
       );
     }
 
-    // 画布缩放。为什么要有：19 步是一条竖链，固有尺寸约 174×2010，被 width:100% 拉到栏宽之后
-    // 高度上万像素——只能上下滚，既看不到全貌也没法凑近看某一段。按钮管精确、滚轮管顺手。
+    // 画布缩放。为什么要有：重排前 19 步是一条 18 层竖链（固有 354×1902），被 width:100%
+    // 拉到栏宽之后高度上万——只能上下滚；重排成阶段带后（固有 354×836）仍有
+    // 「凑近看某一段」的需求。按钮管精确、滚轮管顺手。
     const PIPELINE_ZOOM_MIN = 0.3;
     const PIPELINE_ZOOM_MAX = 4;
     const clampZoom = (z) => Math.min(PIPELINE_ZOOM_MAX, Math.max(PIPELINE_ZOOM_MIN, z));
@@ -7168,7 +7307,7 @@ window.__ModuleLoader__.load({
         if (!el || typeof ResizeObserver !== "function") return;
         const ro = new ResizeObserver((entries) => {
           const w = entries && entries[0] ? entries[0].contentRect.width : 0;
-          // 阈值从 640 降到 320：这张图是竖链，固有宽度只有 174px——栏窄一点反而更该画图。
+          // 阈值从 640 降到 320：竖链与阶段带的固有宽度都是 354px——栏窄一点反而更该画图。
           // 640 那档是按当年那张摊得很开的假数据定的，真数据下它只会把右栏（通常 400~600px）
           // 全部推给「一列节点卡片」那一支，于是「看不到图谱」。
           setNarrow(w > 0 && w < 320);
@@ -7205,6 +7344,19 @@ window.__ModuleLoader__.load({
       }
       return h("div", { className: "mneme-pipeview", ref: rootRef, style: { display: "flex", flexDirection: "column", flex: "1", minHeight: "0" } },
         h(PipelineRunChips, { t, runs, selectedRunId, onSelectRun: setSelectedRunId }),
+        // 流程概览带：投影里 pipeline.done / trigger 此前一个都没渲染——第一屏
+        // 说不出「这条流程要达成什么、什么时候起跑」。放画布上方、做成 HTML
+        // 块而非 SVG 文本：125 字的完成判据要能换行。数据由投影保证存在。
+        (data && data.pipeline) ? h("div", { className: "mneme-pipe-overview" },
+          h("div", null,
+            h("span", { className: "mneme-pipe-dt" }, t("memory.actions.ov.done") + "："),
+            data.pipeline.done
+          ),
+          h("div", null,
+            h("span", { className: "mneme-pipe-dt" }, t("memory.actions.ov.trigger") + "："),
+            (data.pipeline.trigger || []).map((x) => x && x.value).filter(Boolean).join("、") || null
+          )
+        ) : null,
         // 一条运行记录都没有 = 全部候选。这句话得说出来：卡片上「候选」两个字本身
         // 不解释任何东西，而用户在这一屏最容易问的就是「为什么全是候选」。
         runs.length ? null : h("div", { className: "mneme-hint" }, t("memory.actions.noRuns")),
