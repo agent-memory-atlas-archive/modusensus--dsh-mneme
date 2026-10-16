@@ -1,5 +1,6 @@
 import { URL } from "node:url";
 import { isAbsolute } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
 import { timingSafeEqual, randomBytes } from "node:crypto";
 import { FEATURE_FLAG_SPEC } from "./settings.js";
 import { TYPES } from "./store.js";
@@ -13,6 +14,7 @@ import { hostModulesDir, provisionRuntime } from "./runtime/provision.js";
 import { classify, fetchLatestVersion, PACKAGE_VERSION } from "./version-check.js";
 import { parseReclaimQuery, parseReclaimJson, readReclaimFields, reclaimReply, RECLAIM_UNAVAILABLE } from "./reclaim-http.js";
 import { readPipelineDoc } from "./pipeline.js";
+import { loadRunsById, runsDir, RUNS_SUFFIX } from "./pipeline-runs.js";
 import { readCandidateDoc } from "./candidates.js";
 
 // headers：少数端点（/export 附件下载）需要追加 Content-Disposition 等响应头。
@@ -1647,6 +1649,9 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
   // 只读端点，读的是**项目里**的 `<项目>/.mneme/pipelines/*.json`（文件头在
   // src/pipeline.js），项目层优先、插件包里那份降级成全局层；投影成
   // mneme.pipeline/v1 交给面板与 agent——两边读同一份，画面只是它的投影。
+  // 运行账（`<id>.runs.jsonl`，文件头在 src/pipeline-runs.js）也在这里读：**没有账，
+  // 读侧算不出任何状态**（`tallyRuns` 拿空数组时全体节点恒为 candidate），所以喂不喂
+  // runs 决定的是「面板上有没有一句实话」，不是多一个可选装饰。
   // 刻意不做旗标闸门：旗标管的是**客户端座位**（关=一个座位都不注册），不是数据面；
   // 多一个只读端点不会让任何人看见它，而给它加闸门只会让「为什么面板打不开」多一种成因。
   register({
@@ -1665,7 +1670,38 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
           sendJson(res, 400, { error: "project-not-absolute", detail: project });
           return;
         }
-        sendJson(res, 200, readPipelineDoc({ projectRoot: project, id }));
+
+        // 只读**账本目录**来定「哪些 id 有账」：最新一条 run 可能属于一条刚被删掉或
+        // 还没写完的 .json，这时工作流目录里问不到它的 id，而账本还在盘上。
+        let runsResult = { runsById: {}, errors: [] };
+        if (project !== null) {
+          const where = runsDir(project);
+          const ids = existsSync(where)
+            ? readdirSync(where)
+                .filter((f) => f.endsWith(RUNS_SUFFIX))
+                .sort()
+                .map((f) => f.slice(0, -RUNS_SUFFIX.length))
+            : [];
+          if (ids.length) runsResult = loadRunsById(project, ids);
+        }
+        const { runsById, errors: runsErrors } = runsResult;
+
+        // 点名的那条账本坏了就说清坏在哪：静默给一份「没跑过」等于骗人，而账本坏了
+        // 是**必须有人去看**的事——它意味着历史丢了。清单页则相反：一条坏账本不该
+        // 让整个面板打不开（与「项目层坏一个 .json 不拖死全局层」同一口径），
+        // 所以那条走 `runsErrors`，端点照常 200。
+        // 与读侧同一顺序：`__proto__` 这类不是 id，别拿去查表（用 hasOwnProperty
+        // 而不是 `in`/真值判断——`__proto__` 在普通对象上会命中原型）。
+        const badRequested =
+          id !== null && Object.prototype.hasOwnProperty.call(runsById, id)
+            ? runsErrors.find((e) => e.id === id)
+            : null;
+        if (badRequested) {
+          sendJson(res, 500, { error: "pipeline-unreadable", detail: badRequested.detail });
+          return;
+        }
+
+        sendJson(res, 200, { ...readPipelineDoc({ projectRoot: project, id, runsById }), runsErrors });
       } catch (error) {
         // 工作流是人手写的 JSON，报错本身就是给人看的：说清哪一条、坏在哪，
         // 而不是回一句 internal 让人去翻日志。
