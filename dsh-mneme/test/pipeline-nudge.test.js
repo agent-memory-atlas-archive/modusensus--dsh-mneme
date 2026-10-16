@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import zlib from "node:zlib";
@@ -26,6 +26,7 @@ import {
   applyAnswers,
   draftFromCandidate,
   writeDraftPipeline,
+  writeFileAtomic,
   proposalDir,
   validateProposal,
   saveProposal,
@@ -672,5 +673,336 @@ test("写盘留下的目录结构不改动已有工作流（不碰发布工作�
     assert.equal(made.ok, true);
     assert.equal(statSync(join(dir2, "handwritten.json")).mtimeMs, before, "人写的文件不动");
     assert.deepEqual(readFileSync(join(dir2, "handwritten.json"), "utf8"), JSON.stringify(human));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 专家团复核（2026-10-16）抓出的阻断项，每条一个失败即红的回归用例。
+// 这些用例的写法是「先按旧行为写会红」：比如空回答那条，旧实现返回 ok:true +
+// status:"answered"，这里的断言立刻炸。
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("回归·空回答不算「已答」：一条都没接受就不许推进状态", () => {
+  const candidate = { id: "nudge-abc123", steps: [{ id: "S1", title: "技能：alpha", evidence: [] }] };
+  // 旧实现：{} 与 null 都返回 ok:true / status:"answered" / applied:0 —— 无人回答却已答。
+  for (const answers of [{}, null, undefined]) {
+    const r = applyAnswers(candidate, answers);
+    assert.equal(r.ok, false, `answers=${JSON.stringify(answers)} 必须失败`);
+    assert.equal(r.candidate, null, "不许交出一份「已答」的候选");
+    assert.equal(r.applied.length, 0);
+    assert.match(r.problems[0], /空回答不算/);
+  }
+  // 非法选项同样是失败（原有行为，别在修这条时弄丢）。
+  assert.equal(applyAnswers(candidate, { S1: "nope" }).ok, false);
+  // 真答了一条才推进。
+  const ok = applyAnswers(candidate, { S1: "would-fail" });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.candidate.status, "answered");
+  assert.equal(ok.applied.length, 1);
+});
+
+test("回归·跨工作区不并账：两个桶各一次不是「支持度 2 的同一手法」", () => {
+  withDir((dir) => {
+    const sessions = join(dir, "sessions");
+    const seq = [[sessionLine({ turn: 1, calls: [skill("alpha"), skill("beta")] })]];
+    writeSession(join(sessions, "ws-a"), "sess-1", seq);
+    writeSession(join(sessions, "ws-b"), "sess-2", seq);
+    const cross = readSessionObservations({ sessionDir: sessions });
+    const crossSegments = segmentObservations(cross.observations);
+    assert.equal(crossSegments.length, 2);
+    assert.deepEqual(
+      mineRepeatedPatterns(crossSegments),
+      [],
+      "旧实现把两个项目的各一次并成支持度 2 —— 那是把两本账合成一本"
+    );
+
+    // 同一个桶里两个会话才够格，且候选带着自己的桶。
+    writeSession(join(sessions, "ws-a"), "sess-3", seq);
+    const read = readSessionObservations({ sessionDir: sessions });
+    const candidates = mineRepeatedPatterns(segmentObservations(read.observations));
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].support, 2);
+    assert.equal(candidates[0].bucket, "ws-a");
+  });
+});
+
+test("回归·扫全部会话时不许声称候选属于某个项目（拒绝归属，不写项目桶、不落草稿）", () => {
+  withDir((dir) => {
+    const sessions = join(dir, "sessions");
+    const seq = [[sessionLine({ turn: 1, calls: [skill("alpha"), skill("beta")] })]];
+    for (const id of ["sess-a", "sess-b"]) writeSession(sessions, id, seq);
+    const memoryDir = join(dir, "memory");
+    const projectRoot = join(dir, "proj");
+    mkdirSync(projectRoot, { recursive: true });
+
+    // 给 projectRoot、不给 sessionDir（=扫全部）→ 旧实现照旧贴项目名并写项目桶。
+    const loose = nudgeFromSessions({ dshHome: dir, projectRoot, memoryDir, materialize: true });
+    assert.ok(loose.counts.candidates >= 1, "普查本身照跑，候选还是要挖出来");
+    assert.equal(loose.refused.reason, "unscoped-sessions", "必须显式报出降级原因");
+    assert.equal(loose.project, null);
+    assert.equal(loose.proposalsDir, null, "不写任何项目的提议桶");
+    assert.equal(loose.counts.savedProposals, 0);
+    assert.equal(loose.counts.draftsWritten, 0, "更不许往项目里落草稿");
+    assert.equal(existsSync(memoryDir), false, "memoryDir 下连目录都不该建出来");
+    assert.equal(existsSync(join(projectRoot, ".mneme")), false);
+
+    // 给了该项目自己的 sessionDir 才认归属。
+    const scoped = nudgeFromSessions({ sessionDir: sessions, projectRoot, memoryDir, project: "slow-stack/mneme", materialize: 1 });
+    assert.equal(scoped.refused, null);
+    assert.equal(scoped.project, "slow-stack/mneme");
+    assert.ok(scoped.proposalsDir.includes("proposals"));
+    assert.equal(scoped.counts.savedProposals, scoped.counts.candidates);
+    assert.equal(scoped.counts.draftsWritten, 1);
+  });
+});
+
+test("回归·unanswered 补回出口，且与写盘文件里 evidence 为空的步骤一致", () => {
+  withDir((dir) => {
+    const sessions = join(dir, "sessions");
+    const memoryDir = join(dir, "memory");
+    const projectRoot = join(dir, "proj");
+    mkdirSync(projectRoot, { recursive: true });
+    const seq = [[sessionLine({ turn: 1, calls: [skill("alpha"), skill("beta")] })]];
+    for (const id of ["sess-a", "sess-b"]) writeSession(sessions, id, seq);
+
+    const doc = nudgeFromSessions({ sessionDir: sessions, projectRoot, memoryDir, project: "slow-stack/mneme", materialize: 1 });
+    assert.equal(doc.drafts.length, 1);
+    const draft = doc.drafts[0];
+    assert.equal(draft.ok, true);
+    assert.ok(Array.isArray(draft.unanswered), "旧实现把 draftFromCandidate 算出的 unanswered 丢在出口");
+    const saved = JSON.parse(readFileSync(draft.file, "utf8"));
+    assert.deepEqual(
+      draft.unanswered,
+      saved.steps.filter((s) => s.evidence.length === 0).map((s) => s.id),
+      "出口的 unanswered 必须就是写盘文件里还没人回答的那几步"
+    );
+    assert.equal(draft.unanswered.length, saved.steps.length, "没人回答时每一步都还没过准入判据");
+    // 失败分支也要带这个键（否则调用方要按分支判字段在不在）。
+    const broken = draftFromCandidate({ id: "nudge-x", steps: [] }, {});
+    assert.equal(broken.ok, false);
+    assert.ok(Array.isArray(broken.unanswered));
+  });
+});
+
+test("回归·原子写：rename 之前崩掉不留半个目标文件，正常路径不留临时文件", () => {
+  withDir((dir) => {
+    const file = join(dir, "x.json");
+    writeFileSync(file, "旧内容");
+    // 只断言「出现过 tmp 字样」证明不了这条修复；这里把「rename 之前崩掉」真模拟一次。
+    assert.throws(() => writeFileAtomic(file, "新内容", { beforeRename: () => { throw new Error("模拟崩溃"); } }), /模拟崩溃/);
+    assert.equal(readFileSync(file, "utf8"), "旧内容", "目标文件一个字节都不许动");
+    assert.deepEqual(readdirSync(dir), ["x.json"], "临时文件要收掉");
+    writeFileAtomic(file, "新内容");
+    assert.equal(readFileSync(file, "utf8"), "新内容");
+    assert.deepEqual(readdirSync(dir), ["x.json"]);
+  });
+});
+
+test("回归·落盘产物里没有半截文件：读侧整目录校验不能因为临时文件挂掉", () => {
+  withDir((dir) => {
+    const projectRoot = join(dir, "proj");
+    const memoryDir = join(dir, "memory");
+    const pipelineDir = projectPipelineDir(projectRoot);
+    mkdirSync(pipelineDir, { recursive: true });
+    // 先放一条人手写的合法工作流：它必须一直是可读的（读侧任一条坏就整层抛，
+    // 所以一个半截的机器文件能把人写的那条一起带没）。
+    const human = {
+      id: "handwritten",
+      name: "人写的",
+      project: "p",
+      version: 0,
+      status: "active",
+      done: "d",
+      trigger: [{ kind: "phrase", value: "t" }],
+      steps: [
+        { id: "A1", phase: "p", title: "t", when: "w", do: "d", who: "main", tool: "", done: "d", risk: "R0", needs: [], why: "y", evidence: [] }
+      ]
+    };
+    writeFileSync(join(pipelineDir, "handwritten.json"), `${JSON.stringify(human)}\n`);
+
+    const draft = {
+      id: "nudge-atomic",
+      name: "（待补）x",
+      project: "p",
+      version: 0,
+      status: "draft",
+      done: "d",
+      trigger: [{ kind: "phrase", value: "t" }],
+      steps: [
+        { id: "S1", phase: "观察段", title: "t", when: "w", do: "d", who: "main", tool: "", done: "d", risk: "R0", needs: [], why: "y", evidence: [] }
+      ]
+    };
+    const made = writeDraftPipeline({ projectRoot, pipeline: draft });
+    assert.equal(made.ok, true);
+    assert.deepEqual(readdirSync(pipelineDir).filter((f) => f.includes(".tmp-")), [], "temporaries 必须清零");
+    assert.equal(loadPipelines(pipelineDir, { scope: "project", label: "p" }).length, 2, "两条都读得出来");
+
+    // 提议那边同一套。
+    const proposal = {
+      id: "nudge-atomic",
+      origin: "nudge",
+      status: "proposed",
+      names: ["skill:a", "skill:b"],
+      steps: [{ id: "S1", title: "a", evidence: [] }],
+      support: 2,
+      counterfactual: null
+    };
+    const bucket = proposalDir({ memoryDir, projectRoot });
+    saveProposal(bucket, proposal);
+    assert.deepEqual(readdirSync(bucket).filter((f) => f.includes(".tmp-")), []);
+    assert.equal(loadProposals(bucket).length, 1);
+  });
+});
+
+test("回归·边界：校验层拒绝任何非 null 的 verdict（不只靠产者自觉）", () => {
+  const base = {
+    id: "nudge-abc123",
+    origin: "nudge",
+    status: "proposed",
+    names: ["skill:a", "skill:b"],
+    steps: [{ id: "S1", title: "a", evidence: [] }],
+    support: 2
+  };
+  const bad = { ...base, counterfactual: { verdict: "会漏步" } };
+  assert.equal(validateProposal(bad).ok, false);
+  assert.match(validateProposal(bad).problems[0], /verdict 必须是 null/);
+  // 缺 verdict 键 = undefined，也拒（否则「没写」会被读成「还没算」）。
+  assert.equal(validateProposal({ ...base, counterfactual: {} }).ok, false);
+  assert.equal(validateProposal({ ...base, counterfactual: { verdict: null } }).ok, true);
+  assert.equal(validateProposal({ ...base, counterfactual: null }).ok, true);
+  // 写盘时同样过不去：产者那条路绕不开这道边界。
+  withDir((dir) => {
+    assert.throws(() => saveProposal(join(dir, "p"), bad), /verdict 必须是 null/);
+  });
+  // 而 summarizeProposal 照旧原样投影 —— 正因为它会投影，才必须在校验层拦。
+  assert.equal(summarizeProposal({ ...base, counterfactual: { verdict: null } }).verdict, null);
+});
+
+test("回归·按层过滤后的相邻不许当真相邻：夹着的调用要留痕", () => {
+  const raw = [
+    {
+      sessionId: "s1",
+      bucket: "ws-a",
+      turn: 1,
+      steps: [
+        { key: "tool:read", kind: "tool", name: "read", tool: "read", command: "", repeats: 4 },
+        { key: "skill:alpha", kind: "skill", name: "alpha", tool: "skill", command: "", repeats: 1 },
+        { key: "tool:read", kind: "tool", name: "read", tool: "read", command: "", repeats: 3 },
+        { key: "tool:grep", kind: "tool", name: "grep", tool: "grep", command: "", repeats: 1 },
+        { key: "skill:beta", kind: "skill", name: "beta", tool: "skill", command: "", repeats: 1 }
+      ]
+    }
+  ];
+  const scoped = filterSegmentsByKinds(raw, ["skill", "mcp"]);
+  assert.deepEqual(scoped[0].steps.map((s) => s.name), ["alpha", "beta"]);
+  assert.deepEqual(scoped[0].steps[0].elided, { count: 4, tools: ["tool:read"], head: true }, "开头夹着的要记，且标明在它之前");
+  assert.deepEqual(scoped[0].steps[1].elided, { count: 4, tools: ["tool:read", "tool:grep"], head: false });
+
+  const [candidate] = mineRepeatedPatterns(raw, { minSupport: 1, kinds: ["skill", "mcp"] });
+  const steps = candidate.steps;
+  assert.match(steps[0].when, /它之前还有 4 次其他调用/, "开头不是「这一段的入口」");
+  assert.match(steps[1].when, /中间还有 4 次其他调用/);
+  assert.match(steps[1].when, /相邻关系是过滤后的/);
+  assert.ok(!/紧跟在/.test(steps[1].when), "原始观察里中间隔着 4 次调用，不许断言「紧跟在」");
+
+  // 真的相邻时措辞不变（否则这条修复就成了「一律不敢说」）。
+  const tight = [
+    {
+      sessionId: "s2",
+      bucket: "ws-a",
+      turn: 1,
+      steps: [
+        { key: "skill:alpha", kind: "skill", name: "alpha", tool: "skill", command: "", repeats: 1 },
+        { key: "skill:beta", kind: "skill", name: "beta", tool: "skill", command: "", repeats: 1 }
+      ]
+    }
+  ];
+  const [tightCandidate] = mineRepeatedPatterns(tight, { minSupport: 1, kinds: ["skill", "mcp"] });
+  assert.match(tightCandidate.steps[1].when, /紧跟在/);
+  assert.equal(tightCandidate.steps[1].elided, null);
+});
+
+test("回归·failures：未接线与「确实一条都没有」必须分开报", () => {
+  const candidate = {
+    id: "nudge-abc123",
+    bucket: null,
+    names: ["skill:a", "skill:b"],
+    steps: [{ id: "S1", title: "a", evidence: [] }],
+    support: 2,
+    occurrences: 2,
+    sessions: ["s1", "s2"],
+    turns: 2
+  };
+  const unwired = buildCounterfactual(candidate, { segments: [] });
+  assert.notEqual(unwired.observable.failures, null, "旧实现用 null 同时表示「没接线」和「没有记录」");
+  assert.equal(unwired.observable.failures.available, false);
+  assert.equal(unwired.observable.failures.reason, "not-wired");
+  const empty = buildCounterfactual(candidate, { segments: [], failures: [] });
+  assert.deepEqual(empty.observable.failures, { available: true, count: 0, kinds: [] });
+  const rows = buildCounterfactual(candidate, {
+    segments: [],
+    failures: [{ failure_type: "correction" }, { failure_type: "correction" }, { failure_type: "recall" }]
+  });
+  assert.deepEqual(rows.observable.failures, { available: true, count: 3, kinds: ["correction", "recall"] });
+
+  withDir((dir) => {
+    const sessions = join(dir, "sessions");
+    mkdirSync(sessions, { recursive: true });
+    const loose = nudgeFromSessions({ sessionDir: sessions, memoryDir: null, projectRoot: null });
+    assert.equal(loose.source.failureSource, "unwired");
+    const wired = nudgeFromSessions({ sessionDir: sessions, memoryDir: null, projectRoot: null, failures: [] });
+    assert.equal(wired.source.failureSource, "caller");
+  });
+});
+
+test("回归·长度为 2 的候选：对照栏显式留白，不静默变空", () => {
+  withDir((dir) => {
+    const sessions = join(dir, "sessions");
+    const seq = [[sessionLine({ turn: 1, calls: [skill("alpha"), skill("beta")] })]];
+    for (const id of ["sess-a", "sess-b"]) writeSession(sessions, id, seq);
+    const read = readSessionObservations({ sessionDir: sessions });
+    const segments = segmentObservations(read.observations);
+    const [candidate] = mineRepeatedPatterns(segments);
+    assert.equal(candidate.names.length, 2);
+    const contrast = omissionContrast(candidate, segments);
+    assert.deepEqual(contrast.steps, []);
+    assert.equal(contrast.empty, true, "「空」要说出来，否则看的人会把它读成「反例为零」");
+    assert.match(contrast.note, /留白/);
+    // 有中间步骤的候选不该带这条留白说明。长度 3 的候选要在**两个**会话里出现，
+    // 否则它要么被支持度门槛筛掉，要么（只出现一次时）被极大模式并进那条两步的。
+    const three = [[sessionLine({ turn: 1, calls: [skill("alpha"), skill("beta"), skill("gamma")] })]];
+    writeSession(sessions, "sess-c", three);
+    writeSession(sessions, "sess-d", three);
+    const read2 = readSessionObservations({ sessionDir: sessions });
+    const segs2 = segmentObservations(read2.observations);
+    const longOne = mineRepeatedPatterns(segs2).find((c) => c.names.length === 3);
+    assert.ok(longOne, "三步序列在两个会话里出现过，必须挖得出来");
+    const contrast2 = omissionContrast(longOne, segs2);
+    assert.equal(contrast2.empty, false);
+    assert.equal(contrast2.note, "");
+    assert.equal(contrast2.steps.length, 1, "只有中间那一步有缺席对照");
+  });
+});
+
+test("回归·文件上限按排序截断，不按遍历顺序（选择偏差要能被看见）", () => {
+  withDir((dir) => {
+    const sessions = join(dir, "sessions");
+    // 故意让「造出来的顺序」与「字典序」相反。
+    writeSession(join(sessions, "z-ws"), "sess-1", [[sessionLine({ turn: 1, calls: [skill("alpha")] })]]);
+    writeSession(join(sessions, "a-ws"), "sess-2", [[sessionLine({ turn: 1, calls: [skill("beta")] })]]);
+    writeSession(join(sessions, "m-ws"), "sess-3", [[sessionLine({ turn: 1, calls: [skill("gamma")] })]]);
+    const found = findSessionFiles(sessions, { limit: 2 });
+    assert.equal(found.totalFiles, 3, "真总数要能看见");
+    assert.equal(found.files.length, 2);
+    assert.equal(found.truncated, true);
+    assert.ok(
+      found.files.every((f) => f.includes("a-ws") || f.includes("m-ws")),
+      "留下的是字典序靠前的两个，而不是遍历时先撞上的那两个"
+    );
+    // 读数层要把总数与截断一起透出去。
+    const read = readSessionObservations({ sessionDir: sessions, limit: 2 });
+    assert.equal(read.totalFiles, 3);
+    assert.equal(read.truncated, true);
+    assert.equal(read.scannedFiles, 2);
   });
 });

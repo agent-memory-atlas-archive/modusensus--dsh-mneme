@@ -20,6 +20,12 @@
  * 3. **只产草稿，绝不产 active。** 提议自动、固化要人点头（v0.9.0 设计备忘 §4）。
  *    `writeDraftPipeline` 见到 `status !== "draft"` 直接拒写，这条没有开关。
  *
+ * 另外四条是**边界性质**，不只靠产者自觉（专家团复核后补齐，见各函数注释）：
+ *   · 空回答不算「已答」（`applyAnswers` 一条都没接受就不推进状态）；
+ *   · 支持度**只在同一个工作区桶内累加**，且扫全部会话时不许声称候选属于某个项目；
+ *   · 提议/草稿一律**原子落盘**（tmp + rename），半截文件不能把整层工作流带走；
+ *   · `validateProposal` 拒绝任何非 null 的 `counterfactual.verdict`。
+ *
  * 候选的家**分两处**，因为它们的两条命不同：
  *   · 机器产出的候选/问题 → `<memoryDir>/proposals/<项目键>/nudge-*.json`（本地，不进仓库；
  *     一天能长十条、死九条，进仓库就是垃圾，与 `candidates.js` 的绕行候选同一套理由）
@@ -45,7 +51,7 @@
  * ——那里没有白名单。
  */
 
-import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -167,17 +173,24 @@ export function forEachZstdFrame(buf, onText) {
   return { frames, failed };
 }
 
-/** 递归找出会话日志文件，**超限时如实标 truncated**（静默截断会让「扫全了」变成假话）。 */
+/**
+ * 递归找出会话日志文件。
+ *
+ * **先收全、再排序、最后截断**（早前是先截断再排序，于是「留下哪几个」由遍历顺序决定，
+ * 而遍历顺序里带着工作区目录名——截断量会报，**选择偏差不会报**，实测这正是评分表上
+ * 「2000 文件上限按遍历序截断」那一条）。路径本身是短字符串，收全的代价可以忽略；
+ * 真正的内存护栏在读取层（`readSessionObservations` 逐帧解、读完即 `buf.fill(0)`）。
+ *
+ * `totalFiles` 是真总数、`files` 是截断后的结果、`truncated` 说明两者不同——
+ * 三个数一起给，「只扫了一部分」才看得见。
+ */
 export function findSessionFiles(dir, { limit = MAX_SESSION_FILES } = {}) {
   const cap = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : MAX_SESSION_FILES;
-  const result = { files: [], unreadable: [], present: false, truncated: false };
+  const result = { files: [], unreadable: [], present: false, truncated: false, totalFiles: 0 };
   if (!existsSync(dir)) return result;
   result.present = true;
+  const all = [];
   const walk = (current) => {
-    if (result.files.length >= cap) {
-      result.truncated = true;
-      return;
-    }
     let entries;
     try {
       entries = readdirSync(current, { withFileTypes: true });
@@ -187,10 +200,6 @@ export function findSessionFiles(dir, { limit = MAX_SESSION_FILES } = {}) {
       return;
     }
     for (const entry of entries) {
-      if (result.files.length >= cap) {
-        result.truncated = true;
-        return;
-      }
       const full = join(current, entry.name);
       // 符号链接要单独认：Dirent 对 symlink 的 isDirectory() 返回 false。
       let isDir = entry.isDirectory();
@@ -203,11 +212,14 @@ export function findSessionFiles(dir, { limit = MAX_SESSION_FILES } = {}) {
         }
       }
       if (isDir) walk(full);
-      else if (entry.name.startsWith(SESSION_FILE_PREFIX)) result.files.push(full);
+      else if (entry.name.startsWith(SESSION_FILE_PREFIX)) all.push(full);
     }
   };
   walk(dir);
-  result.files.sort();
+  all.sort();
+  result.totalFiles = all.length;
+  result.truncated = all.length > cap;
+  result.files = all.slice(0, cap);
   return result;
 }
 
@@ -219,8 +231,14 @@ export function findSessionFiles(dir, { limit = MAX_SESSION_FILES } = {}) {
  *
  * `command` 只为**风险下限**与**措辞**服务，原文带本机路径，所以下游一律先过
  * `safeCommandTokens` 的清洗，绝不整条进草稿文件。
+ *
+ * `bucket` 是**工作区桶**（会话文件往上数第三层目录名）。为什么非要带上它：
+ * 会话目录在 DSH 侧按工作区分桶，`sessionId` 只是桶内那个会话目录名——两条不同工作区
+ * 里的会话会拿到两个不同的 `sessionId`，于是一段序列在两个项目里各出现一次，就会被
+ * 并成「支持度 2 的同一手法」。那是把两个项目的账合成一本，实测过（复核报告 §2.6）。
+ * 带上 bucket 之后，支持度只在同一个桶内累加。
  */
-export function observationsFromCalls(calls, { sessionId = null } = {}) {
+export function observationsFromCalls(calls, { sessionId = null, bucket = null } = {}) {
   const out = [];
   for (const call of Array.isArray(calls) ? calls : []) {
     if (!call || typeof call.name !== "string" || call.name === "") continue;
@@ -244,7 +262,7 @@ export function observationsFromCalls(calls, { sessionId = null } = {}) {
       : typeof args.file_path === "string" ? args.file_path
       : "";
     const at = Number.isFinite(call.time) ? new Date(call.time).toISOString() : null;
-    out.push({ sessionId, turn: call.turn ?? null, at, tool: call.name, kind, name, command });
+    out.push({ sessionId, bucket, turn: call.turn ?? null, at, tool: call.name, kind, name, command });
   }
   return out;
 }
@@ -283,19 +301,21 @@ export function toolCallsInLine(line) {
 /**
  * 扫会话日志，产出**按会话排好的观察串**（这是候选的唯一原始材料）。
  *
- * 会话 id 取文件名上面那一层目录名（DSH 侧一个会话一个目录），取不到就落 null——
- * 落 null 的观察只会让支持度算不出来，不会假装成「同一个会话」。
+ * 会话 id 取文件名上面那一层目录名（DSH 侧一个会话一个目录），工作区桶取再上面那一层；
+ * 取不到就落 null——落 null 的观察只会让支持度算不出来，不会假装成「同一个会话」
+ * 或「同一个项目」。
  */
 export function readSessionObservations({ sessionDir = resolveSessionDir(), limit = MAX_SESSION_FILES } = {}) {
   const found = findSessionFiles(sessionDir, { limit });
   const files = found.files.slice(0, limit);
+  const totalFiles = Number.isFinite(found.totalFiles) ? found.totalFiles : found.files.length;
   const result = {
     sessionDir,
     present: found.present,
     // 「目录在」与「目录真能列出来」分开报：否则「不可读」与「空目录」同形。
     readable: found.present && found.unreadable.length === 0,
-    truncated: found.truncated === true || found.files.length > files.length,
-    totalFiles: found.files.length,
+    truncated: found.truncated === true || totalFiles > files.length,
+    totalFiles,
     scannedFiles: 0,
     frames: 0,
     failedFrames: 0,
@@ -314,7 +334,9 @@ export function readSessionObservations({ sessionDir = resolveSessionDir(), limi
       continue;
     }
     result.scannedFiles += 1;
-    const sessionId = file.split(/[\\/]/).slice(-2, -1)[0] || null;
+    const parts = file.split(/[\\/]/);
+    const sessionId = parts.slice(-2, -1)[0] || null;
+    const bucket = parts.slice(-3, -2)[0] || null;
     const stat = forEachZstdFrame(buf, (text) => {
       for (const line of text.split("\n")) {
         if (!line.trim() || !line.includes('"tool-call"')) continue;
@@ -322,7 +344,7 @@ export function readSessionObservations({ sessionDir = resolveSessionDir(), limi
         const calls = toolCallsInLine(line);
         if (!calls.length) continue;
         result.calls += calls.length;
-        result.observations.push(...observationsFromCalls(calls, { sessionId }));
+        result.observations.push(...observationsFromCalls(calls, { sessionId, bucket }));
       }
     });
     result.frames += stat.frames;
@@ -343,9 +365,11 @@ export function segmentObservations(observations) {
   const segments = [];
   let current = null;
   for (const obs of Array.isArray(observations) ? observations : []) {
-    const sameSegment = current && current.sessionId === obs.sessionId && current.turn === obs.turn;
+    // 桶也进切段键：两个工作区里的同名会话目录绝不能被当成同一段。
+    const sameSegment =
+      current && current.sessionId === obs.sessionId && current.turn === obs.turn && current.bucket === obs.bucket;
     if (!sameSegment) {
-      current = { sessionId: obs.sessionId, turn: obs.turn, steps: [] };
+      current = { sessionId: obs.sessionId, bucket: obs.bucket ?? null, turn: obs.turn, steps: [] };
       segments.push(current);
     }
     const key = `${obs.kind}:${obs.name}`;
@@ -367,12 +391,45 @@ export function segmentObservations(observations) {
  */
 const MAX_COMMANDS_PER_POSITION = 12;
 
+/** 省略痕迹里的工具名最多记几个：只为了让人看懂「夹的是什么」，不是完整清单。 */
+const MAX_ELIDED_TOOLS = 4;
+
+/**
+ * 把一批被抽掉的步骤并成一条**省略痕迹**。
+ * `head` 表示这些步骤在保留序列的第一个步骤之前——那一步不是这一段的入口，
+ * 「这一段入口」这句话本身也要跟着改（见 planStep）。
+ */
+function elidedFrom(pending) {
+  if (!pending.length) return null;
+  const count = pending.reduce((acc, s) => acc + (s.repeats || 1), 0);
+  const tools = [];
+  for (const s of pending) {
+    const label = `${s.kind}:${s.name}`;
+    if (!tools.includes(label) && tools.length < MAX_ELIDED_TOOLS) tools.push(label);
+  }
+  return { count, tools, head: false };
+}
+
+/** 同一次省略在多次出现里取「最保守」的读法：次数取最大、工具取并。 */
+function mergeElided(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    count: Math.max(a.count, b.count),
+    tools: [...new Set([...a.tools, ...b.tools])].slice(0, MAX_ELIDED_TOOLS),
+    head: a.head && b.head
+  };
+}
+
 function mergePosition(target, step) {
   target.repeats = Math.max(target.repeats, step.repeats);
   if (target.tool === null) target.tool = step.tool;
   if (step.command && !target.commands.includes(step.command) && target.commands.length < MAX_COMMANDS_PER_POSITION) {
     target.commands.push(step.command);
   }
+  // 同一个位置在有的会话里夹着别的调用、有的没有 → 按「夹着」记（保守：宁可多说一句
+  // 「中间还有东西」，也不要断言一个其实不成立的相邻关系）。
+  target.elided = mergeElided(target.elided, step.elided || null);
 }
 
 /**
@@ -439,8 +496,10 @@ function planStep(position, index, prevTitle) {
     id,
     phase: "观察段",
     title,
-    // 位置是观察到的（它确实紧跟在谁后面），但「什么时候该做」是人话，留白。
-    when: prevTitle ? `（待补）观察中它紧跟在「${prevTitle}」之后` : "（待补）这一段的入口",
+    // **相邻关系只在真的相邻时才断言**：按层过滤（见 filterSegmentsByKinds）会把夹在中间的
+    // 调用抽掉，而过滤后的相邻不等于观察到的相邻——原始观察里中间可能隔着 4 次工具调用。
+    // 机器只写观察到的：夹着东西就把夹着的东西一起写出来（`elided`），不写就说明真没夹。
+    when: adjacencyWording(position, prevTitle),
     do: doText,
     who: "main",
     tool: position.tool,
@@ -450,19 +509,40 @@ function planStep(position, index, prevTitle) {
     riskSource: risk.source,
     riskHits: risk.hits,
     repeats: position.repeats,
+    // 省略痕迹原样带进提议文件：草稿那边会被 validatePipeline 的白名单丢掉，所以
+    // 「这一步在过滤前长什么样」只有提议文件里查得到。
+    elided: position.elided || null,
     needs: index === 0 ? [] : [`S${index}`],
     // 反事实对照**故意留空**：它是准入判据，不是备注；没人回答之前宁可是空的。
-    // 面板会把空对照的节点画得虚一点（见 pipeline.js 的 counterfactual 投影）。
+    // 面板会把空对照节点的边画得虚一点（见 pipeline.js 的 counterfactual 投影）。
     why: "（待补）为什么必须有这一步——由 nudge 从重复观察里提出，还没人回答",
     evidence: [],
     gate: false
   };
 }
 
+/** 相邻关系的措辞。三档：真相邻 / 过滤后相邻（要说清夹着什么）/ 同一步。 */
+function adjacencyWording(position, prevTitle) {
+  const elided = position.elided || null;
+  const tail = elided ? `（中间还有 ${elided.count} 次其他调用：${elided.tools.join("、")}）` : "";
+  if (!prevTitle) {
+    return elided
+      ? `（待补）它在过滤后的序列里是第一个保留的步骤，它之前还有 ${elided.count} 次其他调用：${elided.tools.join("、")}`
+      : "（待补）这一段的入口";
+  }
+  return elided
+    ? `（待补）观察中它在「${prevTitle}」之后${tail}，相邻关系是过滤后的`
+    : `（待补）观察中它紧跟在「${prevTitle}」之后`;
+}
+
 /**
  * 按层过滤段，**并重新折叠**：抽掉中间的内置工具调用之后，原本被它隔开的两个同能力
  * 调用会变成相邻——那是一次「很重的同一步」，不是两步。不重折叠就会把 `A → pwsh → A`
- * 记成 `A → A` 两处步骤，支持度与形状全歪。
+ * 记成两处步骤，支持度与形状全歪。
+ *
+ * **抽掉的东西要留痕**（`elided`）：过滤后的相邻不是观察到的相邻。痕迹挂在后一个保留
+ * 步骤上——`{ count, tools, head }`，`head: true` 表示被抽掉的都在它之前（那么它也不是
+ * 「这一段的入口」）。不留痕就会生成「紧跟在 A 之后」这种机器其实没观察到的断言。
  */
 export function filterSegmentsByKinds(segments, kinds) {
   if (!Array.isArray(kinds)) return segments;
@@ -470,17 +550,27 @@ export function filterSegmentsByKinds(segments, kinds) {
   const out = [];
   for (const segment of Array.isArray(segments) ? segments : []) {
     const steps = [];
+    let pending = [];
     for (const step of segment.steps || []) {
-      if (!wanted.has(step.kind)) continue;
+      if (!wanted.has(step.kind)) {
+        pending.push(step);
+        continue;
+      }
       const last = steps[steps.length - 1];
       if (last && last.key === step.key) {
         last.repeats += step.repeats;
         last.at = step.at || last.at;
+        // 同一步被夹开也算省略：`A → pwsh → A` 折成一步时，中间那次 pwsh 一样是「夹着的」。
+        last.elided = mergeElided(last.elided, elidedFrom(pending));
+        pending = [];
         continue;
       }
-      steps.push({ ...step });
+      const elided = elidedFrom(pending);
+      if (elided && steps.length === 0) elided.head = true;
+      steps.push({ ...step, elided: elided || null });
+      pending = [];
     }
-    if (steps.length) out.push({ sessionId: segment.sessionId, turn: segment.turn, steps });
+    if (steps.length) out.push({ sessionId: segment.sessionId, bucket: segment.bucket ?? null, turn: segment.turn, steps });
   }
   return out;
 }
@@ -492,28 +582,34 @@ export function filterSegmentsByKinds(segments, kinds) {
  * 极大模式（maximal pattern）：`A → B` 与 `A → B → C` 支持度相同时，只留长的那条。
  * 理由：`A → B` 是 `A → B → C` 的一段前缀，两条都推给人就是把同一条手法说两遍。
  * 判据是**包含 + 会话集是子集**——只按字符串包含会把「支持度更低的短模式」也吞掉。
+ *
+ * **支持度只在同一个工作区桶内累加**（`key` 前缀带 bucket）：两个不同项目里各见过一次
+ * 的同一段序列，不是「支持度 2 的同一手法」，而是两条各自只有一次的观察。混桶会凭空
+ * 造出候选，并把别人的手法算到这个项目头上（复核报告 §2.6 实测过）。
  */
 export function mineRepeatedPatterns(segments, { minSupport = NUDGE_MIN_SUPPORT, minLength = NUDGE_MIN_LENGTH, maxLength = NUDGE_MAX_LENGTH, maxResults = NUDGE_MAX_CANDIDATES, kinds = DEFAULT_NUDGE_KINDS } = {}) {
   const scoped = filterSegmentsByKinds(segments, kinds);
   const byKey = new Map();
   for (const segment of scoped) {
     const steps = segment.steps || [];
+    const bucket = segment.bucket ?? null;
     for (let len = minLength; len <= maxLength; len += 1) {
       for (let i = 0; i + len <= steps.length; i += 1) {
         const window = steps.slice(i, i + len);
         const names = window.map((s) => `${s.kind}:${s.name}`);
-        const key = names.join(" → ");
+        const key = `${bucket ?? ""}\u0000${names.join(" → ")}`;
         let entry = byKey.get(key);
         if (!entry) {
           entry = {
             key,
+            bucket,
             names,
             sessions: new Set(),
             occurrences: 0,
             turns: new Set(),
             firstSeenAt: null,
             lastSeenAt: null,
-            positions: window.map((s) => ({ kind: s.kind, name: s.name, tool: s.tool, commands: [], repeats: 0 }))
+            positions: window.map((s) => ({ kind: s.kind, name: s.name, tool: s.tool, commands: [], repeats: 0, elided: null }))
           };
           byKey.set(key, entry);
         }
@@ -536,7 +632,14 @@ export function mineRepeatedPatterns(segments, { minSupport = NUDGE_MIN_SUPPORT,
 
   const kept = [];
   for (const entry of candidates) {
-    const subsumed = kept.some((k) => k.names.length > entry.names.length && containsSequence(k.names, entry.names) && isSubset(entry.sessions, k.sessions));
+    // 极大模式只在同一个桶内比较：跨桶的「包含」不是包含，是两回事。
+    const subsumed = kept.some(
+      (k) =>
+        k.bucket === entry.bucket &&
+        k.names.length > entry.names.length &&
+        containsSequence(k.names, entry.names) &&
+        isSubset(entry.sessions, k.sessions)
+    );
     if (!subsumed) kept.push(entry);
   }
   kept.sort((a, b) => b.sessions.size - a.sessions.size || b.names.length - a.names.length || a.key.localeCompare(b.key));
@@ -563,17 +666,20 @@ function isSubset(a, b) {
   return true;
 }
 
-/** 模式 → 候选（含步骤草稿）。id 由「步骤形状」定，所以同一段路再挖到会落到同一条上。 */
+/** 模式 → 候选（含步骤草稿）。id 由「工作区桶 + 步骤形状」定，所以同一段路再挖到会落到同一条上。 */
 function toCandidate(entry, { now = Date.now() } = {}) {
   const steps = [];
   entry.positions.forEach((position, index) => {
     steps.push(planStep(position, index, index === 0 ? null : steps[index - 1].title));
   });
-  const shape = entry.names.join("|");
+  const shape = `${entry.bucket ?? ""}|${entry.names.join("|")}`;
   return {
     id: `nudge-${createHash("sha256").update(shape).digest("hex").slice(0, 12)}`,
     origin: "nudge",
     status: "proposed",
+    // 候选来自哪个工作区桶：**桶名是路径的有损变形，所以它是本机私有数据**，
+    // 只进 memoryDir 的提议文件（那本来就不进仓库），不进草稿文件。
+    bucket: entry.bucket ?? null,
     names: entry.names.slice(),
     steps,
     support: entry.sessions.size,
@@ -603,11 +709,19 @@ function toCandidate(entry, { now = Date.now() } = {}) {
  *     一次内置工具调用会把相邻两步拆开，`A→B→C` 在一次真实走过它的会话里也会被
  *     数成「没走全」。口径必须与挖掘时一致，这里用候选自己的语汇来定，省得调用方
  *     还要记得把过滤后的段传进来。
+ *   · 只看**候选自己那个工作区桶**：别的项目里的 `A→C` 不是这条候选的反例，
+ *     它是另一个项目的事。混进来说明「少走这一步」的次数，等于拿别人的账本记账。
+ *
+ * **长度为 2 的序列这里一定是空的**，而且不是「没有反例」——是这种对照对它不适用。
+ * 早前那种「静默变空」在面板上看起来跟「反例为零」一模一样，所以现在显式带
+ * `empty` 与 `note` 两个字段，把「留白」和「零」分开（复核报告 §3 那一行）。
  */
 export function omissionContrast(candidate, segments) {
   const names = candidate.names || [];
   const out = [];
-  const all = Array.isArray(segments) ? segments : [];
+  const all = (Array.isArray(segments) ? segments : []).filter(
+    (s) => candidate.bucket === undefined || candidate.bucket === null || (s.bucket ?? null) === candidate.bucket
+  );
   const kindsInScope = new Set(names.map((n) => String(n).split(":")[0]));
   for (let i = 1; i < names.length - 1; i += 1) {
     const reduced = names.filter((_, k) => k !== i);
@@ -627,7 +741,17 @@ export function omissionContrast(candidate, segments) {
       withoutStep
     });
   }
-  return { steps: out, interiorOnly: true };
+  const empty = out.length === 0;
+  return {
+    steps: out,
+    interiorOnly: true,
+    empty,
+    // 「空」的两种含义必须分开：这段序列没有中间步骤（长度 2），还是中间步骤暂时没有对照数据。
+    // 首尾不计这条规矩写在这里，免得看的人把留白读成「反例为零」。
+    note: empty
+      ? "这段序列没有可算缺席对照的中间步骤（长度为 2 时首尾的省略等价于整段没发生）——留白，不是「反例为零」"
+      : ""
+  };
 }
 
 /**
@@ -663,11 +787,16 @@ function runsForCandidate(candidate, runs) {
  *   · 复现：同一段序列在几个会话、几次回合、什么时间跨度里出现过（硬事实）；
  *   · 缺席对照：中间那一步「走过几次 / 少走几次」（硬事实，见 omissionContrast）；
  *   · 运行记录与失败记录：如果这条手法已经有 runs，或者人喂了记忆侧的失败行，一并报数。
+ *
+ * `failures` 传 `null`（默认）表示**记忆侧的失败记录还没接进来**，与「接进来了、
+ * 确实一条都没有」是两件事，所以这里不给 `null`，而是给 `{ available, reason }`
+ * ——会话源那侧早就是这么做的（`present` 与 `readable` 分开报），同一套纪律。
  */
-export function buildCounterfactual(candidate, { segments = [], runs = [], failures = [], now = Date.now() } = {}) {
+export function buildCounterfactual(candidate, { segments = [], runs = [], failures = null, now = Date.now() } = {}) {
   const omission = omissionContrast(candidate, segments);
   const runTotals = runsForCandidate(candidate, runs);
-  const failureRows = Array.isArray(failures) ? failures : [];
+  const failuresWired = Array.isArray(failures);
+  const failureRows = failuresWired ? failures : [];
   const ask = (candidate.steps || []).map((step) => ({
     proposalId: candidate.id,
     stepId: step.id,
@@ -696,9 +825,11 @@ export function buildCounterfactual(candidate, { segments = [], runs = [], failu
       },
       omission,
       runs: runTotals,
-      failures: failureRows.length
-        ? { count: failureRows.length, kinds: [...new Set(failureRows.map((f) => f && f.failure_type).filter(Boolean))].sort() }
-        : null
+      // 「没接线」与「确实一条都没有」必须能分辨（同模块会话源那套 present/readable）。
+      failures: failuresWired
+        ? { available: true, count: failureRows.length, kinds: [...new Set(failureRows.map((f) => f && f.failure_type).filter(Boolean))].sort() }
+        : { available: false, reason: "not-wired", note: "记忆侧的失败记录还没接进来——这不是「没有失败记录」" },
+      bucket: candidate.bucket ?? null
     },
     unobservable: [
       "没有这一步「这次会不会漏步」——需要人回答",
@@ -711,7 +842,13 @@ export function buildCounterfactual(candidate, { segments = [], runs = [], failu
 
 /**
  * 人的回答并进候选：写进那一步的 `evidence[]`（准入判据的载体），并留痕。
- * 非法选项**直接拒**，不静默当 `unknown`——静默降级会把一个打错的答案变成一个人的判断。
+ *
+ * 两条硬规矩：
+ *   · 非法选项**直接拒**，不静默当 `unknown`——静默降级会把一个打错的答案变成一个人的判断；
+ *   · **一条回答都没接受就什么都不推进**：`applyAnswers(candidate, {})` 早前返回
+ *     `{ok:true, status:"answered", applied:0}`——无人回答却「已答」。今天没有下游消费者，
+ *     但这条通路的名字就叫「人点头」，将来只要有人写出「answered 才准升格」，那个假状态
+ *     立刻生效。所以空回答按失败处理，`status` 一步都不许动。
  */
 export function applyAnswers(candidate, answers, { now = Date.now() } = {}) {
   const problems = [];
@@ -734,7 +871,16 @@ export function applyAnswers(candidate, answers, { now = Date.now() } = {}) {
     step.evidence = [text];
     applied.push({ stepId, choice, text });
   }
-  if (problems.length) return { ok: false, candidate: null, applied: [], problems };
+  if (problems.length) return { ok: false, candidate: null, applied: [], unanswered: [], problems };
+  if (applied.length === 0) {
+    return {
+      ok: false,
+      candidate: null,
+      applied: [],
+      unanswered: steps.filter((s) => s.evidence.length === 0).map((s) => s.id),
+      problems: ["没有任何一条回答被接受——空回答不算「已答」，状态不推进"]
+    };
+  }
 
   const next = { ...candidate, steps, status: "answered", answeredAt };
   const unanswered = steps.filter((s) => s.evidence.length === 0).map((s) => s.id);
@@ -795,16 +941,50 @@ export function draftFromCandidate(candidate, { project = "", name = "", done = 
 }
 
 /**
+ * **原子整文件写**：先写同目录的临时文件，再 `rename` 覆盖目标。
+ *
+ * 为什么非这样不可：读侧（`loadPipelines`）是「整目录校验，任一条坏就整层抛」，所以
+ * 一个写到一半的文件会让**整个项目层的工作流一起从面板消失**——合法的那几条也一起没，
+ * 而且因为「已存在就跳过」的规矩还不会自愈（复核报告 §2.9 实测过这个组合）。
+ * `rename` 在同一文件系统内是原子的：读者要么看到旧的完整内容，要么看到新的完整内容。
+ *
+ * 临时文件必须**同目录**（跨盘 rename 会退化成拷贝，就不再原子了），并且带 pid 与随机后缀，
+ * 免得两个进程同时写同一个目标时互相吃掉临时文件。
+ *
+ * `beforeRename` 是**给测试用的注入口**（生产路径不传）：它让「rename 之前崩掉」这个窗口
+ * 可以被真的模拟一次，从而证明「失败不会留下半个目标文件」。没有它，测试只能断言
+ * 「代码里出现了 tmp 字样」，那证明不了这条修复要证明的事。
+ */
+export function writeFileAtomic(file, text, { beforeRename = null } = {}) {
+  const tmp = `${file}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    writeFileSync(tmp, text, "utf8");
+    if (typeof beforeRename === "function") beforeRename(tmp);
+    renameSync(tmp, file);
+  } catch (error) {
+    // 崩在中途：把临时文件收掉（目标文件一个字节都没动过，读者看到的还是旧内容）。
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // 收不掉也不该改判原错误——真正要报的是上面那个。
+    }
+    throw error;
+  }
+  return file;
+}
+
+/**
  * 把草稿写进 `<项目>/.mneme/pipelines/<id>.json`。
  *
- * 两条硬规矩：
+ * 三条硬规矩：
  *   · `status` 不是 `draft` 就拒写——沉淀链只产草稿，固化是人的动作；
  *   · 目标文件已存在就拒写（`force` 才覆盖）——**已经在人手里的文件不能被机器改写**，
- *     否则人改过的措辞会被下一次挖掘悄悄冲掉。
+ *     否则人改过的措辞会被下一次挖掘悄悄冲掉；
+ *   · 落盘走 `writeFileAtomic`——写一半就崩不能把整层工作流带走。
  */
 export function writeDraftPipeline({ projectRoot, pipeline, force = false } = {}) {
   if (!projectRoot || String(projectRoot).trim() === "") return { ok: false, reason: "no-project-root", file: null };
-  if (!pipeline || pipeline.status !== "draft") return { ok: false, reason: "not-draft", file: null, detail: "沉淀链只产 status:\"draft\"，升格要人点头" };
+  if (!pipeline || pipeline.status !== "draft") return { ok: false, reason: "not-draft", file: null, detail: "沉淀链只产 draft，升格要人点头" };
   let validated;
   try {
     validated = validatePipeline(pipeline, "<nudge-draft>");
@@ -815,7 +995,7 @@ export function writeDraftPipeline({ projectRoot, pipeline, force = false } = {}
   const file = join(dir, `${validated.id}.json`);
   if (existsSync(file) && force !== true) return { ok: false, reason: "exists", file, id: validated.id };
   mkdirSync(dir, { recursive: true });
-  writeFileSync(file, `${JSON.stringify(validated, null, 2)}\n`, "utf8");
+  writeFileAtomic(file, `${JSON.stringify(validated, null, 2)}\n`);
   return { ok: true, reason: "written", file, id: validated.id, pipeline: validated };
 }
 
@@ -827,7 +1007,14 @@ export function proposalDir({ memoryDir, projectRoot } = {}) {
   return join(base, "proposals", key);
 }
 
-/** 提议的形状校验。比定稿松（它还不是工作流），但**判据那一栏的形状一个都不能少**。 */
+/**
+ * 提议的形状校验。比定稿松（它还不是工作流），但**判据那一栏的形状一个都不能少**。
+ *
+ * `counterfactual.verdict` 在这里**必须恰好是 `null`**（键也必须在，缺键 = `undefined` 也拒）。
+ * 为什么这条要落在校验层、而不只靠产者自觉：`summarizeProposal` 会把 `verdict` 投影给面板，
+ * 于是一份被人手改过、或被别的写入方塞进来的提议就能让面板显示一个机器给的判据结论——
+ * 那正是本模块的头号红线。产者守规矩只是「产者的性质」，校验层拒绝才是「边界的性质」。
+ */
 export function validateProposal(raw) {
   const problems = [];
   const bad = (msg) => problems.push(msg);
@@ -838,19 +1025,23 @@ export function validateProposal(raw) {
   if (!Array.isArray(raw.steps) || raw.steps.length === 0) bad("steps 至少要有一步");
   if (!Number.isInteger(raw.support) || raw.support < 1) bad("support 必须是正整数");
   // 反事实那一栏**必须存在**：可以是 null（还没算），但不能没有——没有它的候选不是候选。
-  if (raw.counterfactual !== null && (typeof raw.counterfactual !== "object" || Array.isArray(raw.counterfactual))) {
-    bad("counterfactual 要么是 null，要么是对象");
+  if (raw.counterfactual !== null) {
+    if (typeof raw.counterfactual !== "object" || Array.isArray(raw.counterfactual)) {
+      bad("counterfactual 要么是 null，要么是对象");
+    } else if (raw.counterfactual.verdict !== null) {
+      bad("counterfactual.verdict 必须是 null：判据只能由人回答，机器不许给出结论");
+    }
   }
   return { ok: problems.length === 0, problems };
 }
 
-/** 写一条提议（同 id 覆盖：同一段路再挖到应当并进同一条，而不是长出第二份）。 */
+/** 写一条提议（同 id 覆盖：同一段路再挖到应当并进同一条，而不是长出第二份）。落盘同样是原子的。 */
 export function saveProposal(dir, proposal) {
   if (!dir) throw new Error("proposalDir 为空：拿不到项目根或 memoryDir");
   const v = validateProposal(proposal);
   if (!v.ok) throw new Error(v.problems.join("; "));
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, `${proposal.id}.json`), `${JSON.stringify(proposal, null, 2)}\n`, "utf8");
+  writeFileAtomic(join(dir, `${proposal.id}.json`), `${JSON.stringify(proposal, null, 2)}\n`);
   return proposal;
 }
 
@@ -932,10 +1123,11 @@ export function retirementProposals(pipeline, { runs = [], now = Date.now() } = 
  * 为什么默认不落草稿：落进仓库是会被 review、被提交的东西，一次自动跑就往里塞文件，
  * 会把「提议」变成「既成事实」。所以 `materialize` 默认 false——要落就得有人开口。
  *
- * 已知的接线缺口（留给上层，不要在这个文件里硬凑）：会话目录在 DSH 侧是**按工作区**
- * 分桶的（目录名由工作区路径变形而来），而那个变形规则不在本仓。所以 `sessionDir`
- * 由调用方给：给了就是「这个项目自己的会话」，不给就扫全部——**扫全部时不要声称
- * 候选属于某个项目**，那会把别人的手法算到这个项目头上。
+ * **会话范围与项目归属是一件事，不是两件**：会话目录在 DSH 侧按工作区分桶，桶名是
+ * 工作区路径的有损变形、规则不在本仓。所以「这个项目的手法」只有在调用方给出
+ * **这个项目自己的 `sessionDir`** 时才成立。给了 `projectRoot` 却没给 `sessionDir`
+ * 时，这一跑会被**降级成「无归属的普查」**：候选不带项目名、不写任何项目的提议桶、
+ * 不落草稿——绝不允许拿全机会话去冒充某个项目的账（复核报告 §2.6）。
  */
 export function nudgeFromSessions({
   sessionDir = null,
@@ -949,18 +1141,28 @@ export function nudgeFromSessions({
   maxLength = NUDGE_MAX_LENGTH,
   maxResults = NUDGE_MAX_CANDIDATES,
   maxFiles = MAX_SESSION_FILES,
-  failures = [],
+  failures = null,
   kinds = DEFAULT_NUDGE_KINDS,
   materialize = false
 } = {}) {
-  const dir = sessionDir || resolveSessionDir({ dshHome });
+  const scoped = typeof sessionDir === "string" && sessionDir.trim() !== "";
+  const dir = scoped ? sessionDir : resolveSessionDir({ dshHome });
+  // 扫描范围不在一个工作区内 → 不许有任何项目归属（连调用方自报的 project 也不认：
+  // 那同样是「拿一批跨项目的观察去贴一个项目名」）。
+  const attributionRefused = !scoped && Boolean(projectRoot || project);
+  const allowedProjectRoot = attributionRefused ? null : projectRoot;
   const read = readSessionObservations({ sessionDir: dir, limit: maxFiles });
   const segments = segmentObservations(read.observations);
   const candidates = mineRepeatedPatterns(segments, { minSupport, minLength, maxLength, maxResults, kinds });
-  const projectName = project || (projectRoot ? projectLabel(projectRoot) : "");
-  const enriched = candidates.map((c) => ({ ...c, project: projectName, counterfactual: buildCounterfactual(c, { segments, failures, now }) }));
+  const projectName = attributionRefused ? "" : project || (allowedProjectRoot ? projectLabel(allowedProjectRoot) : "");
+  const failureSource = Array.isArray(failures) ? "caller" : "unwired";
+  const enriched = candidates.map((c) => ({
+    ...c,
+    project: projectName,
+    counterfactual: buildCounterfactual(c, { segments, failures, now })
+  }));
 
-  const propDir = proposalDir({ memoryDir, projectRoot });
+  const propDir = attributionRefused ? null : proposalDir({ memoryDir, projectRoot: allowedProjectRoot });
   const saved = [];
   if (propDir) {
     for (const c of enriched) saved.push(saveProposal(propDir, c).id);
@@ -968,23 +1170,33 @@ export function nudgeFromSessions({
 
   const drafts = [];
   const limit = materialize === true ? 1 : Number.isFinite(materialize) ? Math.max(0, Math.floor(materialize)) : 0;
-  if (projectRoot && limit > 0) {
+  if (allowedProjectRoot && limit > 0) {
     for (const c of enriched.slice(0, limit)) {
       const made = draftFromCandidate(c, { project: projectName });
       if (!made.ok) {
-        drafts.push({ id: c.id, ok: false, reason: "invalid", problems: made.problems });
+        drafts.push({ id: c.id, ok: false, reason: "invalid", problems: made.problems, unanswered: made.unanswered });
         continue;
       }
-      drafts.push({ id: c.id, ...writeDraftPipeline({ projectRoot, pipeline: made.pipeline }) });
+      // `unanswered` 是草稿出口的一部分：调用方与面板据此知道「还有哪几步没人回答判据」。
+      // 早前它被算出来又在出口丢掉，等于这条判据没有消费者。
+      drafts.push({ id: c.id, unanswered: made.unanswered, ...writeDraftPipeline({ projectRoot: allowedProjectRoot, pipeline: made.pipeline }) });
     }
   }
 
   return {
     contract: "mneme.nudge/v1",
     generatedAt: new Date(now).toISOString(),
+    // 归属被降级时把原因写在最外层：调用方不该错过这件事（它决定这批候选能不能信）。
+    refused: attributionRefused
+      ? {
+          reason: "unscoped-sessions",
+          detail: "给了 projectRoot/project 却没给 sessionDir：会话目录是按工作区分桶的，扫全部拿到的观察不属于任何单个项目。已按「无归属普查」处理——候选不带项目名、不写项目桶、不落草稿。要项目归属就传该项目自己的 sessionDir。"
+        }
+      : null,
     // 会话源的读数**原样带出来**：扫了几个文件、几帧解不出来、有没有被截断。
     source: {
       sessionDir: dir,
+      scoped,
       present: read.present,
       readable: read.readable,
       truncated: read.truncated,
@@ -993,7 +1205,9 @@ export function nudgeFromSessions({
       frames: read.frames,
       failedFrames: read.failedFrames,
       observations: read.observations.length,
-      unreadable: read.unreadable
+      unreadable: read.unreadable,
+      // 失败记录是**没接线**还是**接进来了但一条都没有**，必须分开报（同 present/readable 那套）。
+      failureSource
     },
     segments: segments.length,
     // 挖的是哪一层要跟着结果一起报出来：默认只有能力级，工具级要显式开。
@@ -1002,6 +1216,7 @@ export function nudgeFromSessions({
     proposalsDir: propDir,
     counts: {
       candidates: enriched.length,
+      buckets: new Set(enriched.map((c) => c.bucket).filter(Boolean)).size,
       sessionsWithCandidates: new Set(enriched.flatMap((c) => c.sessions)).size,
       savedProposals: saved.length,
       draftsWritten: drafts.filter((d) => d.ok).length
@@ -1014,7 +1229,9 @@ export function nudgeFromSessions({
       autoAnswerCounterfactual: false,
       writesOnlyDrafts: true,
       // 机器给的风险只是下限；R3 永远只能由人给。
-      riskIsFloor: true
+      riskIsFloor: true,
+      // 支持度只在同一个工作区桶内累加；跨桶不并账。
+      crossProjectSupport: false
     }
   };
 }
