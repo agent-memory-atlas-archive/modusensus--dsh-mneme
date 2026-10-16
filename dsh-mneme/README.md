@@ -656,6 +656,18 @@ autoDream 的理念溯源（理念借鉴、实现原创）：
 
 在上述工作之上，dsh-mneme 做了自己的工程发展：K-Means++ 聚类预分组（`src/dream/clustering.js`）、类型化决策清单（keep / merge / archive / conflict / update，及 sleep 侧 supersede / differentiate）与可回放的 sha256 摘要审计链（`dream_runs` / `receipt_chain`）。如有遗漏的灵感来源，欢迎提 issue 指出。
 
+## 📚 相关研究
+
+dsh-mneme 的机制设计与下列公开研究相互印证（以下引用均逐一核对过 arXiv 收录页；机制对应关系为我们自己的映射，非原论文观点）：
+
+- **在线写入 + 离线巩固**：[Dual-Layer Agentic Memory with Fast Write Routing and Slow Consolidation](https://arxiv.org/abs/2608.22215)（arXiv:2608.22215）——与 autoDream 的「快写慢巩固」分工同构。
+- **热度衰减与访问强化**：[FadeMem](https://arxiv.org/abs/2601.18642)（arXiv:2601.18642）——heat 记忆热度模型（指数衰减 × 访问强化 × 重要性调制）的学术近亲。
+- **冲突裁决与状态追踪**：[StateMemBench](https://arxiv.org/abs/2608.19652)（arXiv:2608.19652）——记忆系统追踪演化状态的考卷；C1 冲突裁决（supersede 后不再引用旧值）以其为验收靶子。
+- **何时该忘 / scope 门控**：[PersistBench](https://arxiv.org/abs/2602.01146)（arXiv:2602.01146）；呈现层缓解见 [Structured Memory](https://arxiv.org/abs/2608.08300)（arXiv:2608.08300）——scope 语义域门控的问题出处与零契约变更改法。
+- **领域全景**：[Write–Manage–Read 综述](https://arxiv.org/abs/2603.07670)（arXiv:2603.07670）——「写入 / 管理 / 读取」三段式与插件整体形状互证。
+- **数月尺度的可靠性工程**：[Memory as Infrastructure](https://arxiv.org/abs/2609.05510)（arXiv:2609.05510）——与 sha256 审计链、fail-safe 降级同属「记忆即基础设施」路线。
+- **相邻系统（对照）**：[Zep](https://arxiv.org/abs/2501.13956)（时序知识图谱）、[Mem0](https://arxiv.org/abs/2504.19413)（生产级抽取式记忆）、[Hindsight](https://arxiv.org/abs/2512.12818)（retain / recall / reflect 三操作）走「写入时 LLM 抽取 + 向量/图检索」路线；dsh-mneme 的差异点在于：巩固由 LLM 参与但产物全程留痕可回放，冲突冻结待人工复核，默认离线。
+
 ## 📜 License
 
 MIT
