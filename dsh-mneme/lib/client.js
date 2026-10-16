@@ -7000,13 +7000,23 @@ window.__ModuleLoader__.load({
           const a = pos[e.from];
           const b = pos[e.to];
           if (!a || !b) return null;
-          const x1 = a.x + NW / 2, y1 = a.y + NH, x2 = b.x + NW / 2, y2 = b.y;
           const st = edgeState[e.from + ">" + e.to];
           const cls = st === "fail" ? "mneme-pipe-edgeFail" : st === "on" ? "mneme-pipe-edgeOn" : "mneme-pipe-edge";
+          // 同行相邻（蛇形读法）：右缘出、左缘进，短水平贝塞尔；
+          // 跨行/跨段仍走「底出顶进」的竖向贝塞尔。同行旧画法会把线甩出段外
+          // （真机截图验出），横连读起来就是「往下一段走」。
+          let d;
+          if (b.y === a.y && b.x > a.x) {
+            const ym = a.y + NH / 2;
+            d = `M ${a.x + NW} ${ym} C ${a.x + NW + GX / 2} ${ym}, ${b.x - GX / 2} ${ym}, ${b.x} ${ym}`;
+          } else {
+            const x1 = a.x + NW / 2, y1 = a.y + NH, x2 = b.x + NW / 2, y2 = b.y;
+            d = `M ${x1} ${y1} C ${x1} ${y1 + 26}, ${x2} ${y2 - 26}, ${x2} ${y2}`;
+          }
           return h("path", {
             key: e.id || (e.from + ">" + e.to),
             className: cls,
-            d: `M ${x1} ${y1} C ${x1} ${y1 + 26}, ${x2} ${y2 - 26}, ${x2} ${y2}`
+            d
           }, e.label ? h("title", null, e.label) : null);
         }),
         nodes.map((n) => {
@@ -7018,7 +7028,7 @@ window.__ModuleLoader__.load({
           const cls = "mneme-pipe-node mneme-pipe-node--" + (n.state || "candidate")
             + (usedSet[n.id] ? " mneme-pipe-node--onpath" : "")
             + (gate ? " mneme-pipe-node--gate" : "");
-          const lines = pipeTitleLines(n.title, 11);
+          const lines = pipeTitleLines(n.title, 10);
           // meta 行三段：状态（四态）· who（主/人/CI）· risk（R0-R3）。
           // who/risk 都是投影自带字段，此前一个都没上屏；risk 缺失按 R0 兜底。
           const meta = [
@@ -7041,19 +7051,20 @@ window.__ModuleLoader__.load({
               x1: p.x + 3, y1: p.y + 8, x2: p.x + 3, y2: p.y + NH - 8,
               "stroke-width": 3, "stroke-linecap": "round"
             }),
+            // 闸门角标：gate 步会「停下等批准」，与反事实圈同列放右上、圈在其上方——
+            // 左上角压 risk 色条（真机截图验出的布局冲突）。
+            gate ? h("text", {
+              className: "mneme-pipe-gatetag",
+              x: p.x + NW - 12, y: p.y + 24, textAnchor: "middle"
+            }, t("memory.actions.gate.tag")) : null,
             // 反事实标记：空心圈 = 还没闸门（counterfactual 为 null），
             // 实心圈 = 有对照证据。做在右上角，一眼区分。
             h("circle", {
-              cx: p.x + NW - 11, cy: p.y + 11, r: 4,
+              cx: p.x + NW - 12, cy: p.y + 11, r: 4,
               fill: n.counterfactual ? "var(--mneme-ok)" : "none",
               stroke: n.counterfactual ? "var(--mneme-ok)" : "var(--mneme-graphic-dim)",
               "stroke-width": 1.5
             }, h("title", null, n.counterfactual ? t("memory.actions.gate.has") : t("memory.actions.gate.none"))),
-            // 闸门角标：gate 步会「停下等批准」，必须和普通步一眼分开。
-            gate ? h("text", {
-              className: "mneme-pipe-gatetag",
-              x: p.x + 12, y: p.y + 12, textAnchor: "middle"
-            }, t("memory.actions.gate.tag")) : null,
             lines.length === 1
               ? h("text", {
                   className: "mneme-pipe-nodeT",
