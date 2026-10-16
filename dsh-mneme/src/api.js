@@ -13,7 +13,7 @@ import { describeLocalRuntime, publicRuntimeStatus } from "./runtime/loader.js";
 import { hostModulesDir, provisionRuntime } from "./runtime/provision.js";
 import { classify, fetchLatestVersion, PACKAGE_VERSION } from "./version-check.js";
 import { parseReclaimQuery, parseReclaimJson, readReclaimFields, reclaimReply, RECLAIM_UNAVAILABLE } from "./reclaim-http.js";
-import { readPipelineDoc } from "./pipeline.js";
+import { readPipelineDoc, loadPipelines, projectPipelineDir } from "./pipeline.js";
 import { loadRunsById, runsDir, RUNS_SUFFIX } from "./pipeline-runs.js";
 import { readCandidateDoc } from "./candidates.js";
 
@@ -1673,7 +1673,7 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
 
         // 只读**账本目录**来定「哪些 id 有账」：最新一条 run 可能属于一条刚被删掉或
         // 还没写完的 .json，这时工作流目录里问不到它的 id，而账本还在盘上。
-        let runsResult = { runsById: {}, errors: [] };
+        let runsResult = { runsById: {}, errors: [], statesById: {} };
         if (project !== null) {
           const where = runsDir(project);
           const ids = existsSync(where)
@@ -1682,26 +1682,42 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
                 .sort()
                 .map((f) => f.slice(0, -RUNS_SUFFIX.length))
             : [];
-          if (ids.length) runsResult = loadRunsById(project, ids);
+          if (ids.length) {
+            // step id 闸门：账本里出现「图上没有的 step id」时，credit 会落在一个没有节点的
+            // 地方——**记了、数得出来、面板上永远看不见**，症状与「从没跑过」同形。
+            // 这里把每条工作流的步骤表读出来当白名单，让那种行变成看得见的噪音。
+            let stepIdsById = null;
+            try {
+              stepIdsById = Object.create(null);
+              for (const p of loadPipelines(projectPipelineDir(project), { scope: "project" })) {
+                stepIdsById[p.id] = p.steps.map((s) => s.id);
+              }
+            } catch {
+              // 项目层有坏 .json 时 readPipelineDoc 会把它记进 `unreadable`；这里不重复报，
+              // 也绝不因此让整个面板打不开——闸门退化成「没有白名单」，账本照读。
+              stepIdsById = null;
+            }
+            runsResult = loadRunsById(project, ids, { expectedStepIdsById: stepIdsById });
+          }
         }
-        const { runsById, errors: runsErrors } = runsResult;
+        const { runsById, errors: runsErrors, statesById } = runsResult;
 
-        // 点名的那条账本坏了就说清坏在哪：静默给一份「没跑过」等于骗人，而账本坏了
-        // 是**必须有人去看**的事——它意味着历史丢了。清单页则相反：一条坏账本不该
-        // 让整个面板打不开（与「项目层坏一个 .json 不拖死全局层」同一口径），
-        // 所以那条走 `runsErrors`，端点照常 200。
-        // 与读侧同一顺序：`__proto__` 这类不是 id，别拿去查表（用 hasOwnProperty
-        // 而不是 `in`/真值判断——`__proto__` 在普通对象上会命中原型）。
-        const badRequested =
-          id !== null && Object.prototype.hasOwnProperty.call(runsById, id)
-            ? runsErrors.find((e) => e.id === id)
-            : null;
-        if (badRequested) {
-          sendJson(res, 500, { error: "pipeline-unreadable", detail: badRequested.detail });
-          return;
-        }
+        const doc = readPipelineDoc({ projectRoot: project, id, runsById });
 
-        sendJson(res, 200, { ...readPipelineDoc({ projectRoot: project, id, runsById }), runsErrors });
+        // 「读不出来」与「还没跑过」在节点状态上完全同形（都是全体 candidate），而且
+        // **不带 id 的默认视图没有兜底**——那正是用户打开时看到的那一屏。所以状态按
+        // pipeline 逐条显式带出去（清单行的 `runsState` 与选中那条的顶层 `runsState`），
+        // 客户端不必靠顶层噪音猜。也刻意**不再**对坏账本回 500：那会让客户端把它当成
+        // 「离线」，还顺手吞掉本来读得出来的那张图（账本坏了，工作流本身没坏）。
+        // 没有项目根时账本层无从读起，如实给 null，而不是谎称「没有账本文件」。
+        const chosenId = doc.pipeline ? doc.pipeline.id : null;
+        const runsState = project !== null && chosenId !== null ? statesById[chosenId] || "absent" : null;
+        const available =
+          project === null
+            ? doc.available
+            : doc.available.map((row) => ({ ...row, runsState: statesById[row.id] || "absent" }));
+
+        sendJson(res, 200, { ...doc, available, runsState, runsErrors });
       } catch (error) {
         // 工作流是人手写的 JSON，报错本身就是给人看的：说清哪一条、坏在哪，
         // 而不是回一句 internal 让人去翻日志。
