@@ -44,7 +44,16 @@ const MAX_SESSION_FILES = 2000;
 /** 判定 `stale` 的默认天数。与 pipeline.js 的 90 天同源：都是「久未使用」的经验阈值。 */
 export const STALE_AFTER_DAYS = 90;
 
-/** 使用状态三值。**没有 `refuted`**——能力被弃用是另一回事，不能从「没用过」推出来。 */
+/**
+ * 使用状态**三值**。
+ *
+ * **这是对 `pipeline.js` 四态（`candidate`/`trusted`/`stale`/`refuted`）的有意收敛，
+ * 不是遗漏**：`refuted` 在工作流里的含义是「这一步被运行记录判定为不成立」，而能力
+ * 的「被使用」记录**推不出**任何等价结论——一个能力被调用过，只能说「用过」，不能
+ * 因此说它「已被推翻」。能力的弃用要另立判据（比如「用它之后任务失败了」），那是
+ * 另一件事，**不能从调用次数硬凑**。所以这里只保留能从运行记录直接推出的三态；
+ * 少了的那一态宁可不做，也不拿 `candidate` 或 `stale` 冒充。
+ */
 export const USAGE_STATES = ["candidate", "trusted", "stale"];
 
 /**

@@ -752,7 +752,7 @@ export function discoverCapabilities(options = {}) {
       filesTruncated: usageCollection?.truncated === true,
       staleAfterDays,
       scopeNote:
-        "使用记录只覆盖本机现存的会话日志。`candidate` 的含义是「在这些日志里没有记录」，不是「从未使用」——日志被清理后，久未用的能力会退化成 candidate；反过来，若 sourceReadable 为 false，则所有 candidate 都不可信。",
+        "使用记录只覆盖本机现存的会话日志。`candidate` 的含义是「在这些日志里没有记录」，不是「从未使用」——日志被清理后，久未用的能力会退化成 candidate；反过来，若 sourceReadable 为 false，则所有 candidate 都不可信。另注意：`stale` 只在现存日志覆盖的时间跨度**超过** staleAfterDays 时才可能出现；本机实测窗口 63.5 天 < 90 天，故 stale 结构性不可达——此时「久未用」与「从未用」在读数上不可区分。这是读数的边界，不是「能力都还在用」。",
       unreadable: usageCollection?.unreadable ?? []
     },
     mcp: {
