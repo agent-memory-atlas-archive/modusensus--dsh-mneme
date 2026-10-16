@@ -9,6 +9,9 @@ import {
   validatePipeline,
   toPipelineV1,
   readPipelineDoc,
+  suggestRetirements,
+  RETIRE_AFTER_SKIPS,
+  RETIRE_AFTER_DETOURS,
   RISK_LEVELS,
   ACTORS
 } from "../src/pipeline.js";
@@ -351,4 +354,129 @@ test("路由 /api/dsh-mneme/pipeline：读得出、认不出 id 时不编造、�
     headers: {}
   }, missing);
   assert.equal(JSON.parse(missing.body).pipeline, null);
+});
+
+// ── 绕行与退役提议：跳过 ≠ 绕开 ──────────────────────────────────────────────
+// 这一版的核心区分。混在一起数，两种提议就都发不出来：
+//   跳过 = 这次不用这一步（图上还在）→ 提议删掉**这一步**
+//   绕开 = 这条路整个不对（图该重画）→ 提议重看**这条路径**
+
+test("跳过与绕开分开计数，谁都不冒充谁", () => {
+  const pipeline = validatePipeline(minimal({
+    steps: [
+      { id: "A1", phase: "p", title: "a", when: "w", do: "d", who: "main", tool: "", done: "x", risk: "R0", needs: [], why: "y", evidence: ["e"] },
+      { id: "A2", phase: "p", title: "b", when: "w", do: "d", who: "main", tool: "", done: "x", risk: "R0", needs: ["A1"], why: "y", evidence: ["e"] }
+    ]
+  }));
+  const doc = toPipelineV1(pipeline, {
+    runs: [
+      { id: "r1", steps: [{ id: "A1", skipped: true }, { id: "A2", detoured: true }] },
+      { id: "r2", steps: [{ id: "A1", skipped: true }, { id: "A2", detoured: true }] }
+    ]
+  });
+  const a1 = doc.nodes.find((n) => n.id === "A1");
+  const a2 = doc.nodes.find((n) => n.id === "A2");
+  assert.equal(a1.credit.skipped, 2, "A1 是被跳过");
+  assert.equal(a1.credit.detoured, 0, "跳过不该被算成绕开");
+  assert.equal(a2.credit.detoured, 2, "A2 是被绕开");
+  assert.equal(a2.credit.skipped, 0, "绕开不该被算成跳过");
+  // 两者都不算「用了这一步」——绕行和跳过都没走那一步。
+  assert.equal(a1.credit.uses, 0);
+  assert.equal(a2.credit.uses, 0);
+});
+
+test("绕行不染色：被绕开不等于这一步坏了", () => {
+  // 染色要留给真正被推翻过的（refuted）——那是唯一有硬判据的信号。
+  // 把「被绕开」也染红，会让图上到处都是红点，人就不看了。
+  const pipeline = validatePipeline(minimal({
+    steps: [
+      { id: "A1", phase: "p", title: "a", when: "w", do: "d", who: "main", tool: "", done: "x", risk: "R0", needs: [], why: "y", evidence: ["e"] }
+    ]
+  }));
+  const doc = toPipelineV1(pipeline, { runs: [{ id: "r1", steps: [{ id: "A1", detoured: true }] }] });
+  assert.equal(doc.nodes[0].state, "candidate", "绕开不改变状态，只累加计数");
+  assert.equal(doc.nodes[0].credit.detoured, 1);
+});
+
+test(`跳过 ≥${RETIRE_AFTER_SKIPS} 次 → 提议删掉这一步`, () => {
+  const pipeline = validatePipeline(minimal({
+    steps: [
+      { id: "A1", phase: "p", title: "这一步其实是多余的", when: "w", do: "d", who: "main", tool: "", done: "x", risk: "R0", needs: [], why: "y", evidence: ["e"] },
+      { id: "A2", phase: "p", title: "b", when: "w", do: "d", who: "main", tool: "", done: "x", risk: "R0", needs: ["A1"], why: "y", evidence: ["e"] }
+    ]
+  }));
+  const runs = [{ id: "r1", steps: [{ id: "A1", skipped: true }, { id: "A2" }] },
+                { id: "r2", steps: [{ id: "A1", skipped: true }, { id: "A2" }] },
+                { id: "r3", steps: [{ id: "A1", skipped: true }, { id: "A2" }] }];
+  const s = suggestRetirements(pipeline, { runs });
+  assert.equal(s.length, 1);
+  assert.equal(s[0].kind, "drop-step");
+  assert.equal(s[0].stepId, "A1");
+  assert.match(s[0].because, /跳过 3 次/);
+});
+
+test(`绕开 ≥${RETIRE_AFTER_DETOURS} 次 → 提议重看这条路径（不是删节点）`, () => {
+  const pipeline = validatePipeline(minimal({
+    steps: [
+      { id: "A1", phase: "p", title: "从这里开始岔出去", when: "w", do: "d", who: "main", tool: "", done: "x", risk: "R0", needs: [], why: "y", evidence: ["e"] },
+      { id: "A2", phase: "p", title: "b", when: "w", do: "d", who: "main", tool: "", done: "x", risk: "R0", needs: ["A1"], why: "y", evidence: ["e"] }
+    ]
+  }));
+  const runs = [{ id: "r1", steps: [{ id: "A1", detoured: true }, { id: "A2" }] },
+                { id: "r2", steps: [{ id: "A1", detoured: true }, { id: "A2" }] },
+                { id: "r3", steps: [{ id: "A1", detoured: true }, { id: "A2" }] }];
+  const s = suggestRetirements(pipeline, { runs });
+  assert.equal(s.length, 1);
+  assert.equal(s[0].kind, "rework-path", "绕开动的是「路径」这一层，不是删掉那个点");
+  assert.match(s[0].effect, /路径/);
+});
+
+test("没到阈值就不提议；两种提议可以同时出现但各自独立", () => {
+  const pipeline = validatePipeline(minimal({
+    steps: [
+      { id: "A1", phase: "p", title: "a", when: "w", do: "d", who: "main", tool: "", done: "x", risk: "R0", needs: [], why: "y", evidence: ["e"] },
+      { id: "A2", phase: "p", title: "b", when: "w", do: "d", who: "main", tool: "", done: "x", risk: "R0", needs: ["A1"], why: "y", evidence: ["e"] }
+    ]
+  }));
+  assert.deepEqual(suggestRetirements(pipeline, { runs: [{ id: "r1", steps: [{ id: "A1", skipped: true }] }] }), [],
+    "跳过一次不该提议");
+  const runs = [{ id: "r1", steps: [{ id: "A1", skipped: true, detoured: true }] },
+                { id: "r2", steps: [{ id: "A1", skipped: true, detoured: true }] },
+                { id: "r3", steps: [{ id: "A1", skipped: true, detoured: true }] }];
+  const s = suggestRetirements(pipeline, { runs });
+  assert.deepEqual(s.map((x) => x.kind).sort(), ["drop-step", "rework-path"], "同一节点上两种提议互不吞并");
+});
+
+test("readPipelineDoc 带上 suggestions（没到阈值时是空数组，不是缺字段）", () => {
+  const doc = readPipelineDoc({ projectRoot: REPO_ROOT });
+  assert.ok(Array.isArray(doc.suggestions), "字段必须在——缺字段会让面板分不清「没有」和「读不到」");
+});
+
+// ── 候选路由：与工作流路由是两处不同的东西 ──────────────────────────────────
+
+test("路由 /api/dsh-mneme/candidates：读候选层，且把三条边界写进契约", async () => {
+  const api = buildApi();
+  const route = api.routes.find((r) => r.path === "/api/dsh-mneme/candidates");
+  assert.ok(route, "候选路由没注册");
+
+  const ok = new FakeRes();
+  route.handler({
+    url: "/api/dsh-mneme/candidates?project=" + encodeURIComponent(REPO_ROOT),
+    method: "GET",
+    headers: {}
+  }, ok);
+  assert.equal(ok.statusCode, 200);
+  const doc = JSON.parse(ok.body);
+  assert.equal(doc.contract, "mneme.candidates/v1");
+  // 「这一刀不做的事」写进契约，免得以后有人以为忘了做。
+  assert.deepEqual(doc.boundaries, { autoPromote: false, autoApprove: false, injectIntoMemory: false });
+  // 候选住本地，不进仓库——契约里给的是本地的家，不是 <项目>/.mneme/。
+  assert.match(doc.dir, /candidates/);
+  assert.equal(doc.dir.includes(REPO_ROOT), false, "候选目录不该等于项目仓库目录");
+
+  // 相对路径与工作流路由同一口径：拒掉，不静默退成「没有项目」。
+  const relative = new FakeRes();
+  route.handler({ url: "/api/dsh-mneme/candidates?project=dsh-mneme", method: "GET", headers: {} }, relative);
+  assert.equal(relative.statusCode, 400);
+  assert.equal(JSON.parse(relative.body).error, "project-not-absolute");
 });
