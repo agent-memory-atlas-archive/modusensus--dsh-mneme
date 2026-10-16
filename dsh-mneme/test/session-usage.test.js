@@ -228,6 +228,46 @@ test("文件发现：**所有版本**的会话文件都要收（只认 v4 会漏
   }
 });
 
+test("文件上限可注入，且截断要留痕（CodeRabbit 抓到的静默截断）", () => {
+  // 实测回归：早期版本把上限写死在遍历里（MAX_SESSION_FILES=2000），于是
+  //   · 调用方传 maxFiles: 5000 也只拿到 2000 个——参数无效，无从察觉；
+  //   · 截断发生在内层，外层算不出 truncated（`found.files.length > maxFiles` 永假）。
+  // 结果就是「只扫了一部分」却看起来像扫全了——本仓库反复防的那类静默错。
+  const base = mkdtempSync(join(tmpdir(), "mneme-usage-cap-"));
+  try {
+    const sessions = join(base, "sessions");
+    // 造 12 个会话文件，限 5 个：应拿到 5 个 + truncated=true
+    for (let i = 0; i < 12; i++) {
+      const d = join(sessions, `s${String(i).padStart(2, "0")}`);
+      mkdirSync(d, { recursive: true });
+      writeFileSync(join(d, "session.v4.jsonl.zstd"), multiFrameBuffer([`line${i}`]));
+    }
+
+    // ① limit 真的生效（不是被内层写死的上限压住）
+    const capped = findSessionFiles(sessions, { limit: 5 });
+    assert.equal(capped.files.length, 5, "limit=5 就该只拿 5 个");
+    assert.equal(capped.truncated, true, "被截断必须留痕");
+
+    // ② 不设限时全拿到，且不报截断
+    const all = findSessionFiles(sessions);
+    assert.equal(all.files.length, 12);
+    assert.equal(all.truncated, false, "没截断就不该报截断");
+
+    // ③ collectUsage 透传：maxFiles 生效，且 truncated 透出来
+    const c = collectUsage({ sessionDir: sessions, maxFiles: 5 });
+    assert.equal(c.scannedFiles, 5);
+    assert.equal(c.truncated, true, "collectUsage 要把截断标记透出来");
+    assert.equal(c.totalFiles, 5, "totalFiles 是被限制后的数量（不是磁盘总数）");
+
+    // ④ 给足够大的 maxFiles 时能扫全（旧实现这里会失败：内层卡 2000）
+    const c2 = collectUsage({ sessionDir: sessions, maxFiles: 9999 });
+    assert.equal(c2.scannedFiles, 12);
+    assert.equal(c2.truncated, false);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("目录不可读要与「空目录」**可分辨**（不许同形）", () => {
   // 实测回归：早期版本用 existsSync 定 present、readdirSync 失败直接 return，
   // 于是 ACL 拒绝的目录产出与「可读空目录」逐字段相同的读数

@@ -113,20 +113,28 @@ export function forEachFrame(buf, onText) {
 /**
  * 递归找出所有会话日志文件。
  *
- * 返回 `{ files, unreadable }`——**目录读不动时必须留痕**。
+ * 返回 `{ files, unreadable, truncated }`——**目录读不动时必须留痕**。
  *
  * 为什么这是关键：早期版本用 `existsSync` 定 `present`、`readdirSync` 失败直接 `return`，
  * 于是「目录存在但不可读（ACL 拒绝、权限不足）」与「目录存在且为空」产出**逐字段相同**
  * 的读数（`present=true, scannedFiles=0, unreadable=[]`），清单上 175 条技能全 `candidate`。
  * 那正是本仓库反复防的那类错：**读不到被显示成「读到但没有」**。所以 readdir 失败要
  * 记进 `unreadable`，让上层能把它与「空目录」分辨开。
+ *
+ * `limit` 可注入（默认 `MAX_SESSION_FILES`）。**早期版本把上限写死在遍历里**，于是
+ * 调用方传 `maxFiles: 5000` 也只拿到 2000 个——上限在内层生效、外层无从知道，
+ * 又是「静默截断」。现在上限只在这里生效，且**超限时 `truncated` 为 true**。
  */
-export function findSessionFiles(dir) {
-  const result = { files: [], unreadable: [], present: false };
+export function findSessionFiles(dir, { limit = MAX_SESSION_FILES } = {}) {
+  const cap = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : MAX_SESSION_FILES;
+  const result = { files: [], unreadable: [], present: false, truncated: false };
   if (!existsSync(dir)) return result;
   result.present = true;
   const walk = (current) => {
-    if (result.files.length >= MAX_SESSION_FILES) return;
+    if (result.files.length >= cap) {
+      result.truncated = true;
+      return;
+    }
     let entries;
     try {
       entries = readdirSync(current, { withFileTypes: true });
@@ -136,7 +144,10 @@ export function findSessionFiles(dir) {
       return;
     }
     for (const entry of entries) {
-      if (result.files.length >= MAX_SESSION_FILES) return;
+      if (result.files.length >= cap) {
+        result.truncated = true;
+        return;
+      }
       const full = join(current, entry.name);
       // 符号链接要单独认：Dirent 对 symlink 的 isDirectory() 返回 false（踩过一次）。
       let isDir = entry.isDirectory();
@@ -226,9 +237,13 @@ export function identifyCapability(call) {
  *
  * 返回结构里的 `skills` / `mcp` 是 Map（能力名 → { uses, lastUsedAt, sessions }），
  * 由上层投影成清单字段。`unmatched` 记对不上名字的调用数——如实报，不硬凑。
+ *
+ * `maxFiles` 现在**真的管用**（透传给 `findSessionFiles` 的 `limit`）：早期版本把上限
+ * 写死在遍历里，传 5000 也只拿到 2000 个且不报截断——调用方以为扫全了。
  */
 export function collectUsage({ sessionDir = resolveSessionDir(), maxFiles = MAX_SESSION_FILES } = {}) {
-  const found = findSessionFiles(sessionDir);
+  const found = findSessionFiles(sessionDir, { limit: maxFiles });
+  // 透传后 found.files 已按上限截好，slice 只是防御（limit 非法时）。
   const files = found.files.slice(0, maxFiles);
   const result = {
     dir: sessionDir,
@@ -237,7 +252,8 @@ export function collectUsage({ sessionDir = resolveSessionDir(), maxFiles = MAX_
     present: found.present,
     readable: found.present && found.unreadable.length === 0,
     // 文件数被上限截断时要说出来，否则「只扫了一部分」看不出来。
-    truncated: found.files.length > maxFiles,
+    // 两个来源：内层遍历到上限（found.truncated），或调用方给的 maxFiles 更小。
+    truncated: found.truncated === true || found.files.length > files.length,
     totalFiles: found.files.length,
     scannedFiles: 0,
     frames: 0,

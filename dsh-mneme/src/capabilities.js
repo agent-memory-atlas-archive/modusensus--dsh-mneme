@@ -390,6 +390,13 @@ export function readMcpStore(dshHome) {
         summary: String(c.summary ?? ""),
         // servers 里带 url/transport，但**不输出 url**：它可能是私有端点，而清单会被截图。
         servers: Array.isArray(c.servers) ? c.servers.length : 0,
+        // **serverName 必须留下来**：会话日志里的 MCP 工具名是 mcp__<serverName>__<tool>，
+        // 而 serverName 与 catalog 的 `id` **不保证相同**——实测本机就有两例对不上
+        // （`baidu-maps`↔`baidu-map`、`bazhuayu-cloud-collection`↔`bazhuayu`）。
+        // 只拿 id 去匹配使用记录，那些 server 的真实调用会被显示成 `candidate`。
+        serverNames: Array.isArray(c.servers)
+          ? c.servers.map((s) => String(s?.serverName ?? "").trim()).filter((s) => s !== "")
+          : [],
         authMode: String(c?.auth?.mode ?? ""),
         probeStatus: String(c.probeStatus ?? ""),
         visibility: "catalog"
@@ -664,10 +671,20 @@ export function discoverCapabilities(options = {}) {
   );
 
   // 用投影后的 catalog（带 usage）算计数——**不能拿原始的 mcp.catalog**，那份没挂使用记录。
-  const mcpCatalogWithUsage = mcp.catalog.map((c) => ({
-    ...c,
-    usage: usageByMcp.get(c.id) ?? { name: c.id, uses: 0, lastUsedAt: null, sessions: 0, state: "candidate" }
-  }));
+  //
+  // **按 serverName 找使用记录，不是按 id。** 会话日志里的 MCP 工具名是
+  // `mcp__<serverName>__<tool>`，而 serverName 与 catalog 的 `id` 不保证相同
+  // （实测 `baidu-maps`↔`baidu-map`、`bazhuayu-cloud-collection`↔`bazhuayu`）。
+  // 只按 id 匹配会让那些 server 的真实调用显示成 candidate。
+  // 一条 catalog 可能有多个 serverName：逐个试，命中即用；都没有才回退到 id。
+  const usageForCatalogEntry = (c) => {
+    for (const sn of c.serverNames ?? []) {
+      const hit = usageByMcp.get(sn);
+      if (hit) return hit;
+    }
+    return usageByMcp.get(c.id) ?? { name: c.id, uses: 0, lastUsedAt: null, sessions: 0, state: "candidate" };
+  };
+  const mcpCatalogWithUsage = mcp.catalog.map((c) => ({ ...c, usage: usageForCatalogEntry(c) }));
 
   return {
     contract: "mneme.capability/v1",

@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import zlib from "node:zlib";
 
 import {
   parseFrontmatter,
@@ -481,6 +482,81 @@ test("总入口：插件 bundles 与 patch 分开报，disabled 的能数出来"
     // 声明不等于生效：两类都标 declared，运行时状态单列
     assert.equal(r.plugins.bundles[0].visibility, "declared");
     assert.match(r.plugins.runtimeOnly.what, /真实加载结果/);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("MCP 使用记录要按 serverName 匹配，不是按 catalog 的 id（CodeRabbit 抓到的映射缺陷）", () => {
+  // 实测回归：会话日志里的 MCP 工具名是 mcp__<serverName>__<tool>，而 serverName 与
+  // catalog 的 `id` **不保证相同**——本机 109 条里有 41 条不一致（如
+  // id=baidu-maps ↔ serverName=baidu-map；id=polardb ↔ serverName=polardbx）。
+  // 早期只按 id 匹配，那些 server 的真实调用会被显示成 candidate（用过却看着没用过）。
+  const base = mkdtempSync(join(tmpdir(), "mneme-cap-mcpname-"));
+  try {
+    const dshHome = join(base, ".dsh");
+    mkdirSync(join(dshHome, "storages"), { recursive: true });
+    writeFileSync(
+      join(dshHome, "storages", "mcp_connector.json"),
+      JSON.stringify({
+        unit: { name: "mcp_connector", version: 1 },
+        tables: {
+          catalog: {
+            remote: {
+              connectors: [
+                // id 与 serverName 故意不一致——这正是要钉住的情形
+                { id: "baidu-maps", name: "百度地图", servers: [{ serverName: "baidu-map" }] },
+                // 一个 id 挂多个 serverName
+                { id: "pkulaw-legal", name: "北大法宝", servers: [{ serverName: "pkulaw-law-search" }, { serverName: "pkulaw-case-keyword" }] },
+                // 一致的普通情形（回归保护）
+                { id: "github", name: "GitHub", servers: [{ serverName: "github" }] }
+              ]
+            }
+          },
+          connections: {},
+          grants: {}
+        }
+      }),
+      "utf8"
+    );
+    // 会话日志里用的是 serverName（baidu-map），不是 id（baidu-maps）
+    const sessionId = "session-mcpname-0001";
+    const dir = join(base, "sessions", "work", sessionId);
+    mkdirSync(dir, { recursive: true });
+    const lines = [
+      JSON.stringify({
+        type: "assistant/message",
+        time: 1792000000000,
+        data: { turn: 1, step: 1, message: { role: "assistant", content: [{ type: "tool-call", name: "mcp__baidu-map__geocode", arguments: "{}" }] } }
+      }),
+      JSON.stringify({
+        type: "assistant/message",
+        time: 1792000000001,
+        data: { turn: 1, step: 2, message: { role: "assistant", content: [{ type: "tool-call", name: "mcp__pkulaw-case-keyword__search", arguments: "{}" }] } }
+      })
+    ].join("\n");
+    writeFileSync(join(dir, "session.v4.jsonl.zstd"), zlib.zstdCompressSync(Buffer.from(lines, "utf8")));
+
+    const r = discoverCapabilities({ projectRoot: null, dshHome, agentsHome: join(base, "none"), profileDir: join(base, "none"), sessionDir: join(base, "sessions") });
+
+    // serverNames 必须被留下来
+    const baidu = r.mcp.catalog.find((c) => c.id === "baidu-maps");
+    assert.deepEqual(baidu.serverNames, ["baidu-map"], "serverName 要留在 catalog 条目上");
+
+    // 关键：按 serverName 匹配上了 → 不是 candidate
+    assert.equal(baidu.usage.state, "trusted", "id 与 serverName 不一致时仍要匹配到使用记录");
+    assert.equal(baidu.usage.name, "baidu-map", "usage 记的是 serverName");
+    assert.equal(baidu.usage.uses, 1);
+
+    // 一个 id 挂多个 serverName：命中任意一个即可
+    const pkulaw = r.mcp.catalog.find((c) => c.id === "pkulaw-legal");
+    assert.equal(pkulaw.usage.uses, 1, "多 serverName 时命中其一即可");
+    assert.equal(pkulaw.usage.name, "pkulaw-case-keyword");
+
+    // 一致的情形照旧
+    const gh = r.mcp.catalog.find((c) => c.id === "github");
+    assert.equal(gh.usage.state, "candidate", "没用过的仍是 candidate");
+    assert.equal(gh.serverNames[0], "github");
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
