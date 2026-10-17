@@ -42,7 +42,10 @@ test("release.yml 的 provenance 权限只发给 publish，不发给工作流顶
   const yml = readFileSync(path.join(repoRoot, ".github", "workflows", "release.yml"), "utf8");
   assert.match(yml, /npm publish[^\n]*--provenance/, "publish 必须带 --provenance");
 
-  const head = codeOnly(yml).split(/\r?\n(?=jobs:)/)[0];
+  // YAML 允许把顶层键写成 "jobs": 或 'jobs':，那也是合法的工作流。
+  // 只匹配裸 jobs: 会在那种写法下把整个文件当成 head，于是 publish 里合法的
+  // id-token 被误判成「顶层声明」——失败方向是误红不是漏检，但假红会磨损这条锁。
+  const head = codeOnly(yml).split(/\r?\n(?=["']?jobs["']?:\s*$)/m)[0];
   assert.doesNotMatch(head, /id-token:/, "工作流顶层不得声明 id-token（会泄漏给所有 job）");
 
   const publish = jobBlock(yml, "publish");
