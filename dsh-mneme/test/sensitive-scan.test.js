@@ -205,3 +205,47 @@ test("长文本上的回溯有上界：写阻塞类回归的计时护栏", () =>
     assert.ok(ms < 2000, `${text.length} 字符耗时 ${ms.toFixed(1)}ms，超 2000ms 预算（回溯上界被破坏？）`);
   }
 });
+
+// 仓库文本守卫：语料里的凭据值必须以拼接形式存在，仓库里不得留下完整形状。
+// 触发这件事的是 GitHub secret scanning 的 alert #1——write-admission-samples.js 里
+// openai-key 那条曾经是整串字面量（同文件其它四条都已是 assemble 拼接），被报成
+// openai_api_key 的 open=true 告警。它本身不是泄露（正文是 a-z、0-9 的顺序串），
+// 但扫描器只看形状；而这条漏网说明「逐条记得改」靠不住，所以用一条测试把它钉住：
+// 以后谁再往语料里加字面量，这里先红，不用等 GitHub 来通知。
+test("语料里不留完整形状的凭据字面量（secret scanning alert #1 的回归锁）", async () => {
+  const { readFile, readdir } = await import("node:fs/promises");
+  const helpersDir = new URL("./helpers/", import.meta.url);
+  const files = (await readdir(helpersDir)).filter((f) => f.endsWith(".js"));
+  // 前缀集合与长度都对齐 src/sensitive-scan.js 的 github_token / slack_token /
+  // openai_key 三条规则——只有形状一致才谈得上「扫描器会认」，前缀写窄了等于给
+  // gho_ / ghs_ / xoxp- 这些同族凭据开后门。改那三条规则时这里要跟着改。
+  // 唯一放宽的是 sk- 的下限：生产规则是 24，这里用 20，宁可多报——漏报的代价是
+  // GitHub 再报一次告警，多报的代价只是有人来把这行改成拼接。
+  const rules = [
+    // kind 与生产判据对齐，下面的断言拿它反查 scanSensitive 是不是真认这个形状。
+    { re: /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/, what: "OpenAI key", kind: "openai_key", probe: `sk-${"a1".repeat(13)}` },
+    { re: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36}\b/, what: "GitHub token", kind: "github_token", probe: `ghs_${"a1".repeat(18)}` },
+    { re: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/, what: "Slack token", kind: "slack_token", probe: `xoxp-${"a1".repeat(8)}` }
+  ];
+  // 「与生产规则同源」不能只是注释：CodeRabbit 在 #465 指出前一版把前缀写窄了
+  // （只认 ghp_ / xoxb-，漏了 gho_/ghs_/xoxp-），注释却写着同源。所以这里反查
+  // scanSensitive——守卫的每条规则必须真的被生产判据认成同一个 kind，否则这条红。
+  // 生产规则收窄前缀时，这条测试会先于「GitHub 又报一次告警」发现不一致。
+  // 两段合起来才叫同源：探针要同时被**守卫的规则**和**生产判据**认下，且 kind 一致。
+  // 只查一边的话，任一侧收窄前缀都不会红——那正是 CodeRabbit 指出的失效模式。
+  for (const { re, what, kind, probe } of rules) {
+    assert.match(probe, re, `守卫自己的 ${what} 规则认不出 ${probe}，前缀写窄了？`);
+    assert.equal(scanSensitive(probe)?.kind, kind, `生产判据不认 ${probe} 为 ${kind}，守卫与它不同源`);
+  }
+  for (const file of files) {
+    const text = await readFile(new URL(file, helpersDir), "utf8");
+    for (const { re, what } of rules) {
+      const hit = text.match(re);
+      assert.equal(
+        hit,
+        null,
+        `${file} 里出现了完整的 ${what} 字面量（${hit?.[0]?.slice(0, 12)}…）：按 assemble 拼接，别整串写`
+      );
+    }
+  }
+});
