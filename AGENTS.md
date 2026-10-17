@@ -37,7 +37,7 @@ dsh-mneme 是 DSH 宿主的记忆插件（蒸馏 / 注入 / 检索 / 巩固 / sc
 | 存储生命周期 | `src/maintenance.js` | 无损回收维护入口（#275 第一批；`dsh-mneme reclaim`，默认 dry-run，VACUUM 单独指定） |
 | 回收 HTTP 口径 | `src/reclaim-http.js` | 面板路由与 Bearer 数据面共用的唯一一份解析与答复（#411）；两张皮只许剩鉴权与路径不同 |
 | 服务层 | `src/service.js` | saveWithDedupe（去重键 type+title+scope 三元组）、fuseRecall 检索融合（keyword/vector/bm25/entity）、注入候选、镜像同步、冲突队列 |
-| 写入准入 | `src/write-admission.js` | 写入前的会话写入预算与同话题冷却（#254）；第 1 级确定性判据（空白 / 噪声 / 密钥 PII）在 `writeAdmission.enforce` 打开时**会真拒绝**（`ADMISSION_DECISION_DENY`），默认只计量，测量点落 `llm_audit_logs` |
+| 写入准入 | `src/write-admission.js` | 写入前的会话写入预算与同话题冷却（#254）。第 1 级确定性判据（空白 / 噪声 / 密钥 PII）只在三个条件同时成立时才跑：有 `sessionKey`、`llmAudit.enabled` 未被显式关、`writeAdmission.enabled === true`；都成立且**命中**时，再由 `writeAdmission.enforce` 决定是否真拒绝（`ADMISSION_DECISION_DENY`）。只开 `enforce` 不跑判据、也不拦写入。默认只计量，测量点落 `llm_audit_logs` |
 | 注入 | `src/inject.js` | 注入位构造、内容截断、跨轮轮换 |
 | 蒸馏 | `src/summarize.js` + `src/quality-filter.js` | 会话 → 记忆；质量打分与处置（归档/降权） |
 | 巩固与睡眠 | `src/dream.js` + `src/dream/{decisions,clustering,sleep}.js` | LLM 巩固决策、dream_runs 审计回执 |
@@ -65,7 +65,8 @@ dsh-mneme 是 DSH 宿主的记忆插件（蒸馏 / 注入 / 检索 / 巩固 / sc
 6. 提交署名可归属与 AI 内容核验义务见 [CONTRIBUTING](CONTRIBUTING.md)（硬性要求）；
 7. **发布/打包只在 `dsh-mneme/` 包目录内执行**——根目录历史上发出过坏包（0.6.9、0.7.0–0.7.10），此条为防复发红线；
 8. **注释写「为什么」，不写「是什么」**：非常规实现、防御段、行为开关的动机（issue 编号、消融数据、基准数字）必须落注释，代码含义靠命名与测试名表达；测试同样适用——锁形状/锁字面量的用例要注释写清它在防哪类回归（例：`test/recall-evals.test.js` 的 signals 形状锁）。
-9. **面板配色走 `--mneme-*` 语义色层**：宿主 `label-tertiary` / `label-dimmed` 是分隔线/占位符用的低对比层，**不是正文色**，直接拿来当 `color` 会在浅色或深色主题下掉到 AA 以下（#178 实测 70 条）。正文与图形一律用 `.mneme-x,.mneme-overlay,.mneme-triggerwrap,.mneme-topentry` 上定义的语义变量；新增或改动颜色后 `test/contrast.test.js` 会自动重算全部 `color` 声明的对比度（解析不出的颜色记失败，不静默跳过），并锁死「引用的 `--dsw-*` 必须真实存在」「四个渲染根一个不少」「图形色按 3:1」「虚线边不得靠 `opacity` 区分」。
+9. **新路由必须声明 `policy`**（`open` / `token` / `token-write`）：`src/api.js` 的 `createRouteRegistrar` 对漏声明与重复路径直接抛错，插件起不来。归完类同步 `SECURITY.md` 的安全模型表——那张表是代码的投影，不是愿望清单；
+10. **面板配色走 `--mneme-*` 语义色层**：宿主 `label-tertiary` / `label-dimmed` 是分隔线/占位符用的低对比层，**不是正文色**，直接拿来当 `color` 会在浅色或深色主题下掉到 AA 以下（#178 实测 70 条）。正文与图形一律用 `.mneme-x,.mneme-overlay,.mneme-triggerwrap,.mneme-topentry` 上定义的语义变量；新增或改动颜色后 `test/contrast.test.js` 会自动重算全部 `color` 声明的对比度（解析不出的颜色记失败，不静默跳过），并锁死「引用的 `--dsw-*` 必须真实存在」「四个渲染根一个不少」「图形色按 3:1」「虚线边不得靠 `opacity` 区分」。
 
 ## 闸门清单
 
