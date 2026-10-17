@@ -1152,7 +1152,8 @@ export function retirementProposals(pipeline, { runs = [], now = Date.now(), obs
       title: s.title,
       because: s.because,
       effect: s.effect,
-      cause: s.cause,
+      // cause 只有 rework-path 有；其余 kind 不带 undefined 键（消费方 deepEqual 会看到多余键）
+      ...(s.cause ? { cause: s.cause } : {}),
       ...ask
     };
   });

@@ -1941,10 +1941,10 @@ test("GET /api/dsh-mneme/pipeline 带观察旁挂：observationsById 真的进�
     assert.ok(row, "工作流要出现在清单里");
     assert.ok(data.pipeline, "选中投影要存在");
     // F1 的直接断言：观察旁挂真的喂进了 suggestions 的判据（修复前 observationsById
-    // 恒为 {}——ReferenceError 被 catch 吞掉，观察永远空）。可观测面：S1 声明
-    // tool=npm test、账本确认走过 1 次、观察里 npm test 出现过 4 次 → **无矛盾**，
-    // 不该冒 fix-step-tool；观察里再放一条「声明之外的命令」也不影响这条正向断言。
-    // 反向（观察为空时 fix-step-tool 也不该冒）由 pipeline.test.js 的判据锁管。
+    // 恒为 {}——ReferenceError 被 catch 吞掉，观察永远空）。
+    // 观察里只写了 git push，而 S1 声明 tool=npm test 且账本确认走过 1 次 → 矛盾
+    // 成立，fix-step-tool 必须冒头（下方正向锁）；观察为空时它不该冒，那是
+    // pipeline.test.js 的判据锁。
     // runsState 是账本健康度（RUNS_STATES: absent/empty/ok/partial/broken），
     // 不是节点状态——账本一行合法 run 即为 ok。节点级 trusted 由 deriveState 管，
     // 在 summarizePipeline 的 perNode 里，这里不重复锁。
