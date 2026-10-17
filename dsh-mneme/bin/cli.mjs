@@ -19,8 +19,14 @@ const CLI_NAME = 'dsh-mneme';
 const DEFAULT_URL = 'http://127.0.0.1:8790';
 const CONFIG_DIR = path.join(os.homedir(), '.dsh-mneme');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'cli.json');
-const MEMORY_TYPES = ['preference', 'project', 'decision', 'summary', 'history'];
-const SEARCH_MODES = ['keyword', 'vector', 'auto'];
+// 与 src/store.js 的 TYPES 对齐（CLI 是零依赖 HTTP 客户端，不 import 服务端
+// 模块，所以这里是手写字面量）。document 是唯一例外：它只能经
+// memory_register_document 铸造，saveWithDedupe 会拒绝旁路写入，所以不作为
+// --type 的选项——test/cli-enums.test.js 锁住「差值恰好是 document」。
+const MEMORY_TYPES = ['preference', 'project', 'decision', 'history', 'summary', 'pattern', 'rejected_solution', 'pitfall', 'constraint'];
+// hybrid：API 的 searchMemories 支持（向量先、关键词补位、双路命中做分数混合，
+// 见 src/api.js 的 mode 注释）。此前漏列，search --mode hybrid 会被客户端自己拒掉。
+const SEARCH_MODES = ['keyword', 'vector', 'auto', 'hybrid'];
 const REQUEST_TIMEOUT_MS = 10_000;
 
 function readPkgVersion() {

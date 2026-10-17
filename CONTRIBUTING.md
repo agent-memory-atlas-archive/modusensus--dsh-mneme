@@ -109,6 +109,10 @@ Common scripts (all run under `dsh-mneme/`):
 - Commits whose author email resolves to **someone else's GitHub account**, or that cannot be linked to you at all, **will not be merged**: unattributed code means nobody owns the responsibility when review questions or regressions arrive.
 - You are expected to participate in review and answer questions about your own code — attribution is what makes that possible.
 
+**No co-author trailers.** A commit message must not carry `Co-Authored-By:` at all — not for a person, not for a bot, not for an AI tool — and no `Generated with …` tool signature either. The author line is the only attribution mechanism here.
+
+> Effective 2026-09-19. Earlier history is **not** rewritten: a handful of pre-rule commits carry `Co-Authored-By: Claude` trailers, and they stay as they are — rewriting public history to satisfy a later rule is worse than the trailers themselves.
+
 ---
 
 ## Contributor Workflow: Issue → Claim → PR

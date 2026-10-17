@@ -1,6 +1,10 @@
 name: Security
 
-# 安全扫描：只做「注释级提醒」不拦合并（跑几周没误报再收紧为 fail）。
+# 安全扫描的姿态（2026-10 审计后改口径）：gitleaks 与 dependency-review 一红，
+# job 就是红的；但「红」≠「拦合并」——只有进了 main 的 required status checks
+# 才会真的挡住 PR。这条区别写在注释里而不是只靠印象：本轮把两者加进 required
+# checks 之前，任何一次安全告警都只是标签页里的一条记录。
+# osv-scanner 现在也 fail-on-vuln=true（lockfile 有已知漏洞即红），不再只当提醒。
 # 组成：
 #   1. gitleaks         —— 密钥泄露扫描（NPM_TOKEN 等一旦进历史就完了，这是最便宜的保险）
 #   2. dependency-review —— PR 依赖 diff：新引入依赖的已知漏洞 / 投毒包举报（OSV）
@@ -40,7 +44,8 @@ jobs:
         with:
           fail-on-severity: moderate
 
-  # 官方 reusable workflow：扫 lockfile、SARIF 传 Security 标签页；fail-on-vuln=false = 纯提醒
+  # 官方 reusable workflow：扫 lockfile、SARIF 传 Security 标签页；fail-on-vuln=true = 有已知漏洞即红
+# （2026-10 审计前它是 false，只上传 SARIF 不拦；lockfile 当时 0 漏洞，所以打开没有存量噪音）
   osv-scanner:
     if: github.event_name == 'push'
     permissions:
@@ -49,6 +54,6 @@ jobs:
       security-events: write
     uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.6.0
     with:
-      fail-on-vuln: false
+      fail-on-vuln: true
       scan-args: |-
         -r ./dsh-mneme

@@ -23,6 +23,12 @@ import { parseReclaimJson, readReclaimFields, reclaimReply, RECLAIM_UNAVAILABLE 
 const DEFAULT_PORT = 8790;
 const DEFAULT_HOST = "127.0.0.1";
 const MAX_PORT_ATTEMPTS = 20;
+// 请求体与分页上界（防御，不是功能）：与宿主内 api.js 的 MAX_REQUEST_BODY_BYTES /
+// MAX_PAGE_LIMIT / MAX_SEARCH_TOP_K 同值同义——两张数据面的口径必须一致，否则
+// 「从哪张脸进来」会决定一次请求能吃掉多少内存。
+const MAX_REQUEST_BODY_BYTES = 4 * 1024 * 1024;
+const MAX_PAGE_LIMIT = 1000;
+const MAX_SEARCH_TOP_K = 200;
 
 /**
  * Listen with automatic EADDRINUSE recovery. Tries the configured port, then
@@ -86,13 +92,35 @@ function isAuthorized(req, apiToken) {
   return timingSafeEqual(Buffer.from(token), Buffer.from(apiToken));
 }
 
-/** Collect the request body as text (tolerant of transport errors). */
-function readBody(req) {
+/**
+ * Collect the request body as text, or null when it exceeds the cap.
+ *
+ * 超限时**必须回 null 而不是空串**：空串经 parseBody 变成 {}，而 /profile、
+ * /rules、/persona 的 PUT 会把「字段缺失」当成「用户要清空」——一个 5 MiB 的
+ * 请求就能把画像/规则/人格静默清掉。返回 null 让调用点在碰任何 store 之前
+ * 直接 413（2026-10 评审指出的数据损坏路径）。
+ * 连接不 destroy：调用方要能收到明确的 413，而不是被掐断。
+ */
+function readBody(req, res) {
   return new Promise((resolve) => {
     let body = "";
-    req.on("data", (chunk) => { body += chunk; });
-    req.on("end", () => resolve(body));
-    req.on("error", () => resolve(""));
+    let bytes = 0;
+    let overflow = false;
+    req.on("data", (chunk) => {
+      if (overflow) return;
+      bytes += chunk.length;
+      if (bytes > MAX_REQUEST_BODY_BYTES) {
+        overflow = true;
+        body = "";
+        sendJson(res, 413, { error: "payload-too-large", limit: MAX_REQUEST_BODY_BYTES });
+        return;
+      }
+      body += chunk;
+    });
+    req.on("end", () => resolve(overflow ? null : body));
+    // 超限后再来 transport error 也必须保留超限状态：否则调用点会拿着空串
+    // 继续往 store 写（PUT /persona 把 "" 解析成 {}，覆盖既有设置）。
+    req.on("error", () => resolve(overflow ? null : ""));
   });
 }
 
@@ -333,7 +361,8 @@ export function createStandaloneApi({ service, store, config = {}, logger, setti
       // 形状判定在 setPersona 内（settings.js 双形兼容：单对象=合并 default、
       // 多卡=全量替换）；坏 JSON 回 400（与 /memories 写路径同口径）。
       if (req.method === "PUT" && pathname === "/persona") {
-        void readBody(req).then((text) => {
+        void readBody(req, res).then((text) => {
+          if (text === null) return;
           let body;
           try {
             body = JSON.parse(text || "{}");
@@ -364,7 +393,8 @@ export function createStandaloneApi({ service, store, config = {}, logger, setti
       //     internal /api/dsh-mneme/list) ------------------------------------
       if (req.method === "GET" && pathname === "/memories") {
         const type = url.searchParams.get("type") ?? undefined;
-        const limit = Number(url.searchParams.get("limit") ?? 50);
+        // 上界是防御：limit 直接进 SQL LIMIT（见 MAX_PAGE_LIMIT 注释）。
+        const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), MAX_PAGE_LIMIT);
         const offset = Number(url.searchParams.get("offset") ?? 0);
         const order = url.searchParams.get("order") ?? undefined;
         const minRaw = url.searchParams.get("minImportance");
@@ -415,7 +445,8 @@ export function createStandaloneApi({ service, store, config = {}, logger, setti
         // 整个异步回调套 try/catch：service 抛错不能变成未处理拒绝（Node 默认
         // 策略下会终止宿主进程）或悬着不回的请求（外层同步 try 捕不到这里）。
         if (req.method === "PUT") {
-          void readBody(req).then(async (text) => {
+          void readBody(req, res).then(async (text) => {
+            if (text === null) return;
             try {
               await handlePutBody(res, service, logger, id, text);
             } catch (error) {
@@ -431,7 +462,8 @@ export function createStandaloneApi({ service, store, config = {}, logger, setti
 
       // --- POST /memories: save with title-dedupe (safer than raw save) ------
       if (req.method === "POST" && pathname === "/memories") {
-        void readBody(req).then((text) => {
+        void readBody(req, res).then((text) => {
+          if (text === null) return;
           let body;
           try {
             body = JSON.parse(text || "{}");
@@ -519,7 +551,8 @@ export function createStandaloneApi({ service, store, config = {}, logger, setti
       // /api/dsh-mneme/maintenance/reclaim 共用 src/reclaim-http.js，两张皮只有鉴权
       // 与路径不同。这条曾经是整段复制的，于是面板侧修好之后这边还停在旧形态（#411）。
       if (req.method === "POST" && pathname === "/maintenance/reclaim") {
-        void readBody(req).then((text) => {
+        void readBody(req, res).then((text) => {
+          if (text === null) return;
           const parsed = parseReclaimJson(text);
           if (!parsed.ok) {
             sendJson(res, 400, { error: parsed.error });
@@ -552,7 +585,8 @@ export function createStandaloneApi({ service, store, config = {}, logger, setti
       // 显式收 dir（插件没有工作区根目录概念，不猜路径）；确定性解析零 LLM；
       // 幂等骑 saveWithDedupe 的 (type, title, scope) 去重 + _overwrite 刷新。
       if (req.method === "POST" && pathname === "/bootstrap") {
-        void readBody(req).then((text) => {
+        void readBody(req, res).then((text) => {
+          if (text === null) return;
           let body;
           try {
             body = JSON.parse(text || "{}");
@@ -585,7 +619,8 @@ export function createStandaloneApi({ service, store, config = {}, logger, setti
       // --- GET /search: unified recall pipeline (keyword + vector + BM25) ----
       if (req.method === "GET" && pathname === "/search") {
         const q = url.searchParams.get("q") ?? "";
-        const limit = Number(url.searchParams.get("topK") ?? url.searchParams.get("limit") ?? 20);
+        // 上界是防御：topK 直接进召回（见 MAX_SEARCH_TOP_K 注释）。
+        const limit = Math.min(Number(url.searchParams.get("topK") ?? url.searchParams.get("limit") ?? 20), MAX_SEARCH_TOP_K);
         const mode = url.searchParams.get("mode") ?? "auto";
         const rerank = url.searchParams.get("rerank") !== "false";
         const occurredFrom = url.searchParams.get("occurred_from") ?? null;
@@ -630,7 +665,7 @@ export function createStandaloneApi({ service, store, config = {}, logger, setti
       if (req.method === "GET" && pathname === "/context") {
         const q = (url.searchParams.get("q") ?? "").trim();
         const maxItemsRaw = Number(url.searchParams.get("topK") ?? url.searchParams.get("limit") ?? 5);
-        const maxItems = Number.isInteger(maxItemsRaw) && maxItemsRaw > 0 ? maxItemsRaw : 5;
+        const maxItems = Number.isInteger(maxItemsRaw) && maxItemsRaw > 0 ? Math.min(maxItemsRaw, MAX_SEARCH_TOP_K) : 5;
         // threshold 是 importance 阈值（injectCandidates 语义），与 /search 的
         // 相似度 threshold 同名不同义——文档已点名，勿混。
         const thresholdRaw = Number(url.searchParams.get("threshold") ?? 3);

@@ -43,6 +43,7 @@
 |---|---|---|---|
 | `writeAdmission.enabled` | `false` | 跑第 1 级确定性判据：空白 / 纯噪声 + 密钥 / PII（判据来源是 #164 A2，经 `sensitiveScan` 注入） | 关 = 不判定、不拒绝，`evaluate` 返回与只计量阶段逐字段一致。命中 → 审计行带 `metadata.deny` |
 | `writeAdmission.enforce` | `false` | 命中时真的拒绝（`store.save` 之前返回） | 关 = 仅告警：判据照跑、审计照留、写入不拦（读审计时「`deny` 非空且 `decision=allow`」即这一档的指纹）。被拒写入不落库、不通知、不排嵌入，`memory_save` 返回 `action:"denied"` + `reason` |
+| `sensitiveScanEnabled` | `false` | A2 密钥 / PII 判据的来源（`sensitive-scan.js`）。开 = 判定结果可被写入准入消费；只覆盖带 sessionKey 的写入路径 | 关 = 扫描器不参与，`writeAdmission` 第 1 级只剩空白/噪声判据。**经 MCP / 8790 / `/import` 的写入不带 sessionKey，不进这道闸**（`write-admission.js` 的文件头注释点名了这条边界） |
 
 第 1 级的判据面刻意收窄：**去重键命中不进第 1 级**（归 write-update 放行——同步近重复门跑在异步矛盾检测之前会把本该被裁决的矛盾直接拒掉），G1/G2 阈值也只是计量。两个键都走 feature_flags 白名单（面板可启停）。
 
@@ -114,6 +115,8 @@
 | `hotMemoryRounds` | `5` | 热记忆覆盖最近几轮对话（≤50） | — |
 | `hotMemoryMaxTokens` | `2000` | 热记忆块 token 上限（200–32000） | — |
 | `escapePromptVariables` | `true` | 注入内容连续花括号转义（#162） | 关 = 原样透传（DSH interpolate 可能 throw） |
+| `injectTimePrefix` | `false` | 对话开始注入一次当前时间（#34，v0.7.11 误删后随 #333 恢复） | opt-in；格式与键名与 v0.7.2 一致，存量 feature_flags 恢复即生效 |
+| `personaEnabled` | `false` | 人格段：用户自写的一小段常驻注入文本 | opt-in；只是轻量常驻文本、不引入重型后台路径，故不进 `LIGHT_MODE_OFF` |
 
 ## 巩固（autoDream）
 
@@ -223,6 +226,21 @@
 | `rerankScoreThreshold` | `0.1` | 重排分数阈值 | — |
 | `rerankDtype` | `q8` | 量化档（#188） | 非法值由 transformers 抛出 → 重排降级告警 |
 
+## 图谱（graph，opt-in，#24）
+
+图谱四条链路都依赖实体抽取产出（`entityExtractionEnabled`），默认全关；lightMode 把前四个布尔键一并强制关。级联与预算键只是阈值，跟着开关走。
+
+| 键 | 默认 | 作用 | 开启后果 / 冲突 |
+|---|---|---|---|
+| `graphAnchoringEnabled` | `false` | 块1 图谱锚定：以查询命中的实体为种子沿关系表级联扩散（默认深度 2） | opt-in；关 = 与 #219 单跳轴逐字节一致；需 `entityRecallEnabled` 之上再开 |
+| `graphSeedCap` | `12` | 锚定种子集上限（1–30） | 只影响一次扩散的宽度 |
+| `graphCascadeDepth` | `2` | 级联深度（1–3） | 深度与召回面线性相关，3 容易把远邻拉进来 |
+| `graphWeightEnabled` | `false` | 块2 边权重演化：被寻回路径的边权重抬升（只加不减、封顶 1.0） | opt-in；关 = 边初值纯由建边来源决定 |
+| `graphWeightDelta` | `0.1` | 单次有效触达的抬升幅度（0–1） | 与其他 graph 开关无关的纯阈值 |
+| `graphPassiveConfirm` | `false` | 块4 被动确认：heat 触达（召回/注入）即给挂联关系边抬一格 | opt-in；关 = 零行为变化 |
+| `graphInjectHint` | `false` | 块3 关联提示标注：图召回候选在注入文本里以「[检索线索] …」标出 | 关 = 只参与排序、不改变注入块构成（保守档） |
+| `graphInjectBudget` | `1` | 图召回候选在注入块里的独立预算（0–5 条） | 不占 `maxInjectedItems` 名额；0 = 关闭 |
+
 ## 热度
 
 | 键 | 默认 | 作用 | 开启后果 / 冲突 |
@@ -242,6 +260,8 @@
 | `externalApiHost` | `127.0.0.1` | 绑定地址 | 改成非回环 = 把整个记忆库暴露给网络，自负其责 |
 | `disableMemorySearch` | `false` | 对模型隐藏 `memory_search` 工具（v0.8.5） | 慢/轻量模型的工具往返节流；隐藏即不可调 |
 | `disableMemoryArchive` | `false` | 对模型隐藏 `memory_archive` 工具 | 同上 |
+| `actionPipelineEnabled` | `false` | M.O.（手法）只读视图的门控：做法图谱 + 对话行结算卡 | opt-in beta；只是纯 UI 入口、不引入重型后台路径，故不进 `LIGHT_MODE_OFF`。写账另有独立的执行记账键（`/mo-run`），看图 ≠ 写账 |
+| `actionRunEnabled` | `false` | M.O. 执行记账：`/mo-run` 开一次执行窗口，窗口内命令执行才可能被记成一条 run | opt-in beta；挂在热路径（每个会话事件都过一次监听），故 `LIGHT_MODE_OFF` 里有它 |
 
 ## 运行时与本地模型
 
@@ -260,6 +280,9 @@
 | `runtimeDir` | `""` | 自管运行时目录（transformers + onnxruntime 闭包，#131） | 空 = `~/.dsh/mneme/runtime`；把重依赖挪出宿主 profile 的依赖图 |
 | `runtimeTarballDir` | `""` | 本地 `.tgz` 离线取件目录 | 有货优先于联网（弱网下装 onnxruntime-node 用） |
 | `runtimeMirror` | `""` | registry 镜像前缀（如 `https://npmmirror.com/mirrors/npm/`） | 空 = manifest 里的官方地址 |
+| `reindexMaxPerBoot` | `500` | 启动期向量回填的单次上限（原先硬编码 500） | `0` = 不限、本次跑完整个积压（4k 行积压靠重启九次才清空的旧行为就是被这个上限卡住的） |
+| `reindexBatchSize` | `10` | 回填批大小（1–64） | 越大单批 token/耗时越高 |
+| `reindexRateLimitMs` | `200` | 回填批间隔毫秒（限速） | 0 = 不限速 |
 
 ## lightMode 强制关闭清单（`LIGHT_MODE_OFF`）
 
@@ -269,6 +292,8 @@
 `entityExtractionEnabled` · `autoDream` · `sleepModeEnabled` · `rerankEnabled` ·
 `autoReindexOnBoot` · `hybridInject` · `injectGuidanceEnabled` · `searchSemanticDedup` ·
 `selectiveInjectEnabled` · `bm25SearchEnabled` · `entityRecallEnabled` ·
+`graphAnchoringEnabled` · `graphWeightEnabled` · `graphInjectHint` · `graphPassiveConfirm` ·
+`actionRunEnabled` ·
 `dreamNarrativeEnabled` · `documentMemoryEnabled` · `heatEnabled` · `continuityRescueEnabled` ·
 `preInjectGate.enabled`（#380） · `distillRecords.enabled`（#399）
 
