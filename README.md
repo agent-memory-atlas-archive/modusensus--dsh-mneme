@@ -10,7 +10,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3E63DD?style=flat-square" alt="license"></a>
   <a href="https://github.com/slow-stack/mneme/actions"><img src="https://img.shields.io/github/actions/workflow/status/slow-stack/mneme/ci.yml?style=flat-square&label=CI" alt="CI"></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-22%2B-3E63DD?style=flat-square&logo=nodedotjs&logoColor=white" alt="node"></a>
-  <a href="https://github.com/slow-stack/mneme"><img src="https://img.shields.io/badge/tests-2011%20passed-3E63DD?style=flat-square" alt="tests"></a>
+  <a href="https://github.com/slow-stack/mneme"><img src="https://img.shields.io/badge/tests-2045%20passed-3E63DD?style=flat-square" alt="tests"></a>
   <a href="https://codecov.io/gh/slow-stack/mneme"><img src="https://img.shields.io/codecov/c/github/slow-stack/mneme/main?style=flat-square" alt="coverage"></a>
   <a href="https://github.com/awesome-dsh-plugin/awesome-dsh-plugin"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="Awesome"></a>
 </p>
@@ -201,7 +201,7 @@ dsh-mneme-serve          # 默认 ~/.dsh/memory + 127.0.0.1:8790
 | **v0.5** | 召回融合与记忆可视化：BM25 + 图谱 + 热记忆 | ✅ |
 | **v0.6** | 会话生命周期：删对话 ≠ 删记忆 | ✅ |
 | **v0.7** | 自进化记忆：热度衰减 + 睡眠双保护 + 桌面端工作台/功能开关 | ✅ |
-| **v0.8** | 作用域隔离（agent/workspace 双维隔离 + 检索加权 + opt-in 硬过滤）+ 冲突队列人工裁决 + 归属显式声明 + 生态化（stdio MCP server / 图召回轴 / 冷启动 / 注入截断与状态条 / 蒸馏可靠性 / 注入形态与 agent 主动整理接口 / 配置说明与 issue 模板） | ✅ 已发布（至 v0.8.9） |
+| **v0.8** | 作用域隔离（agent/workspace 双维隔离 + 检索加权 + opt-in 硬过滤）+ 冲突队列人工裁决 + 归属显式声明 + 生态化（stdio MCP server / 图召回轴 / 冷启动 / 注入截断与状态条 / 蒸馏可靠性 / 注入形态与 agent 主动整理接口 / 配置说明与 issue 模板） | ✅ 已发布（至 v0.8.16） |
 
 > 完整逐小版本说明见 [CHANGELOG](dsh-mneme/CHANGELOG.md)。
 
@@ -209,7 +209,7 @@ dsh-mneme-serve          # 默认 ~/.dsh/memory + 127.0.0.1:8790
 
 ```bash
 cd dsh-mneme && npm install
-npm test        # 2011 个测试
+npm test        # 2045 个测试
 npm run stress  # 三轴线压测
 npm run sync    # src → lib 同步
 ```
@@ -227,6 +227,18 @@ autoDream 的理念溯源（理念借鉴、实现原创）：
 - **cc-haha**：早期实现思路的参照之一。
 
 在上述工作之上，dsh-mneme 做了自己的工程发展：K-Means++ 聚类预分组、类型化决策清单（keep / merge / archive / conflict / update，及 sleep 侧 supersede / differentiate）与可回放的 sha256 摘要审计链（`dream_runs` / `receipt_chain`）。如有遗漏的灵感来源，欢迎提 issue 指出。
+
+## 📚 相关研究
+
+dsh-mneme 的机制设计与下列公开研究相互印证（以下引用均逐一核对过 arXiv 收录页；机制对应关系为我们自己的映射，非原论文观点）：
+
+- **在线写入 + 离线巩固**：[Dual-Layer Agentic Memory with Fast Write Routing and Slow Consolidation](https://arxiv.org/abs/2608.22215)（arXiv:2608.22215）——与 autoDream 的「快写慢巩固」分工同构。
+- **热度衰减与访问强化**：[FadeMem](https://arxiv.org/abs/2601.18642)（arXiv:2601.18642）——heat 记忆热度模型（指数衰减 × 访问强化 × 重要性调制）的学术近亲。
+- **冲突裁决与状态追踪**：[StateMemBench](https://arxiv.org/abs/2608.19652)（arXiv:2608.19652）——记忆系统追踪演化状态的考卷；C1 冲突裁决（supersede 后不再引用旧值）以其为验收靶子。
+- **何时该忘 / scope 门控**：[PersistBench](https://arxiv.org/abs/2602.01146)（arXiv:2602.01146）；呈现层缓解见 [Structured Memory](https://arxiv.org/abs/2608.08300)（arXiv:2608.08300）——scope 语义域门控的问题出处与零契约变更改法。
+- **领域全景**：[Write–Manage–Read 综述](https://arxiv.org/abs/2603.07670)（arXiv:2603.07670）——「写入 / 管理 / 读取」三段式与插件整体形状互证。
+- **数月尺度的可靠性工程**：[Memory as Infrastructure](https://arxiv.org/abs/2609.05510)（arXiv:2609.05510）——与 sha256 审计链、fail-safe 降级同属「记忆即基础设施」路线。
+- **相邻系统（对照）**：[Zep](https://arxiv.org/abs/2501.13956)（时序知识图谱）、[Mem0](https://arxiv.org/abs/2504.19413)（生产级抽取式记忆）、[Hindsight](https://arxiv.org/abs/2512.12818)（retain / recall / reflect 三操作）走「写入时 LLM 抽取 + 向量/图检索」路线；dsh-mneme 的差异点在于：巩固由 LLM 参与但产物全程留痕可回放，冲突冻结待人工复核，默认离线。
 
 <a name="english"></a>
 
@@ -410,7 +422,7 @@ Community projects that wire mneme into more platforms — not part of this repo
 | **v0.5** | Recall fusion & visualization: BM25 + graph + hot memory | ✅ |
 | **v0.6** | Session lifecycle: delete session ≠ delete memory | ✅ |
 | **v0.7** | Self-evolving memory: heat decay + sleep dual-protection + desktop workbench/feature toggles | ✅ |
-| **v0.8** | Scope isolation (agent/workspace stamping + retrieval weighting + opt-in hard filter) + conflict review queue + explicit attribution + ecosystem (stdio MCP server / graph recall axis / cold-start bootstrap / injection truncation & status bar / distill reliability / injection shaping & agent-driven organize / configuration reference & issue templates) | ✅ Released (up to v0.8.9) |
+| **v0.8** | Scope isolation (agent/workspace stamping + retrieval weighting + opt-in hard filter) + conflict review queue + explicit attribution + ecosystem (stdio MCP server / graph recall axis / cold-start bootstrap / injection truncation & status bar / distill reliability / injection shaping & agent-driven organize / configuration reference & issue templates) | ✅ Released (up to v0.8.16) |
 
 > Full per-minor-version changelog in [CHANGELOG](dsh-mneme/CHANGELOG.md).
 
@@ -418,7 +430,7 @@ Community projects that wire mneme into more platforms — not part of this repo
 
 ```bash
 cd dsh-mneme && npm install
-npm test        # 2011 tests
+npm test        # 2045 tests
 npm run stress  # three-axis stress test
 npm run sync    # src → lib sync
 ```
@@ -434,6 +446,18 @@ Provenance of the autoDream concept (ideas credited, implementation original):
 - **cc-haha**: an early reference for the implementation approach.
 
 On top of these, dsh-mneme adds its own engineering: K-Means++ cluster pre-grouping, a typed decision list (keep / merge / archive / conflict / update, plus supersede / differentiate on the sleep side), and a replayable sha256-digest audit chain (`dream_runs` / `receipt_chain`). If any source of inspiration is missing, please open an issue.
+
+## Related Research
+
+dsh-mneme's design echoes the following public research (every citation below has been verified against its arXiv page; the mechanism mappings are our own, not the papers' claims):
+
+- **Fast write + slow consolidation**: [Dual-Layer Agentic Memory](https://arxiv.org/abs/2608.22215) (arXiv:2608.22215) — mirrors autoDream's online-write / offline-consolidate split.
+- **Heat decay & access reinforcement**: [FadeMem](https://arxiv.org/abs/2601.18642) (arXiv:2601.18642) — academic kin of the heat model (exponential decay × access reinforcement × importance modulation).
+- **Conflict resolution & state tracking**: [StateMemBench](https://arxiv.org/abs/2608.19652) (arXiv:2608.19652) — a benchmark for tracking evolving state; C1 conflict adjudication (no stale reads after supersede) treats it as its acceptance target.
+- **When to forget / scope gating**: [PersistBench](https://arxiv.org/abs/2602.01146) (arXiv:2602.01146); presentation-layer mitigation in [Structured Memory](https://arxiv.org/abs/2608.08300) (arXiv:2608.08300).
+- **Field survey**: [Write–Manage–Read survey](https://arxiv.org/abs/2603.07670) (arXiv:2603.07670) — the write/manage/read taxonomy matches the plugin's overall shape.
+- **Months-scale reliability**: [Memory as Infrastructure](https://arxiv.org/abs/2609.05510) (arXiv:2609.05510) — the same "memory as infrastructure" school as the sha256 audit chain and fail-safe degradation.
+- **Adjacent systems (contrast)**: [Zep](https://arxiv.org/abs/2501.13956) (temporal knowledge graph), [Mem0](https://arxiv.org/abs/2504.19413) (production-grade extraction) and [Hindsight](https://arxiv.org/abs/2512.12818) (retain / recall / reflect) extract with LLM at write time and retrieve via vectors/graphs; dsh-mneme instead keeps consolidation replayable with a full audit trail, freezes conflicts for human review, and stays offline by default.
 
 ## 📜 License
 
