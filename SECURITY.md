@@ -24,16 +24,16 @@ The following security features are implemented and maintained in the project:
 
 | Feature | Description | Status |
 |---|---|---|
-| `apiToken` Authentication | All remote endpoints require `Authorization: Bearer <apiToken>` when a token is configured; comparison uses `crypto.timingSafeEqual` | ✅ Implemented |
+| `apiToken` Authentication | When a token is configured, **write** routes plus the sensitive reads (`/export`, `/external-api`, `/vector-config`, `/maintenance/*`) require `Authorization: Bearer <apiToken>`; comparison uses `crypto.timingSafeEqual`. Plain reads stay open by design — see [Security Model](#5-security-model-what-actually-protects-what) | ✅ Implemented |
 | `policyEpoch` Memory Governance | Bumping `policyEpoch` downgrades all prior `dream_runs` to historical evidence; their receipts no longer drive real-time memory decisions | ✅ Implemented |
 | `conflictFreezeEnabled` Conflict Freeze | Conflicting memories are not auto-merged; they are flagged as pending human review, preserving data integrity | ✅ Implemented |
 | CAS (Compare-and-Swap) Guard | Prevents concurrent write conflicts; ensures atomic write operations | ✅ Implemented |
 | Digest Baseline Audit | Memory updates are compared against digest baselines to detect unauthorized changes | ✅ Implemented |
 | `failure_memories` Audit Trail | Every failed write operation is logged for forensic analysis | ✅ Implemented |
 | `recall_run` Search Audit | Every search operation is recorded with timestamp and query metadata | ✅ Implemented |
-| Local-First Data Processing | All embeddings, reranking, and memory consolidation run locally; no data leaves the device | ✅ Implemented |
-| No Telemetry | No analytics, no remote logging, no network requests by design | ✅ Implemented |
-| Query Sanitization | LIKE-query escaping, bounded paging, and Markdown mirror escaping prevent injection and malformed input | ✅ Implemented |
+| Local-First Data Processing | Local by default; **not** zero-network: with an OpenAI-compatible embedder (`embedProvider`, default `openai`) memory text is POSTed to the configured endpoint, and consolidation/summarization send text to the host LLM. Local model downloads (runtime) and the npm registry version check are the only other outbound calls | ⚠️ Conditional |
+| No Telemetry | No analytics and no remote logging of memories; the plugin does make the outbound calls listed above (version check, model download, configured embedder/LLM) | ✅ Implemented (no telemetry) |
+| Query Sanitization | LIKE-query escaping, **bounded paging** (`limit` ≤ 1000, `topK` ≤ 200, request body ≤ 4 MiB), and Markdown mirror escaping prevent injection, memory amplification and malformed input | ✅ Implemented |
 | `entityExtractionEnabled` Opt-In Entity Extraction | Entity extraction is opt-in via configuration (default: off), minimizing data processing by default | ✅ Implemented |
 | Graceful Degradation | System falls back to keyword search on component failure; no crash | ✅ Implemented |
 | Human-Editable Mirrors | All memories mirrored to Markdown files; users can verify and reconstruct data | ✅ Implemented |
@@ -50,8 +50,8 @@ The following security features are implemented and maintained in the project:
 Since v0.7.12 the plugin can optionally start its own HTTP server (`externalApiEnabled`, default **off**) so other plugins, CLIs, and desktop tools can read and write memories without going through the DSH host port.
 
 - **Loopback by default**: the server binds `127.0.0.1:8790` (`externalApiHost` / `externalApiPort`, or persisted panel settings). Rebinding to a non-loopback address exposes the store to your network and is an explicit operator decision.
-- **Token authentication**: every route except `GET /health` requires `Authorization: Bearer <token>`; the token is auto-generated on first use, persisted in the plugin settings store, verified with `timingSafeEqual`, and can be rotated from the web panel (Settings -> External API).
-- **Surface**: read/write on memories only (`GET/POST/DELETE /memories`, `GET /memories/:id`, `GET /search`, `GET /status`). No profile, rules, commands, or configuration endpoints are exposed; writes go through the same dedupe + quality-filter path as in-conversation saves.
+- **Token authentication**: every route except `GET /health` requires `Authorization: Bearer <token>`; the token is auto-generated on first use, persisted in the plugin settings store and verified with `timingSafeEqual`. To rotate it, clear the persisted value (settings kv key `external_api`) and let the next boot mint a new one — there is no rotate endpoint yet.
+- **Surface**: memories read/write (`GET/POST /memories`, `GET/PUT/DELETE /memories/:id`, `GET /search`, `GET /context`, `GET /status`), plus profile/rules **reads** (`GET /profile`, `GET /rules`), `POST /bootstrap` and the reclaim routes (`GET/POST /maintenance/reclaim`). Writes go through the same dedupe + quality-filter path as in-conversation saves. The full route list lives in [docs/DAEMON.md](docs/DAEMON.md).
 - **CLI**: `bin/cli.mjs` is a thin client over this API and stores its credentials in `~/.dsh-mneme/cli.json` - treat that file like any credential file.
 
 ---
@@ -146,11 +146,16 @@ We follow the [CVSS v3.1](https://www.first.org/cvss/v3.1/specification-document
 - Machine writes vs. human edits are distinguished via digest baselines
 - Users can fully reconstruct the database from Markdown mirrors alone
 
-### 5. Minimal Remote Surface
+### 5. Security Model: What Actually Protects What
 
-- Remote API endpoints are opt-in: they require a configured `apiToken`
-- When a token is set, every remote request is checked with a timing-safe comparison
-- When no token is set, remote endpoints are effectively disabled; all processing stays local
+The token is a lock on the **write** surface, not a wall around the whole API.
+
+- **The real boundary is loopback + the DSH host listener.** The host-side routes (`/api/dsh-mneme/*`) are mounted on the DSH port, which binds `127.0.0.1` and is fenced by the host against DNS rebinding and cross-site browser requests. That fence does **not** establish identity: any local process, and any page running in the host's own origin, is inside the perimeter.
+- **Authentication is opt-in and fail-open.** `apiToken` defaults to empty; while it is empty, `isAuthorized()` returns true for every request — reads *and* writes. Setting a token gates the write routes and the sensitive reads; it does not gate plain reads.
+- **Open reads (no token even when one is configured)**: `GET /`, `/info`, `/version-check`, `/list`, `/recall-stats`, `/search`, `/semantic`, `/semantic/llm-audit`, `/semantic/llm-audit/stats`, `/semantic/graph/*`, `/entities`, `/memories/entities`, `/dream-status`, `/inject-status`, `/inject-preview`, `/pipeline`, `/candidates`, `/llm-providers`, plus the `GET` branches of `/profile`, `/rules`, `/features`, `/mode`, `/commands`. Treat them as readable by anything local.
+- **Gated routes (when a token is configured)**: all writes (`/create`, `/update`, `/delete`, `/import`, `/mode`, `/features`, `/commands`, `/conflicts/resolve`, `PUT /profile`, `PUT /rules`, `/vector-config`, `/vector-reindex`, `/runtime/provision`, `/maintenance/reclaim`, `/test-model`, `/health`) and the sensitive reads `/export` and `/external-api`.
+- **The standalone data plane** (`127.0.0.1:8790`) is the opposite shape: every route except `GET /health` requires its own Bearer token. Pointing `externalApiHost` at a non-loopback address therefore turns it into a plaintext, token-only HTTP surface — an explicit operator decision.
+- **Consequence**: if you expose the plugin beyond loopback (reverse proxy, non-loopback bind), set `apiToken` *and* check that the plain reads above are acceptable to expose — they are not covered by it.
 
 ---
 
@@ -322,9 +327,6 @@ dsh-mneme:
 
   # Coding-memory distillation is off by default (data minimization)
   codingRetrospect: false
-
-  # Disable session lifecycle if you do not need session-scoped disposal
-  sessionLifecycleEnabled: false
 
   # Disable sleep mode maintenance if you want zero background activity
   sleepModeEnabled: false
@@ -688,9 +690,6 @@ dsh-mneme:
 
   # 编码记忆蒸馏默认关闭（数据最小化）
   codingRetrospect: false
-
-  # 不需要会话级清理时可关闭会话生命周期
-  sessionLifecycleEnabled: false
 
   # 不需要后台维护时可关闭 Sleep Mode
   sleepModeEnabled: false

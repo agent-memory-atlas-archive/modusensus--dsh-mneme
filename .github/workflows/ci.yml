@@ -7,10 +7,11 @@ name: CI
 # 3. Codecov 只在 ubuntu+node24 一个分片跑一次（覆盖率无需每个组合都传）。
 # 4. node_modules 缓存（cache-dependency-path 指向子目录的 lockfile）。
 # 5. 宿主版本兼容腿 test-host-legacy：peer 声明的 0.1.x 两段各真跑一遍（见该作业注释）。
-# ⚠️ 需要 package.json 配合一处小改（跨平台通配符）：
-#    dsh-mneme/package.json 的 "test": "node --test test/*.test.js" 在 Windows 的 cmd 下
-#    不展开 glob。建议改为 "test": "node --test test/"（目录模式，全平台等价），
-#    "test:coverage" 同理（c8 node --test test/）。改动只影响脚本调用方式，用例不变。
+# 关于 test 脚本的跨平台通配符（2026-10 实测，别按旧建议改）：
+#    dsh-mneme/package.json 的 "test": "node --test test/*.test.js" 在 Windows cmd 下
+#    不展开 glob，但引号会把字面量交给 node，由 node 自己的 glob 展开（Node 22/24 皆可，
+#    本仓 windows 腿一直绿）。反过来，改成 "node --test test/" 在 Windows 上实测报
+#    MODULE_NOT_FOUND（Node v24.15.0），所以**不要**那样改。
 
 on:
   push:

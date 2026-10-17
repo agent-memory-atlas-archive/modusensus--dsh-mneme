@@ -3,7 +3,7 @@
 - **日期**：2026-08-15
 - **状态**：✅ 已实现（本地 Embedding / Rerank / 聚类随 v0.2+ 落地；本文档转为历史设计存档，当前能力以 [README](../README.md) 正文为准）
 - **范围**：为 dsh-mneme 增加"完全离线的语义记忆引擎"，覆盖本地 Embedding、Rerank 精排、autoDream 向量聚类三个阶段
-- **相关文档**：[本地模型部署指南](LOCAL_MODEL.md) · [从 v0.1 升级说明](MIGRATION.md)
+- **相关文档**：[本地模型部署指南](LOCAL_MODEL.md) · [全键配置参考](CONFIGURATION.md)
 
 ## 1. 背景与目标
 
@@ -59,7 +59,7 @@ scripts/
 docs/
 ├── SEMANTIC.md         # 本文档
 ├── LOCAL_MODEL.md      # 本地模型部署指南
-└── MIGRATION.md        # 从 v0.1 升级说明
+└── CONFIGURATION.md    # 全键配置参考
 ```
 
 ## 3. 搜索流水线
@@ -207,7 +207,7 @@ LocalEmbedder(ONNX) ──失败──► OllamaEmbedder ──失败──► O
 
 ## 7. 配置新增项
 
-见 [MIGRATION.md](MIGRATION.md) 完整表格。核心：`embedProvider`（`local` / `ollama` / `openai`，默认 `openai` 保持 v0.1 行为）、`localEmbedModel`、`localEmbedDimension`、`localEmbedDevice`、`localEmbedBatchSize`、`ollamaBaseUrl`、`ollamaModel`、`embedModelCacheDir`、`rerankEnabled`、`rerankModel`。
+见 [CONFIGURATION.md](CONFIGURATION.md) 的检索与运行时键表。核心：`embedProvider`（`local` / `ollama` / `openai`，默认 `openai` 保持 v0.1 行为）、`localEmbedModel`、`localEmbedDimension`、`localEmbedDevice`、`localEmbedBatchSize`、`ollamaBaseUrl`、`ollamaModel`、`embedModelCacheDir`、`rerankEnabled`、`rerankModel`。
 
 ## 8. 测试与基准
 

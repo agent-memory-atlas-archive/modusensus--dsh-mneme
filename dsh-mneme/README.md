@@ -61,6 +61,7 @@ dsh web
 | `memory_delete` | 删除记忆（按记忆 ID 精确删除） |
 | `memory_forget` | 抑制注入（降权不删除，可恢复） |
 | `memory_archive` | 归档/恢复记忆（v0.2.5；归档后隐藏于列表/搜索/注入/整理，`archived=false` 可恢复） |
+| `memory_register_document` | 登记 agent 产长文档的指针行（#230：摘要 + `doc_path` + evidence 落 `document` 类型；正文留在磁盘、由 agent 自管，注册口唯一，旁路写入被拒） |
 | `memory_runtime` | 本地推理运行时的状态 / 供给 / 校验（v0.7.32，自管运行时三档取件） |
 
 ### 自动注入 + 会话摘要
@@ -443,7 +444,9 @@ dsh web
 | `conflictFreezeMaxPending` | `100` | 冲突冻结队列最大挂起数（1-1000）：超出后不再入队（防队列无限膨胀） |
 | `escapePromptVariables` | `true` | 注入文本花括号转义（v0.8.0 恢复，issue #162）：注入边界把 `{{...}}` 转义，防止 hot memory / 记忆原文里的 Go template / Vue 语法触发宿主 interpolate 抛错卡死会话（v0.7.4 曾修复、v0.7.11 误删） |
 
-> 🔐 **API 安全**：DSH 无内置鉴权且默认仅监听 `127.0.0.1`。插件 API 默认开放（便于 Web 面板即装即用）。如需防护（如局域网暴露），在配置中设置 `apiToken`：写操作（画像/规则/命令）与密钥端点（`vector-config`、`vector-reindex`）需携带 `Authorization: Bearer <token>`（前端设置面板可填入同一 token），只读的 `list` / `search` / `semantic` 保持开放。`/api/dsh-mneme/vector-config` 返回的 `apiKey` 已掩码（`sk-***…`），存储仍保留明文供调用；前端回传空或掩码值表示"不改 key"。
+> 🔐 **API 安全**：DSH 无内置鉴权且默认仅监听 `127.0.0.1`。插件 API 默认开放（便于 Web 面板即装即用）——**未配 `apiToken` 时读和写都开放**，真正的围栏是回环 + 宿主监听器的 Host/Origin 校验（它防 DNS rebinding 与跨站浏览器请求，但不建立身份）。如需防护（如局域网暴露），在配置中设置 `apiToken`：此时**写操作**（新增/更新/删除/导入/画像/规则/命令/开关/开关计费类）与**敏感读**（`/export`、`/external-api`、`/vector-config`、`/vector-reindex`、`/maintenance/*`、`/runtime/provision`）需携带 `Authorization: Bearer <token>`（前端设置面板填同一个 token）；只读的 `list` / `search` / `semantic` / `inject-preview` 等**仍然开放**，不要把它们当成被 token 保护的面。`/api/dsh-mneme/vector-config` 返回的 `apiKey` 已掩码（`sk-***…`），存储仍保留明文供调用；前端回传空或掩码值表示"不改 key"。
+>
+> 安全模型全表（哪些路由免鉴权、为什么）见 [SECURITY.md](../SECURITY.md#5-security-model-what-actually-protects-what)。
 
 
 > ⚠️ **已知边界：极简模式（minimal agent preset）下不注入**（宿主设计，非插件缺陷）：minimal 预设的组合文件显式 `complete: true` + `includeRuntimeContext: false`——整条系统提示词被 persona 钉死、全部 runtime context 快照被压制，**记忆注入 / 用户画像 / hot memory 在极简模式会话中一律不送达模型**（宿主内置 context 同样消失）。判断与解法：会话头部显示「极简模式」即为该形态；需要记忆注入请改用标准模式（会话级切换，或 `~/.dsh/settings.yaml` 设 `agent-presets.default: standard`——注意 `--dump-config` 显示的是 bundle 默认值，会被用户层覆盖，不能反映实际生效值）；极简模式下的过渡方案是把画像/规则写入 `AGENTS.md`（agent-instructions 走 section 路径，不受该压制影响）。
@@ -474,6 +477,7 @@ dsh web
 | `GET` | `/search?q&mode=keyword\|vector\|hybrid\|auto&topK&occurred_from&occurred_to&agent_scope&workspace_scope` | 搜索（关键词 / 向量 / hybrid=向量领位关键词补位 / 自动）。scope 两参声明调用方身份（不传 = 不解析，行为与旧版一致；任一给出则 strictScope 硬过滤与 A2 软加权随之生效） |
 | `GET` | `/context?q&topK&threshold&agent_scope&workspace_scope` | 注入候选一站式聚合（issue #370，#363 承诺）：宿主注入管线 `injectCandidates` 全语义（优先级分层 / 编码门控 / heat / scope 软加权 / hybrid 语义路 / pin 前置）+ 画像 + 规则，返回 `{profile, rules, items, pinnedCount}` 结构化条目，不含渲染文本。`threshold` 是 **importance 阈值**（默认 3，与 `/search` 的相似度阈值同名不同义）；`topK` 默认 5（对齐宿主 `maxInjectedItems`）；scope 语义与 `/search` 同口径；跨轮轮换 / 热记忆 / 时间前缀不含（调用方自管）；recall_runs 注入分账与宿主注入同口径（#217 `mode='inject'`） |
 | `POST` | `/bootstrap` | 冷启动（v0.8.4）：从仓库目录反向构建初始记忆，body `{dir}` 必填；幂等（(type,title,scope) 去重 + `_overwrite` 原地刷新），零 LLM、必有产出 |
+| `GET`/`POST` | `/maintenance/reclaim` | 无损回收（#275 / #411，与面板同口径）：默认 dry-run，body 或 query 带 `confirm=true` 才真删；`vacuum` 只允许显式指定 |
 
 ### curl 示例
 
@@ -584,7 +588,7 @@ Claude Code 挂载示例（项目根 `.mcp.json`；token 在面板「设置 → 
 │  服务层：saveWithDedupe / injectCandidates        │
 │         / mergeHumanEdits / onWrite 钩子          │
 ├─────────────────────────────────────────────────┤
-│  模型接口：9 个工具 + 自动注入 + 会话摘要          │
+│  模型接口：10 个工具 + 自动注入 + 会话摘要         │
 ├─────────────────────────────────────────────────┤
 │  autoDream：阈值调度 → LLM 决策清单               │
 │            → 校验（fail-safe）→ 应用 → 摘要       │
@@ -602,7 +606,7 @@ src/
 ├── service.js        # 领域逻辑（去重合并、注入筛选、写入钩子、scope 加权/硬过滤、冲突队列）
 ├── scope.js          # 作用域解析（agentPreset + workspace registry 反查，issue #17）
 ├── config.js         # schemastery 配置 schema
-├── tools.js          # 9 个模型工具（defineTool）
+├── tools.js          # 10 个模型工具（defineTool）
 ├── inject.js         # systemPrompt.context 动态注入（含花括号转义）
 ├── summarize.js      # 会话结束 LLM 摘要
 ├── dream.js          # autoDream 调度 + runDream（LLM 决策 + 摘要）
