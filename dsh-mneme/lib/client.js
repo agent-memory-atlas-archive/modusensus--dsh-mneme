@@ -147,7 +147,11 @@ window.__ModuleLoader__.load({
       flame: [["path", { d: "M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" }]],
       // 意见与反馈入口的行首图标（Lucide 数据，同上 ISC 惯例内联）
       bug: [["path", { d: "m8 2 1.88 1.88" }], ["path", { d: "M14.12 3.88 16 2" }], ["path", { d: "M9 7.13v-1a3.003 3.003 0 1 1 6 0v1" }], ["path", { d: "M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6" }], ["path", { d: "M12 20v-9" }], ["path", { d: "M6.53 9C4.6 8.8 3 7.1 3 5" }], ["path", { d: "M6 13H2" }], ["path", { d: "M3 21c0-2.1 1.7-3.9 3.8-4" }], ["path", { d: "M20.97 5c0 2.1-1.6 3.8-3.5 4" }], ["path", { d: "M22 13h-4" }], ["path", { d: "M17.2 17c2.1.1 3.8 1.9 3.8 4" }]],
-      mail: [["rect", { width: "20", height: "16", x: "2", y: "4", rx: "2" }], ["path", { d: "m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" }]]
+      mail: [["rect", { width: "20", height: "16", x: "2", y: "4", rx: "2" }], ["path", { d: "m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" }]],
+      // star 是设置页鼓励入口的行首图标（Lucide 数据，同上 ISC 惯例内联）。
+      // Icon 对未注册的名字静默 return null——漏了它就是一行缺图标、闸门全绿，
+      // 所以这条表与用法必须同处出现（见 test/client.test.js 的图标名锁）。
+      star: [["polygon", { points: "12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" }]]
     };
     const Icon = ({ name, size = 16, className }) => {
       const parts = ICON_PATHS[name];
@@ -277,6 +281,22 @@ window.__ModuleLoader__.load({
         "memory.settings.profileHint": "写一段自我介绍（角色、背景、偏好），Agent 每轮对话都会自动带上。",
         "memory.settings.profileSave": "保存画像",
         "memory.settings.profileSaved": "画像已保存",
+        "memory.settings.persona": "人格定义（beta）",
+        "memory.settings.personaHint": "给这位 Agent 一张角色卡：名字、性格、回复要求。开关打开且下方「人格定义」总闸开启时，每轮对话都会注入。",
+        "memory.settings.personaName": "名字",
+        "memory.settings.personaNamePlaceholder": "例如：Amarre",
+        "memory.settings.personaPersonality": "性格设定",
+        "memory.settings.personaPersonalityPlaceholder": "例如：轻松幽默，讲难题时用类比帮用户快速理解",
+        "memory.settings.personaReplyStyle": "回复要求",
+        "memory.settings.personaReplyStylePlaceholder": "例如：先给结论再解释；用人在用的词，不用机制名",
+        "memory.settings.personaSave": "保存人格",
+        "memory.settings.personaSaved": "人格已保存",
+        "memory.settings.personaEnabledToggle": "启用这张人格卡",
+        "memory.settings.personaView": "Agent 眼中的你（注入生效文本）",
+        "memory.settings.personaViewHint": "以下是每一轮实际注入的用户画像与规则，只读。",
+        "memory.settings.personaViewEmpty": "画像与规则均为空——Agent 每轮只会看到记忆库。",
+        "memory.features.personaEnabled": "人格定义（beta）",
+        "memory.features.personaEnabled.hint": "把「设置 → 个性化」里的人格卡注入到每轮对话。默认关（beta）；总闸与人格卡内的开关同时打开才生效。",
         "memory.settings.rules": "规则",
         "memory.settings.rulesHint": "给 Agent 立下必须遵守的规矩，随时增删，下一轮即生效。",
         "memory.settings.ruleAdd": "添加规则",
@@ -299,12 +319,14 @@ window.__ModuleLoader__.load({
         "memory.explorer.tabStatus": "状态",
         "memory.entities.count": "{n} 个实体",
         "memory.entities.pick": "从左侧选择一个实体，查看它的属性与关系",
+        // 搜索框有字但一条没筛出来时用它；与 entities.none（库里真没实体）分开，
+        // 否则「暂无实体」会把打错一个字误导成「你还没开抽取」。
+        "memory.entities.noMatch": "没有匹配的实体，换个词试试",
         "memory.entities.none": "暂无实体：开启实体抽取后，记忆里的人物 / 项目 / 概念会自动沉淀到这里",
         "memory.entities.attrs": "属性",
         "memory.entities.relations": "关系",
         "memory.entities.mentions": "{n} 次提及",
         "memory.entities.lastSeen": "最近出现",
-        "memory.entities.graph": "关系图谱",
         "memory.entity.person": "人物",
         "memory.entity.project": "项目",
         "memory.entity.concept": "概念",
@@ -329,8 +351,6 @@ window.__ModuleLoader__.load({
         "memory.explorer.tags": "标签",
         "memory.explorer.importance": "重要性",
         "memory.explorer.heat": "热度",
-        "memory.explorer.sourceFilter": "来源",
-        "memory.explorer.sort": "排序",
         "memory.explorer.heatSort": "热度优先",
         "memory.explorer.heatSortHint": "对已加载条目按热度降序（页内排序，非全局序；时间树保持时间序）",
         "memory.explorer.filterDeposited": "沉淀",
@@ -351,7 +371,6 @@ window.__ModuleLoader__.load({
         "memory.graph.depth": "跳数",
         "memory.graph.empty": "图谱待积累：随对话记忆的沉淀，实体与关系会自动进入图谱",
         "memory.graph.notFound": "未找到该实体",
-        "memory.graph.attrs": "属性",
         "memory.graph.related": "关联记忆",
         "memory.graph.relation": "关系",
         "memory.graph.sourceMemory": "查看来源记忆",
@@ -386,8 +405,16 @@ window.__ModuleLoader__.load({
         "memory.settings.feedback.browse": "浏览已知问题",
         "memory.settings.feedback.browse.sub": "先搜搜，省一份重复 issue",
         "memory.settings.feedback.hint": "反馈前先搜搜是否已有相同问题，能省一份重复的 issue～",
-        "memory.settings.version.outdated": "🆕 有新版本 {v}（当前运行 {c}）",
+        "memory.settings.update.check": "检测更新",
+        "memory.settings.update.latest": "已是最新版本 ✓",
+        "memory.settings.update.ahead": "当前版本比 registry 还新（本地开发版）",
+        "memory.settings.update.error": "检测失败：稍后再试",
+        // 检测更新点出的第三种结果（发现新版本）；横幅形态已删，它现在只是
+        // 按需那一行的文案，占位 {v}/{c} 由 checkResultText 填。
+        "memory.settings.version.outdated": "有新版本 {v}（当前运行 {c}）",
         "memory.settings.version.outdatedHint": "若安装时指定过版本号，常规升级不会跨大/小版本（pnpm 钉子）——请重新安装或在升级命令加 --latest；npm 已发布而市场暂未收录属正常（约 1 天延迟）。",
+        "memory.settings.star": "给项目点个 Star",
+        "memory.settings.star.sub": "它对你是好用的，就鼓励一下作者吧 (●'◡'●)",
         "memory.settings.mode.title": "运行模式",
         "memory.settings.mode.desc": "轻量模式只保留核心能力：记忆读写、自动注入、热记忆；巩固、实体抽取、语义搜索等全部关闭，适合低配机器或只想「记住偏好」的场景。标准模式开启全部功能。",
         "memory.settings.mode.light": "轻量",
@@ -430,6 +457,9 @@ window.__ModuleLoader__.load({
         // 「别的会话能不能看到」由同在首屏的 scope 组回答。
         "memory.features.group.basic": "常用（先动这几个）",
         "memory.features.group.core": "它会记住什么",
+        // group.mo 是 v0.9.0 新增的独立分组（座位闸门，不是行为开关）；渲染
+        // 走 t(`memory.features.${g.key}`)，缺这行会把键名直接写上屏。
+        "memory.features.group.mo": "它的工作流（M.O.）",
         "memory.features.group.enhance": "它什么时候写进去",
         "memory.features.group.dream": "它怎么用回来",
         "memory.features.group.scope": "不同会话之间",
@@ -528,10 +558,13 @@ window.__ModuleLoader__.load({
         "memory.actions.credit": "复用",
         "memory.actions.creditValue": "{n} 次 · 上次 {d} 天前",
         "memory.actions.dep": "依赖",
+        "memory.actions.zoom.value": "缩放 {n}%",
         "memory.actions.zoom.in": "放大",
         "memory.actions.zoom.out": "缩小",
         "memory.actions.zoom.fit": "适应宽度",
         "memory.actions.zoom.hint": "Ctrl/⌘ + 滚轮也能缩放",
+        // 缩放百分比指示（{n} 由画布工具条填）；基线 4568614 起就缺这两行，
+        // 工具条上会直接显示键名。
         "memory.actions.list.heading": "这个项目里的工作流",
         "memory.actions.list.count": "工作流 {n} 条",
         "memory.actions.list.meta": "{steps} 步 · {gates} 道闸门 · 反事实 {cf}/{steps}",
@@ -911,6 +944,22 @@ window.__ModuleLoader__.load({
         "memory.settings.profileHint": "Describe yourself once — the agent reads it every turn.",
         "memory.settings.profileSave": "Save Profile",
         "memory.settings.profileSaved": "Profile saved",
+        "memory.settings.persona": "Persona (beta)",
+        "memory.settings.personaHint": "Give this agent a character card: name, personality, reply style. Injected every turn when the toggle below and the \"Persona\" master switch are both on.",
+        "memory.settings.personaName": "Name",
+        "memory.settings.personaNamePlaceholder": "e.g. Amarre",
+        "memory.settings.personaPersonality": "Personality",
+        "memory.settings.personaPersonalityPlaceholder": "e.g. relaxed and humorous; use analogies for hard topics",
+        "memory.settings.personaReplyStyle": "Reply style",
+        "memory.settings.personaReplyStylePlaceholder": "e.g. conclusion first; plain words over jargon",
+        "memory.settings.personaSave": "Save Persona",
+        "memory.settings.personaSaved": "Persona saved",
+        "memory.settings.personaEnabledToggle": "Enable this persona card",
+        "memory.settings.personaView": "You, as the agent sees you (injected text)",
+        "memory.settings.personaViewHint": "The profile and rules actually injected every turn. Read-only.",
+        "memory.settings.personaViewEmpty": "Profile and rules are both empty — the agent only sees the memory store.",
+        "memory.features.personaEnabled": "Persona (beta)",
+        "memory.features.personaEnabled.hint": "Inject the persona card (Settings → Personalization) into every turn. Off by default (beta); both this switch and the card's own toggle must be on.",
         "memory.settings.rules": "Rules",
         "memory.settings.rulesHint": "Rules the agent must follow — add or remove anytime, effective next turn.",
         "memory.settings.ruleAdd": "Add Rule",
@@ -933,12 +982,12 @@ window.__ModuleLoader__.load({
         "memory.explorer.tabStatus": "Status",
         "memory.entities.count": "{n} entities",
         "memory.entities.pick": "Select an entity to see its attributes and relations",
+        "memory.entities.noMatch": "No entities match that search — try another word",
         "memory.entities.none": "No entities yet — turn on entity extraction and people / projects / concepts will accumulate here",
         "memory.entities.attrs": "Attributes",
         "memory.entities.relations": "Relations",
         "memory.entities.mentions": "{n} mentions",
         "memory.entities.lastSeen": "Last seen",
-        "memory.entities.graph": "Relation graph",
         "memory.entity.person": "People",
         "memory.entity.project": "Projects",
         "memory.entity.concept": "Concepts",
@@ -963,8 +1012,6 @@ window.__ModuleLoader__.load({
         "memory.explorer.tags": "Tags",
         "memory.explorer.importance": "Importance",
         "memory.explorer.heat": "Heat",
-        "memory.explorer.sourceFilter": "Source",
-        "memory.explorer.sort": "Sort",
         "memory.explorer.heatSort": "By heat",
         "memory.explorer.heatSortHint": "Sort loaded items by heat, in-page (not global; the month tree keeps chronological order)",
         "memory.explorer.filterDeposited": "Deposited",
@@ -985,7 +1032,6 @@ window.__ModuleLoader__.load({
         "memory.graph.depth": "hops",
         "memory.graph.empty": "The graph is waiting for data: entities and relations accumulate as memories are extracted",
         "memory.graph.notFound": "Entity not found",
-        "memory.graph.attrs": "Attributes",
         "memory.graph.related": "Related memories",
         "memory.graph.relation": "Relation",
         "memory.graph.sourceMemory": "View source memory",
@@ -1020,8 +1066,14 @@ window.__ModuleLoader__.load({
         "memory.settings.feedback.browse": "Browse known issues",
         "memory.settings.feedback.browse.sub": "Check if it's already reported",
         "memory.settings.feedback.hint": "Search for an existing issue first — it saves a duplicate.",
-        "memory.settings.version.outdated": "🆕 New version {v} available (running {c})",
+        "memory.settings.update.check": "Check for updates",
+        "memory.settings.update.latest": "Up to date ✓",
+        "memory.settings.update.ahead": "Newer than the registry (local build)",
+        "memory.settings.update.error": "Check failed: try again later",
+        "memory.settings.version.outdated": "New version {v} available (running {c})",
         "memory.settings.version.outdatedHint": "If the plugin was installed with a pinned version, regular upgrades never cross minor/major lines — reinstall or pass --latest. A fresh npm release may take about a day to appear in the market.",
+        "memory.settings.star": "Star the project",
+        "memory.settings.star.sub": "If it serves you well, cheer the author on (●'◡'●)",
         "memory.settings.mode.title": "Runtime mode",
         "memory.settings.mode.desc": "Light mode keeps the core loop only: memory read/write, auto-injection and hot memory — consolidation, entity extraction and semantic search are all off. For modest machines or when you just want preferences remembered. Standard mode enables everything.",
         "memory.settings.mode.light": "Light",
@@ -1065,6 +1117,7 @@ window.__ModuleLoader__.load({
         // "can other sessions see this?" is answerable without opening anything.
         "memory.features.group.basic": "Common (start here)",
         "memory.features.group.core": "What gets remembered",
+        "memory.features.group.mo": "Its workflow (M.O.)",
         "memory.features.group.enhance": "When it gets written",
         "memory.features.group.dream": "How it comes back",
         "memory.features.group.scope": "Between sessions",
@@ -1155,6 +1208,7 @@ window.__ModuleLoader__.load({
         "memory.actions.credit": "Reuse",
         "memory.actions.creditValue": "{n} uses · last {d}d ago",
         "memory.actions.dep": "depends on",
+        "memory.actions.zoom.value": "Zoom {n}%",
         "memory.actions.zoom.in": "Zoom in",
         "memory.actions.zoom.out": "Zoom out",
         "memory.actions.zoom.fit": "Fit width",
@@ -1635,17 +1689,26 @@ window.__ModuleLoader__.load({
       ".mneme-xcount{flex:none;font-size:12px;line-height:16px;color:var(--mneme-fg-dim);white-space:nowrap}",
       // --- three-column browse layout: hairline separators, no outer box ---
       ".mneme-xmain{flex:1;min-height:0;display:flex;flex-direction:row;overflow:hidden}",
-      ".mneme-xside{flex:none;width:236px;min-width:0;min-height:0;overflow-y:auto;padding:16px 14px;border-right:1px solid var(--dsw-alias-border-l2);box-sizing:border-box;display:flex;flex-direction:column;gap:8px}",
-      ".mneme-xside--filter{width:214px}",
+      ".mneme-xside{flex:none;width:264px;min-width:0;min-height:0;overflow-y:auto;overflow-x:hidden;padding:16px 14px;border-right:1px solid var(--dsw-alias-border-l2);box-sizing:border-box;display:flex;flex-direction:column;gap:8px}",
+      // 左栏下段=重要性+来源+热度：紧跟检索段之后（复验修订：不再钉底），
+      // 顶部细线保留分段感；栏宽 264px 让 4 枚星级 chip 单行排布。
+      ".mneme-xside-imp{flex:none;margin-top:10px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l1);display:flex;flex-direction:column;gap:8px}",
+      // 内容区列容器 + 顶部工具条：类型 chips 横排 + 计数/刷新靠右；窄容器靠 wrap 换行。
+      ".mneme-xcontent{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}",
+      ".mneme-xbrowsebar{flex:none;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 16px;border-bottom:1px solid var(--dsw-alias-border-l2)}",
+      // 窄容器（better-sidebar 工作台 ~500px）：左栏收窄保内容区可用宽度。
+      "@container (max-width: 640px){.mneme-xside{width:216px}}",
+      // 类型筛选原为第二侧栏的竖排列表（三栏布局遗留，#面板两栏改版）：
+      // 两栏化后收进内容区工具条，改为自适应横排 chips，彩点与计数保留。
+      ".mneme-xtype{display:inline-flex;justify-content:flex-start;align-items:center;gap:7px;padding:4px 9px;border:none;border-radius:8px;background:none;color:var(--dsw-alias-label-secondary);cursor:pointer;font-family:inherit;font-size:13px;line-height:18px;text-align:left}",
       ".mneme-xbrowse{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}",
       ".mneme-xrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}",
       ".mneme-xsearch{width:100%}",
       ".mneme-xselect{flex:1;min-width:0}",
       ".mneme-xcolhead{flex:none;font-size:12px;font-weight:500;margin:0;color:var(--mneme-fg-dim);padding:2px 8px 8px}",
-      ".mneme-xtype{display:flex;justify-content:flex-start;align-items:center;gap:8px;width:100%;padding:5px 8px;border:none;border-radius:8px;background:none;color:var(--dsw-alias-label-secondary);cursor:pointer;font-family:inherit;font-size:13px;line-height:18px;text-align:left}",
       ".mneme-xtype:hover{background:var(--dsw-alias-interactive-bg-hover)}",
       ".mneme-xtype.mneme-active{background:var(--dsw-alias-interactive-bg-active);color:var(--dsw-alias-label-primary);font-weight:500}",
-      ".mneme-xcount2{flex:none;margin-left:auto;font-size:12px;color:var(--mneme-fg-dim)}",
+      ".mneme-xcount2{flex:none;font-size:12px;color:var(--mneme-fg-dim)}",
       ".mneme-xmonth{display:flex;align-items:center;gap:4px;width:100%;padding:6px 8px 4px;border:none;border-radius:8px;background:none;color:var(--dsw-alias-label-primary);cursor:pointer;font-family:inherit;font-size:13px;font-weight:500;line-height:18px;text-align:left}",
       ".mneme-xmonth:first-child{margin-top:0}",
       ".mneme-xmonth:hover{background:var(--dsw-alias-interactive-bg-hover)}",
@@ -1687,20 +1750,26 @@ window.__ModuleLoader__.load({
       // 虚线态靠 dash 图案区分，不再叠 opacity：50% 的描边再乘 .7 后浅色画布上
       // 只剩 2.28，低于图形要求的 3:1（图案已经承担了「没有 memory_id」这个语义）。
       ".mneme-gedge-dashed{stroke-dasharray:5 4}",
-      ".mneme-graphhint{flex:none;color:var(--mneme-fg-dim);font-size:13px;text-align:center;padding:6px 0 2px}",
-      ".mneme-graphside{flex:none;max-height:220px;overflow-y:auto;border-top:1px solid var(--dsw-alias-border-l1);margin-top:10px;padding-top:10px}",
+      // 图谱与图内侧卡的共同父容器：侧卡改浮层（#面板实体页去冗余）后需要
+      // relative 锚点，否则 absolute 会逃逸到 .mneme-ent 根。
+      ".mneme-entgraphwrap{position:relative;min-width:0}",
+      // 侧卡从「SVG 下方文档流堆叠」（把图挤成邮票）改为图内左下浮层：
+      // 反应面板与点击焦点同位，SVG 不再被推挤；背景用不透明 bg-layer-1，
+      // 浮层下透出的图形不参与文字对比度计算。
+      ".mneme-graphside{position:absolute;left:12px;bottom:12px;width:min(300px,60%);max-height:60%;overflow-y:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-1);padding:10px 12px;z-index:2}",
       ".mneme-gs-title{font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary);margin-bottom:4px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}",
       ".mneme-gs-meta{font-size:13px;color:var(--mneme-fg-dim);margin-bottom:6px}",
-      ".mneme-gs-attr{display:flex;gap:6px;font-size:13px;padding:2px 0}",
-      ".mneme-gs-attrkey{flex:none;color:var(--mneme-fg-dim);font-size:13px}",
-      ".mneme-gs-attrval{color:var(--dsw-alias-label-secondary);word-break:break-word;font-size:13px}",
       ".mneme-gs-link{display:block;width:100%;text-align:left;border:none;background:none;color:var(--dsw-alias-label-secondary);cursor:pointer;font-family:inherit;font-size:13px;padding:3px 6px;border-radius:6px;word-break:break-word}",
       ".mneme-gs-link:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
       // --- entity explorer: rail + layered detail (entities → attrs → relations → graph) ---
       ".mneme-ent{flex:1;min-height:0;display:flex;overflow:hidden}",
-      ".mneme-entrail{flex:none;width:224px;min-height:0;overflow-y:auto;padding:12px;border-right:1px solid var(--dsw-alias-border-l2);box-sizing:border-box;display:flex;flex-direction:column;gap:4px}",
-      ".mneme-enttype{display:flex;align-items:center;gap:6px;width:100%;padding:8px 8px 2px;border:none;background:none;color:var(--mneme-fg-dim);cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;line-height:16px;text-align:left;letter-spacing:.02em}",
-      ".mneme-entitem{display:flex;align-items:center;gap:8px;width:100%;padding:5px 8px;border:none;border-radius:8px;background:none;color:var(--dsw-alias-label-secondary);cursor:pointer;font-family:inherit;font-size:13px;line-height:18px;text-align:left}",
+      ".mneme-entrail{flex:none;width:224px;min-height:0;overflow:hidden;padding:12px 0 0;border-right:1px solid var(--dsw-alias-border-l2);box-sizing:border-box;display:flex;flex-direction:column}",
+      // 复验修订：搜索与计数固定在顶部不随列表滚动，列表独立滚动；
+      // 类型分组头 sticky——长列表滚动时分组归属始终可见。
+      ".mneme-entrailhead{flex:none;padding:0 12px 10px;display:flex;flex-direction:column;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l1)}",
+      ".mneme-entrailbody{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:4px 12px 12px;display:flex;flex-direction:column;gap:4px}",
+      ".mneme-enttype{position:sticky;top:0;z-index:1;background:var(--dsw-alias-bg-layer-1);display:flex;align-items:center;gap:6px;width:100%;box-sizing:border-box;padding:8px 8px 2px;border:none;color:var(--mneme-fg-dim);cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;line-height:16px;text-align:left;letter-spacing:.02em}",
+      ".mneme-entitem{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;padding:5px 8px;border:none;border-radius:8px;background:none;color:var(--dsw-alias-label-secondary);cursor:pointer;font-family:inherit;font-size:13px;line-height:18px;text-align:left}",
       ".mneme-entitem:hover{background:var(--dsw-alias-interactive-bg-hover)}",
       ".mneme-entitem.mneme-active{background:var(--dsw-alias-interactive-bg-active);color:var(--dsw-alias-label-primary)}",
       ".mneme-entname{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
@@ -2005,8 +2074,14 @@ window.__ModuleLoader__.load({
       ".mneme-barcol:hover .mneme-bar{opacity:.8}",
       ".mneme-barlabels{display:flex;gap:8px;padding:6px 2px 0}",
       ".mneme-barlabels span{flex:1;min-width:0;text-align:center;font-size:10.5px;color:var(--mneme-fg-dim);font-variant-numeric:tabular-nums}",
-      ".mneme-heatgrid{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,12px);gap:3px;margin-top:12px}",
-      ".mneme-heatcell{width:12px;height:12px;border-radius:3px;background:var(--dsw-alias-interactive-bg-hover)}",
+      // GitHub 贡献图式紧凑网格（复验第三轮「间距太大」）：11px 格 + 2px 缝；
+      // heatrows 是左侧星期标签列（一/三/五），heatmonths 是顶部月份标签行
+      // （列主序网格下月份行须与格子列对齐，所以同用 auto-flow:column）。
+      ".mneme-heatgrid{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,11px);gap:2px;margin-top:12px}",
+      ".mneme-heatcell{width:11px;height:11px;border-radius:2px;background:var(--dsw-alias-interactive-bg-hover)}",
+      ".mneme-heatwrap{display:flex;gap:4px}",
+      ".mneme-heatrows{display:grid;grid-template-rows:repeat(7,11px);gap:2px;margin-top:12px;font-size:9.5px;line-height:11px;color:var(--mneme-fg-dim);text-align:right}",
+      ".mneme-heatmonths{display:grid;grid-auto-flow:column;grid-auto-columns:11px;gap:2px;margin-top:0;font-size:9.5px;line-height:14px;color:var(--mneme-fg-dim)}",
       // 类名编号=视觉档位（l1 最浅…l4 最深），变量编号=business 占比降序，故交叉引用。
       ".mneme-heatcell.l1{background:var(--mneme-heat-4)}",
       ".mneme-heatcell.l2{background:var(--mneme-heat-3)}",
@@ -2563,31 +2638,39 @@ window.__ModuleLoader__.load({
       const graphStatus = status === "ready" && data && data.nodes.length <= 1 ? "empty" : status;
 
       const rail = h("div", { className: "mneme-entrail" },
-        h("div", { className: "mneme-xcolhead" }, t("memory.view.label")),
-        h("input", {
-          className: "mneme-search mneme-xsearch",
-          placeholder: t("memory.graph.placeholder"),
-          value: railQuery,
-          onChange: (e) => setRailQuery(e.target.value)
-        }),
-        entities === null && h("div", { className: "mneme-xempty" }, "…"),
-        entities !== null && entities.length === 0 && h("div", { className: "mneme-xempty" }, t("memory.entities.none")),
-        entities !== null && entities.length > 0 && h("div", { className: "mneme-xcount" },
-          t("memory.entities.count").replace("{n}", String(entities.length))),
-        groups.map((g) => h("div", { key: g.key },
-          h("div", { className: "mneme-enttype" },
-            h("span", { className: "mneme-xdot", style: { color: typeColor(g.key === "other" ? null : g.key) }, "aria-hidden": "true" }),
-            entityTypeLabel(t, g.key)
-          ),
-          g.items.map((e) => h("button", {
-            key: e.id,
-            className: e.name === entityName ? "mneme-entitem mneme-active" : "mneme-entitem",
-            onClick: () => setEntityName(e.name)
-          },
-            h("span", { className: "mneme-entname" }, e.name),
-            h("span", { className: "mneme-entmentions" }, `×${e.mention_count ?? 1}`)
+        // 头部固定段：表头（本页名「实体」——原误用全局页签名「记忆库」，而
+        // memory.view.label 仍被顶部 nav aria-label 使用，字典不动只换这里）
+        // + 搜索 + 计数，不随列表滚动。
+        h("div", { className: "mneme-entrailhead" },
+          h("div", { className: "mneme-xcolhead" }, t("memory.explorer.tabEntities")),
+          h("input", {
+            className: "mneme-search mneme-xsearch",
+            placeholder: t("memory.graph.placeholder"),
+            value: railQuery,
+            onChange: (e) => setRailQuery(e.target.value)
+          }),
+          entities !== null && entities.length > 0 && h("div", { className: "mneme-xcount" },
+            t("memory.entities.count").replace("{n}", String(entities.length)))
+        ),
+        h("div", { className: "mneme-entrailbody" },
+          entities === null && h("div", { className: "mneme-xempty" }, "…"),
+          entities !== null && entities.length === 0 && h("div", { className: "mneme-xempty" }, t("memory.entities.none")),
+          entities !== null && entities.length > 0 && visibleEntities.length === 0 && h("div", { className: "mneme-xempty" }, t("memory.entities.noMatch")),
+          groups.map((g) => h("div", { key: g.key },
+            h("div", { className: "mneme-enttype" },
+              h("span", { className: "mneme-xdot", style: { color: typeColor(g.key === "other" ? null : g.key) }, "aria-hidden": "true" }),
+              entityTypeLabel(t, g.key)
+            ),
+            g.items.map((e) => h("button", {
+              key: e.id,
+              className: e.name === entityName ? "mneme-entitem mneme-active" : "mneme-entitem",
+              onClick: () => setEntityName(e.name)
+            },
+              h("span", { className: "mneme-entname" }, e.name),
+              h("span", { className: "mneme-entmentions" }, `×${e.mention_count ?? 1}`)
+            ))
           ))
-        ))
+        )
       );
 
       // side card for a clicked (non-root) node or edge inside the graph layer
@@ -2603,14 +2686,7 @@ window.__ModuleLoader__.load({
             selected.node.name !== entityName && h("button", {
               className: "mneme-footbtn",
               onClick: () => setEntityName(selected.node.name)
-            }, t("memory.graph.viewInGraph")),
-            attrs.length > 0 && h("div", null,
-              h("div", { className: "mneme-gs-meta" }, t("memory.graph.attrs")),
-              attrs.map((a, i) => h("div", { key: i, className: "mneme-gs-attr" },
-                h("span", { className: "mneme-gs-attrkey" }, `${a.key}:`),
-                h("span", { className: "mneme-gs-attrval" }, a.value)
-              ))
-            )
+            }, t("memory.graph.viewInGraph"))
           )
         : selected?.kind === "edge"
           ? h("div", { className: "mneme-graphside" },
@@ -2644,46 +2720,104 @@ window.__ModuleLoader__.load({
               h("span", { title: formatDate(entity.last_seen) },
                 `${t("memory.entities.lastSeen")}: ${formatRelativeTime(entity.last_seen, t)}`)
             ),
-            // ① 属性 — current snapshot (valid_until IS NULL)
-            h("div", { className: "mneme-layer" },
-              h("div", { className: "mneme-layerhead" },
-                t("memory.entities.attrs"),
-                h("span", { className: "mneme-layercount" }, String(attrs.length))
-              ),
-              attrs.length === 0
-                ? h("div", { className: "mneme-xempty" }, t("memory.settings.empty"))
-                : h("div", { className: "mneme-attrgrid" },
-                    attrs.map((a, i) => h("div", { key: i, className: "mneme-attrcard", title: a.value },
-                      h("div", { className: "mneme-attrkey" }, a.key),
-                      h("div", { className: "mneme-attrval" }, a.value)
-                    ))
-                  )
-            ),
-            // ② 关系 — both directions from the 1-hop ego walk
+            // ① 关系图谱（前置）：图形在属性/列表之前，是实体页的第一眼；
+            // 深度/复位 chips 从层头移进图谱工具行（动作靠近作用对象），操作
+            // 提示收进行尾小字不再独占一行；关系列表（跳来源记忆的唯一入口）
+            // 保留为图谱的文本镜像、与图谱同层共享层头，消除信息双轨的分段感。
             h("div", { className: "mneme-layer" },
               h("div", { className: "mneme-layerhead" },
                 t("memory.entities.relations"),
                 h("span", { className: "mneme-layercount" }, String(rootEdges.length))
               ),
-              rootEdges.length === 0
-                ? h("div", { className: "mneme-xempty" }, t("memory.settings.empty"))
-                : rootEdges.map((e) => {
-                    const out = e.from === data.root.id;
-                    const other = nodeById.get(out ? e.to : e.from);
-                    const otherName = other?.name ?? (out ? e.to : e.from);
-                    return h("button", {
-                      key: e.id,
-                      className: "mneme-relrow",
-                      title: e.memory_id ? t("memory.graph.sourceMemory") : undefined,
-                      onClick: () => { if (e.memory_id && onJumpMemory) onJumpMemory({ id: e.memory_id }); }
-                    },
-                      h("span", { className: "mneme-relname", style: { textAlign: "right", flex: 1 } }, entity.name),
-                      h("span", { className: "mneme-reltype" }, e.relation_type),
-                      h("span", { className: "mneme-relname", style: { flex: 1 } }, otherName)
-                    );
-                  })
+              rootEdges.length === 0 && graphStatus === "empty"
+                ? h("div", { className: "mneme-hint" }, t("memory.graph.empty"))
+                : h(react.Fragment, null,
+                    graphStatus !== "empty" && h("div", { className: "mneme-graphbar" },
+                      h("button", {
+                        className: depth === 2 ? "mneme-chip mneme-active" : "mneme-chip",
+                        title: t("memory.graph.depth"),
+                        onClick: () => setDepth(depth === 1 ? 2 : 1)
+                      }, `${depth} ${t("memory.graph.depth")}`),
+                      h("button", {
+                        className: "mneme-chip",
+                        title: t("memory.graph.resetView"),
+                        onClick: resetView
+                      }, t("memory.graph.resetView")),
+                      h("span", { style: { marginLeft: "auto", fontSize: 12, color: "var(--mneme-fg-dim)" } }, t("memory.graph.hint"))
+                    ),
+                    graphStatus !== "empty" && h("div", { className: "mneme-entgraphwrap" },
+                      h("svg", {
+                        ref: svgRef,
+                        className: "mneme-graphsvg",
+                        viewBox: `0 0 ${VIEW_W} ${VIEW_H}`,
+                        style: { height: 440 },
+                        role: "img",
+                        "aria-label": t("memory.graph.summary")
+                          .replace("{entity}", (data.root && (data.root.label || data.root.name)) || "")
+                          .replace("{nodes}", String(data.nodes.length))
+                          .replace("{edges}", String(data.edges.length)),
+                        onMouseDown: onSurfaceMouseDown
+                      },
+                        h("g", {
+                          transform: `translate(${viewRef.current.x},${viewRef.current.y}) scale(${viewRef.current.k})`
+                        },
+                          data.edges.map((e) => {
+                            const a = nodeById.get(e.from), b = nodeById.get(e.to);
+                            if (!a || !b) return null;
+                            return h("line", {
+                              key: e.id,
+                              x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+                              className: e.memory_id ? "mneme-gedge" : "mneme-gedge mneme-gedge-dashed",
+                              onClick: () => onEdgeClick(e)
+                            });
+                          }),
+                          nodes.map((n) => h("g", {
+                            key: n.id,
+                            className: n.id === data.root.id ? "mneme-gnode mneme-groot" : "mneme-gnode",
+                            transform: `translate(${n.x},${n.y})`,
+                            onMouseDown: (e) => onNodeMouseDown(e, n),
+                            onClick: () => onNodeClick(n),
+                            "data-node": n.name
+                          },
+                            h("circle", { r: nodeRadius(n), fill: typeColor(n.type), fillOpacity: nodeOpacity(n) }),
+                            h("text", { className: "mneme-glabel", y: nodeRadius(n) + 13 }, n.name)
+                          ))
+                        )
+                      ),
+                      side
+                    ),
+                    rootEdges.length > 0 && rootEdges.map((e) => {
+                      const out = e.from === data.root.id;
+                      const other = nodeById.get(out ? e.to : e.from);
+                      const otherName = other?.name ?? (out ? e.to : e.from);
+                      return h("button", {
+                        key: e.id,
+                        className: "mneme-relrow",
+                        title: e.memory_id ? t("memory.graph.sourceMemory") : undefined,
+                        onClick: () => { if (e.memory_id && onJumpMemory) onJumpMemory({ id: e.memory_id }); }
+                      },
+                        h("span", { className: "mneme-relname", style: { textAlign: "right", flex: 1 } }, entity.name),
+                        h("span", { className: "mneme-reltype" }, e.relation_type),
+                        h("span", { className: "mneme-relname", style: { flex: 1 } }, otherName)
+                      );
+                    })
+                  )
             ),
-            // ③ 关联记忆 — entity: prefix recall
+            // ② 属性 — current snapshot (valid_until IS NULL)；空层整层隐藏
+            // （原先渲染一行「暂无内容」占住高度，是零信息的堆积）
+            attrs.length > 0 && h("div", { className: "mneme-layer" },
+              h("div", { className: "mneme-layerhead" },
+                t("memory.entities.attrs"),
+                h("span", { className: "mneme-layercount" }, String(attrs.length))
+              ),
+              h("div", { className: "mneme-attrgrid" },
+                attrs.map((a, i) => h("div", { key: i, className: "mneme-attrcard", title: a.value },
+                  h("div", { className: "mneme-attrkey" }, a.key),
+                  h("div", { className: "mneme-attrval" }, a.value)
+                ))
+              )
+            ),
+            // ③ 关联记忆 — entity: prefix recall（entity: 之外的唯一记忆回链入口）
             related.length > 0 && h("div", { className: "mneme-layer" },
               h("div", { className: "mneme-layerhead" },
                 t("memory.graph.related"),
@@ -2696,68 +2830,6 @@ window.__ModuleLoader__.load({
                 title: t("memory.card.open"),
                 onClick: () => onJumpMemory && onJumpMemory(m)
               }, m.title || m.content?.slice(0, 60)))
-            ),
-            // ④ 关系图谱 — the ego graph
-            h("div", { className: "mneme-layer" },
-              h("div", { className: "mneme-layerhead" },
-                t("memory.entities.graph"),
-                h("span", { className: "mneme-layercount" },
-                  h("button", {
-                    className: depth === 2 ? "mneme-chip mneme-active" : "mneme-chip",
-                    title: t("memory.graph.depth"),
-                    onClick: () => setDepth(depth === 1 ? 2 : 1)
-                  }, `${depth} ${t("memory.graph.depth")}`)),
-                h("span", { className: "mneme-layercount" },
-                  h("button", {
-                    className: "mneme-chip",
-                    title: t("memory.graph.resetView"),
-                    onClick: resetView
-                  }, t("memory.graph.resetView")))
-              ),
-              graphStatus === "empty"
-                ? h("div", { className: "mneme-hint" }, t("memory.graph.empty"))
-                : h(react.Fragment, null,
-                    h("svg", {
-                      ref: svgRef,
-                      className: "mneme-graphsvg",
-                      viewBox: `0 0 ${VIEW_W} ${VIEW_H}`,
-                      style: { height: 320 },
-                      role: "img",
-                      "aria-label": t("memory.graph.summary")
-                        .replace("{entity}", (data.root && (data.root.label || data.root.name)) || "")
-                        .replace("{nodes}", String(data.nodes.length))
-                        .replace("{edges}", String(data.edges.length)),
-                      onMouseDown: onSurfaceMouseDown
-                    },
-                      h("g", {
-                        transform: `translate(${viewRef.current.x},${viewRef.current.y}) scale(${viewRef.current.k})`
-                      },
-                        data.edges.map((e) => {
-                          const a = nodeById.get(e.from), b = nodeById.get(e.to);
-                          if (!a || !b) return null;
-                          return h("line", {
-                            key: e.id,
-                            x1: a.x, y1: a.y, x2: b.x, y2: b.y,
-                            className: e.memory_id ? "mneme-gedge" : "mneme-gedge mneme-gedge-dashed",
-                            onClick: () => onEdgeClick(e)
-                          });
-                        }),
-                        nodes.map((n) => h("g", {
-                          key: n.id,
-                          className: n.id === data.root.id ? "mneme-gnode mneme-groot" : "mneme-gnode",
-                          transform: `translate(${n.x},${n.y})`,
-                          onMouseDown: (e) => onNodeMouseDown(e, n),
-                          onClick: () => onNodeClick(n),
-                          "data-node": n.name
-                        },
-                          h("circle", { r: nodeRadius(n), fill: typeColor(n.type), fillOpacity: nodeOpacity(n) }),
-                          h("text", { className: "mneme-glabel", y: nodeRadius(n) + 13 }, n.name)
-                        ))
-                      )
-                    ),
-                    h("div", { className: "mneme-graphhint" }, t("memory.graph.hint"))
-                  ),
-              side
             )
           )
         )
@@ -2783,19 +2855,27 @@ window.__ModuleLoader__.load({
     // 用户敢动的总开关；group.scope 也在首屏——它回答新用户的第二个必答题
     // 「它记的东西会不会被别的会话看到」。其余组整组收进「全部设置」折叠
     // （showAll）。成员从原组里移走而不是渲染时过滤：同一项永远只渲染一次。
-    // 首屏可点项 = 3 总开关 + autoInject 的 2 个子开关 + scope 2 开关 +
-    // 「全部设置」按钮 = 8（验收线 ≤ 8；RuntimeProvisionBlock 配好即消失，
-    // 常态首屏更少）。
-    const FEATURE_FIRST_SCREEN = ["group.basic", "group.scope"];
+    // 首屏可点项 = 3 总开关 + autoInject 的 2 个子开关 + M.O. 1 开关 +
+    // scope 2 开关 + 「全部设置」按钮 = 9。复验修订：产品主人点名 M.O.
+    // 「别藏在里面」，独立成组但仍折在「全部设置」后等于换个地方藏；
+    // ≤8 是本仓库 #427 自设的软预算，owner 点名豁免一项，锁随注释同步改。
+    // RuntimeProvisionBlock 配好即消失，常态首屏更少。
+    const FEATURE_FIRST_SCREEN = ["group.basic", "group.mo", "group.scope"];
     const FEATURE_GROUPS = [
       { key: "group.basic", items: ["autoInject", "autoSummarize", "autoDream"] },
       { key: "group.core", items: ["hotMemoryEnabled", "injectTimePrefix", "memoryQualityFilter.enabled", "llmAudit.enabled", "writeAdmission.enabled", "writeAdmission.enforce", "preInjectGate.enabled", "preInjectGate.enforce", "sensitiveScanEnabled",
         // #399 的留存总闸（见下方 distillSub：天数行是它的子块）。放在组末，
         // 子块才能紧跟在它后面展开——items.map 之后的子块是按组尾渲染的。
         "distillRecords.enabled"] },
-      // v0.9.0 M.O.（beta）：开关挂在 enhance 组。它不是行为开关而是
-      // 座位闸门——关=一个座位都不注册（见 apply 内的 M.O. 块）。
-      { key: "group.enhance", items: ["entityExtractionEnabled", "codingRetrospect", "rerankEnabled", "resilientModelDownload", "searchSemanticDedup", "bm25SearchEnabled", "heatEnabled", "documentMemoryEnabled", "actionPipelineEnabled"] },
+      // v0.9.0 M.O.（beta）复验修订：独立分组行——它不是行为开关而是座位闸门
+      // （关=一个座位都不注册，见 apply 内的 M.O. 块）。独立成组只解决「混在
+      // enhance 末位」；可见层由 FEATURE_FIRST_SCREEN 决定（见其注释），
+      // 本轮已把组名提进首屏——组成员资格不决定可见性。
+      { key: "group.mo", items: ["actionPipelineEnabled"] },
+      { key: "group.enhance", items: ["entityExtractionEnabled", "codingRetrospect", "rerankEnabled", "resilientModelDownload", "searchSemanticDedup", "bm25SearchEnabled", "heatEnabled", "documentMemoryEnabled",
+        // 人格定义页（beta）：注入总闸。分组随 enhance（行为开关，非座位闸门）；
+        // 人格内容在设置页「个性化」区的人格卡。
+        "personaEnabled"] },
       { key: "group.dream", items: ["sleepModeEnabled"] },
       // v0.8.0 A4（issue #17）：作用域隔离组——标注总开关 + 严格硬过滤。
       { key: "group.scope", items: ["scopeEnabled", "strictScope"] }
@@ -3310,6 +3390,10 @@ window.__ModuleLoader__.load({
       const [newCmd, setNewCmd] = react.useState({ name: "", description: "", instruction: "" });
       const [saved, setSaved] = react.useState(false);
       const [cmdError, setCmdError] = react.useState("");
+      // 人格卡（beta）：name/personality/replyStyle 三字段草稿 + 卡内开关；
+      // provenance 是 v1.5 协作式人格的预留位，v1 只透传不编辑。
+      const [persona, setPersona] = react.useState({ name: "", personality: "", replyStyle: "", enabled: false });
+      const [personaSaved, setPersonaSaved] = react.useState(false);
       const [vector, setVector] = react.useState({ enabled: false, baseUrl: "", apiKey: "", model: "" });
       const [vectorSaved, setVectorSaved] = react.useState(false);
       const [reindexing, setReindexing] = react.useState(false);
@@ -3320,9 +3404,36 @@ window.__ModuleLoader__.load({
       const [apiTokenSaved, setApiTokenSaved] = react.useState(false);
       // 反馈入口的插件版本（GET /info）。失败保持 "unknown"，链接仍可用。
       const [pkgVersion, setPkgVersion] = react.useState("unknown");
-      // 版本自检（#174 后续）：运行版本 vs registry latest。仅 outdated 渲染
-      // 横幅，其余状态（up-to-date / ahead / unknown / 查询失败）零渲染零打扰。
+      // 版本自检（复验修订：原为进入设置页自动请求 + 顶部横幅，现改为底部
+      // 「支持与鼓励」卡里的「检测更新」按钮手动触发，结果内联显示——自动
+      // 请求与横幅常驻都是打扰面）。status 共四种：outdated / latest / error / null（未检测）。
       const [updateInfo, setUpdateInfo] = react.useState(null);
+      const [updateChecking, setUpdateChecking] = react.useState(false);
+      function checkForUpdate() {
+        if (updateChecking) return;
+        setUpdateChecking(true);
+        apiFetch("/api/dsh-mneme/version-check")
+          .then((res) => (res.ok ? res.json() : null))
+          .then((j) => {
+            setUpdateInfo(j && typeof j.latest === "string" && typeof j.version === "string"
+              ? { status: j.status, latest: j.latest, current: j.version }
+              : { status: "error" });
+            setUpdateChecking(false);
+          })
+          .catch(() => { setUpdateInfo({ status: "error" }); setUpdateChecking(false); });
+      }
+      // 检测结果一行文案：按 status 取既有或新增的 i18n key。
+      function checkResultText() {
+        if (!updateInfo) return "";
+        if (updateInfo.status === "outdated") {
+          return t("memory.settings.version.outdated")
+            .replace("{v}", updateInfo.latest)
+            .replace("{c}", updateInfo.current);
+        }
+        if (updateInfo.status === "latest" || updateInfo.status === "up_to_date") return t("memory.settings.update.latest");
+        if (updateInfo.status === "ahead") return t("memory.settings.update.ahead");
+        return t("memory.settings.update.error");
+      }
       // 运行模式 — light vs standard; null = still loading. The card keeps
       // its own busy/saved/error state so it never blocks the others.
       const [mode, setMode] = react.useState(null);
@@ -3343,16 +3454,25 @@ window.__ModuleLoader__.load({
 
       const load = react.useCallback(async () => {
         try {
-          const [p, r, c, v] = await Promise.all([
+          const [p, r, c, v, ps] = await Promise.all([
             apiFetch("/api/dsh-mneme/profile").then((res) => res.json()),
             apiFetch("/api/dsh-mneme/rules").then((res) => res.json()),
             apiFetch("/api/dsh-mneme/commands").then((res) => res.json()),
-            apiFetch("/api/dsh-mneme/vector-config").then((res) => res.json())
+            apiFetch("/api/dsh-mneme/vector-config").then((res) => res.json()),
+            apiFetch("/api/dsh-mneme/persona").then((res) => res.json()).catch(() => null)
           ]);
           setProfile(p.profile || "");
           setRules(Array.isArray(r.rules) ? r.rules : []);
           setCommands(Array.isArray(c.commands) ? c.commands : []);
           setVector(v.config || { enabled: false, baseUrl: "", apiKey: "", model: "" });
+          // 人格卡：旧后端无 /persona（404）时保持默认空卡，不阻塞其它卡片
+          const pj = ps && ps.persona && typeof ps.persona === "object" ? ps.persona : {};
+          setPersona({
+            name: typeof pj.name === "string" ? pj.name : "",
+            personality: typeof pj.personality === "string" ? pj.personality : "",
+            replyStyle: typeof pj.replyStyle === "string" ? pj.replyStyle : "",
+            enabled: pj.enabled === true
+          });
         } catch { /* ignore */ }
       }, []);
 
@@ -3364,21 +3484,6 @@ window.__ModuleLoader__.load({
         apiFetch("/api/dsh-mneme/info")
           .then((res) => (res.ok ? res.json() : null))
           .then((j) => { if (!cancelled && j && typeof j.version === "string") setPkgVersion(j.version); })
-          .catch(() => {});
-        return () => { cancelled = true; };
-      }, []);
-
-      // 版本自检：只读 /version-check（宿主围栏鉴权）。非 outdated 一律归
-      // null——横幅不出现即是「无需处理」；接口失败也静默，不新增故障面。
-      react.useEffect(() => {
-        let cancelled = false;
-        apiFetch("/api/dsh-mneme/version-check")
-          .then((res) => (res.ok ? res.json() : null))
-          .then((j) => {
-            if (!cancelled && j && j.status === "outdated" && typeof j.latest === "string" && typeof j.version === "string") {
-              setUpdateInfo({ latest: j.latest, current: j.version });
-            }
-          })
           .catch(() => {});
         return () => { cancelled = true; };
       }, []);
@@ -3442,6 +3547,22 @@ window.__ModuleLoader__.load({
           setTimeout(() => setSaved(false), 1500);
         } catch { /* ignore */ }
       }
+
+      // 人格卡保存：整对象 PUT（后端 setPersona 只挑白名单字段）；saved 提示同
+      // profile 卡节奏（1.5s 自消）。
+      async function savePersona(next) {
+        try {
+          await apiFetch("/api/dsh-mneme/persona", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ persona: next })
+          });
+          setPersonaSaved(true);
+          announce(t("memory.settings.personaSaved"));
+          setTimeout(() => setPersonaSaved(false), 1500);
+        } catch { /* ignore */ }
+      }
+      const setPersonaField = (key, value) => setPersona((c) => ({ ...c, [key]: value }));
 
       async function putRules(next) {
         await apiFetch("/api/dsh-mneme/rules", {
@@ -3624,18 +3745,7 @@ window.__ModuleLoader__.load({
       }
 
       return h("div", null,
-        // 版本自检横幅 — 仅 outdated 时渲染（up-to-date/ahead/unknown/失败
-        // 全部零渲染）。钉子警示：安装时指定过版本号的 profile 会被 pnpm
-        // 挡住常规升级（#174 报障者的实际成因）；市场收录新发布约有 1 天延迟。
-        updateInfo && h("section", { className: "mneme-set-card" },
-          h("div", { className: "mneme-set-title" },
-            t("memory.settings.version.outdated")
-              .replace("{v}", updateInfo.latest)
-              .replace("{c}", updateInfo.current)
-          ),
-          h("div", { className: "mneme-featsubhint" }, t("memory.settings.version.outdatedHint"))
-        ),
-        // —— 个性化：画像 / 规则 / 自定义指令（Agent 怎么对你） ——
+        // —— 个性化：画像 / 人格 / 规则 / 自定义指令（Agent 怎么对你） ——
         h("div", { className: "mneme-set-grouphead" }, t("memory.settings.group.personal")),
         // 用户画像 — who the agent is talking to
         h("section", { className: "mneme-set-card" },
@@ -3651,6 +3761,61 @@ window.__ModuleLoader__.load({
             h("button", { className: "mneme-btn", onClick: saveProfile }, t("memory.settings.profileSave")),
             saved && h("span", { className: "mneme-saved" }, t("memory.settings.profileSaved"))
           )
+        ),
+        // 人格卡（beta）— who the agent is：名字/性格/回复要求 + 卡内开关。
+        // 卡内开关只是 persona.enabled 半边；总闸 personaEnabled 在功能开关的
+        // 「它什么时候写进去」组里，双闸同真才注入（设计稿④双层闸门）。
+        h("section", { className: "mneme-set-card" },
+          h("div", { className: "mneme-set-title" }, t("memory.settings.persona")),
+          h("div", { className: "mneme-set-desc" }, t("memory.settings.personaHint")),
+          h("div", { className: "mneme-set-row", style: { justifyContent: "space-between" } },
+            h("span", { className: "mneme-set-ruletext" }, t("memory.settings.personaEnabledToggle")),
+            h("input", {
+              type: "checkbox",
+              checked: persona.enabled === true,
+              "aria-label": t("memory.settings.personaEnabledToggle"),
+              onChange: (e) => {
+                const next = { ...persona, enabled: e.target.checked };
+                setPersona(next);
+                savePersona(next);
+              }
+            })
+          ),
+          h("input", {
+            className: "mneme-set-input",
+            value: persona.name,
+            placeholder: t("memory.settings.personaNamePlaceholder"),
+            "aria-label": t("memory.settings.personaName"),
+            onChange: (e) => setPersonaField("name", e.target.value)
+          }),
+          h("textarea", {
+            className: "mneme-set-input mneme-set-input--area",
+            value: persona.personality,
+            placeholder: t("memory.settings.personaPersonalityPlaceholder"),
+            "aria-label": t("memory.settings.personaPersonality"),
+            onChange: (e) => setPersonaField("personality", e.target.value)
+          }),
+          h("textarea", {
+            className: "mneme-set-input mneme-set-input--area",
+            value: persona.replyStyle,
+            placeholder: t("memory.settings.personaReplyStylePlaceholder"),
+            "aria-label": t("memory.settings.personaReplyStyle"),
+            onChange: (e) => setPersonaField("replyStyle", e.target.value)
+          }),
+          h("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+            h("button", { className: "mneme-btn", onClick: () => savePersona(persona) }, t("memory.settings.personaSave")),
+            personaSaved && h("span", { className: "mneme-saved" }, t("memory.settings.personaSaved"))
+          )
+        ),
+        // Agent 眼中的画像（只读）— 注入生效文本：profile + rules 原样展示。
+        // 纯前端拼接（GET 已在 load 里拿到 profile/rules），零后端新请求。
+        h("section", { className: "mneme-set-card" },
+          h("div", { className: "mneme-set-title" }, t("memory.settings.personaView")),
+          h("div", { className: "mneme-set-desc" }, t("memory.settings.personaViewHint")),
+          (profile.trim() || rules.length)
+            ? h("pre", { className: "mneme-set-input mneme-set-input--area", style: { whiteSpace: "pre-wrap", minHeight: 0 } },
+                [profile.trim() ? "- " + profile.trim() : "", ...rules.map((r) => "- " + r)].filter(Boolean).join("\n"))
+            : h("div", { className: "mneme-xempty" }, t("memory.settings.personaViewEmpty"))
         ),
         // 规则 — numbered rows, hover reveals the delete affordance
         h("section", { className: "mneme-set-card" },
@@ -3879,7 +4044,7 @@ window.__ModuleLoader__.load({
           ),
           apiTokenSaved && h("div", { style: { marginTop: 8 } }, h("span", { className: "mneme-saved" }, t("memory.settings.apiTokenSaved")))
         ),
-        // —— 帮助：意见与反馈（图标行 + 版本 footer，兼当「关于」收尾） ——
+        // —— 帮助：支持与鼓励（图标行 + 检测更新 + star，兼当「关于」收尾） ——
         h("div", { className: "mneme-set-grouphead" }, t("memory.settings.group.help")),
         // 反馈三入口：新建 issue 预填（版本+平台）/ 邮件 / 浏览已知问题。
         // 纯前端链接零后端成本；插件版本来自 /info，平台取 userAgent。GitHub
@@ -3894,6 +4059,20 @@ window.__ModuleLoader__.load({
               { href: mailHref }),
             feedRow("search", t("memory.settings.feedback.browse"), t("memory.settings.feedback.browse.sub"),
               { href: "https://github.com/slow-stack/mneme/issues", target: "_blank", rel: "noopener noreferrer" })
+          ),
+          // 检测更新：手动触发（复验修订——原顶部自动横幅移除），结果内联；
+          // outdated 时提示带 pnpm 钉子警示（#174 报障成因）。
+          h("div", { style: { display: "flex", alignItems: "center", gap: 8, marginTop: 12 } },
+            h("button", { className: "mneme-btn", onClick: checkForUpdate, disabled: updateChecking },
+              updateChecking ? "…" : t("memory.settings.update.check")),
+            updateInfo && h("span", { className: "mneme-feedsub" }, checkResultText())
+          ),
+          updateInfo?.status === "outdated" && h("div", { className: "mneme-set-hint", style: { marginTop: 8 } },
+            t("memory.settings.version.outdatedHint")),
+          // star 鼓励入口：给仓库点星是零成本的支持方式
+          h("div", { className: "mneme-feedlist", style: { marginTop: 12 } },
+            feedRow("star", t("memory.settings.star"), t("memory.settings.star.sub"),
+              { href: "https://github.com/slow-stack/mneme/stargazers", target: "_blank", rel: "noopener noreferrer" })
           ),
           h("div", { className: "mneme-set-foot" },
             h("span", null, `dsh-mneme v${pkgVersion}`)
@@ -4580,7 +4759,18 @@ window.__ModuleLoader__.load({
       if (n >= 1e3) return `${Math.round(n / 1e3)}K`;
       return String(n);
     };
-    const heatLevel = (n) => (n > 2500000 ? 4 : n > 1500000 ? 3 : n > 750000 ? 2 : n > 0 ? 1 : 0);
+    // 热力分档：固定阈值（75万/150万/250万）在低用量库里整片落在 l1，档位失真
+    // （复验第三轮「颜色不怎么明显」）。改按 56 天窗口内的非零日做三分位切四档
+    // ——GitHub 贡献图同思路，档次随库的实际用量自适应拉开；全零/无数据退化
+    // 为全 0 档（不留空档位）。边界是三个分位值（q 只返回 3 个）：n>p75 → l4、
+    // >p50 → l3、>p25 → l2、其余非零 → l1，四档都有 populated。
+    const heatLevel = (n, q) => (n <= 0 ? 0 : n > q[2] ? 4 : n > q[1] ? 3 : n > q[0] ? 2 : 1);
+    const heatQuartiles = (days) => {
+      const pos = days.map((d) => d.total).filter((v) => v > 0).sort((a, b) => a - b);
+      if (!pos.length) return [0, 0, 0];
+      const pick = (p) => pos[Math.min(pos.length - 1, Math.floor(p * pos.length))];
+      return [pick(0.25), pick(0.5), pick(0.75)];
+    };
 
     function TokenFlowSection({ t }) {
       const [stats, setStats] = useState(null);
@@ -4690,6 +4880,33 @@ window.__ModuleLoader__.load({
           heatCells.push({ key, total: byDayMap.get(key) ?? 0 });
         }
       }
+      // 分档阈值取自本窗口真实分布（见 heatQuartiles 注释），空窗口退化全 0 档。
+      const heatQ = heatQuartiles(heatCells);
+      // 月份标签：GitHub 同款——按周列贴，列首日期属于哪个月，那列就标那个
+      // 月；连续同月的列合并成一段（gridColumn: from / span）。月不在列首
+      // 开始时其首列仍标上一月（列首归属优先），这是贡献图的通行近似。
+      const monthLabels = (() => {
+        if (!heatCells.length) return [];
+        const spans = [];
+        heatCells.forEach((c, i) => {
+          if (i % 7 !== 0) return; // 只看列首
+          const ym = c.key.slice(0, 7);
+          const col = Math.floor(i / 7) + 1;
+          const label = `${Number(ym.slice(5, 7))}月`;
+          const lastSpan = spans[spans.length - 1];
+          if (lastSpan && lastSpan.key === ym) { lastSpan.last = col; return; }
+          spans.push({ key: ym, label, from: col, last: col });
+        });
+        return spans.map((m) => ({ ...m, span: m.last - m.from + 1 }));
+      })();
+      // 行标签：行 r 的星期 = (首列星期 + r) % 7（getUTCDay 周日=0）。一/三/五
+      // 三行有字（GitHub 同款），其余留空。
+      const heatRowLabels = (() => {
+        const startDow = heatCells.length ? new Date(`${heatCells[0].key}T00:00:00Z`).getUTCDay() : 0;
+        const rows = new Array(7).fill("");
+        for (const d of [1, 3, 5]) rows[(d - startDow + 7) % 7] = ["一", "三", "五"][[1, 3, 5].indexOf(d)];
+        return rows;
+      })();
       const kpi = (title, num, cap) =>
         h(StatusCard, { t, title, loading, error: statsError, num, cap });
       const segClass = (s) =>
@@ -4783,12 +5000,22 @@ window.__ModuleLoader__.load({
             days.map((d) => h("span", { key: d.day }, d.day.slice(5)))
           ),
           h("h3", { className: "mneme-xcolhead" }, t("memory.status.token.heat")),
-          h("div", { className: "mneme-heatgrid" },
-            heatCells.map((c) => h("div", {
-              key: c.key,
-              className: heatLevel(c.total) ? `mneme-heatcell l${heatLevel(c.total)}` : "mneme-heatcell",
-              title: `${c.key} · ${c.total.toLocaleString()}`
-            }))
+          // 月份行与格子列同用列主序网格对齐：每月占的列数 = 该月在这个
+          // 56 天窗口里的列数（按列的起始日期算），标签只在该列起点画一次。
+          h("div", { className: "mneme-heatmonths" },
+            monthLabels.map((m) => h("span", { key: m.key, style: { gridColumn: `${m.from} / span ${m.span}` } }, m.label))
+          ),
+          h("div", { className: "mneme-heatwrap" },
+            h("div", { className: "mneme-heatrows", "aria-hidden": "true" },
+              heatRowLabels.map((d, i) => h("span", { key: i }, d))
+            ),
+            h("div", { className: "mneme-heatgrid" },
+              heatCells.map((c) => h("div", {
+                key: c.key,
+                className: heatLevel(c.total, heatQ) ? `mneme-heatcell l${heatLevel(c.total, heatQ)}` : "mneme-heatcell",
+                title: `${c.key} · ${c.total.toLocaleString()}`
+              }))
+            )
           ),
           h("div", { className: "mneme-heatlegend" },
             h("span", null, t("memory.status.token.heatLess")),
@@ -6267,6 +6494,9 @@ window.__ModuleLoader__.load({
           ),
         ),
         view === "memory" && h("div", { className: "mneme-xmain" },
+          // 两栏布局（桉桉规格）：左栏上段=语义检索（怎么搜），下段=重要性/
+          // 来源/热度（留什么）；原第二侧栏的类型列表与计数刷新下沉到内容区
+          // 工具条（.mneme-xbrowsebar），五个功能入口一个不丢。
           h("div", { className: "mneme-xside" },
             h("div", { className: "mneme-xcolhead" }, t("memory.explorer.searchTitle")),
             h("div", { className: "mneme-xsearchwrap" },
@@ -6307,39 +6537,28 @@ window.__ModuleLoader__.load({
                 ["all", "7d", "30d", "90d"].map((k) =>
                   h("option", { key: k, value: k }, t(`memory.explorer.date.${k}`))))
             ),
-            h("div", { className: "mneme-xrow" },
-              h("span", { className: "mneme-xcount" }, t("memory.explorer.count").replace("{n}", String(visible.length))),
-              h("button", { className: "mneme-footbtn", onClick: () => setReloadKey((k) => k + 1) },
-                h(Icon, { name: "refresh", size: 12 }), t("memory.explorer.refresh"))
-            )
-          ),
-          h("div", { className: "mneme-xside mneme-xside--filter" },
-            h("div", { className: "mneme-xcolhead" }, t("memory.explorer.importance")),
-            h("div", { className: "mneme-xrow" },
-              [0, 3, 4, 5].map((v) =>
-                h("button", {
-                  key: v,
-                  className: minImp === v ? "mneme-chip mneme-active" : "mneme-chip",
-                  onClick: () => setMinImp(v)
-                }, v === 0 ? t("memory.tab.all") : h(react.Fragment, null, h(StarGlyph, { size: 11 }), ` ${v}+`)))
-            ),
-            h("div", { className: "mneme-xcolhead" }, t("memory.explorer.sourceFilter")),
-            h("div", { className: "mneme-xrow" },
-              h("button", {
-                className: depositedOnly ? "mneme-chip mneme-active" : "mneme-chip",
-                title: t("memory.explorer.filterDepositedHint"),
-                onClick: () => setDepositedOnly(!depositedOnly)
-              }, t("memory.explorer.filterDeposited")),
-              h("button", {
-                className: archivedOnly ? "mneme-chip mneme-active" : "mneme-chip",
-                title: t("memory.explorer.filterArchivedHint"),
-                onClick: () => setArchivedOnly(!archivedOnly)
-              }, t("memory.explorer.filterArchived"))
-            ),
-            heatAvailable && h(react.Fragment, null,
-              h("div", { className: "mneme-xcolhead" }, t("memory.explorer.sort")),
+            h("div", { className: "mneme-xside-imp" },
+              h("div", { className: "mneme-xcolhead" }, t("memory.explorer.importance")),
+              h("div", { className: "mneme-xrow" },
+                [0, 3, 4, 5].map((v) =>
+                  h("button", {
+                    key: v,
+                    className: minImp === v ? "mneme-chip mneme-active" : "mneme-chip",
+                    onClick: () => setMinImp(v)
+                  }, v === 0 ? t("memory.tab.all") : h(react.Fragment, null, h(StarGlyph, { size: 11 }), ` ${v}+`)))
+              ),
               h("div", { className: "mneme-xrow" },
                 h("button", {
+                  className: depositedOnly ? "mneme-chip mneme-active" : "mneme-chip",
+                  title: t("memory.explorer.filterDepositedHint"),
+                  onClick: () => setDepositedOnly(!depositedOnly)
+                }, t("memory.explorer.filterDeposited")),
+                h("button", {
+                  className: archivedOnly ? "mneme-chip mneme-active" : "mneme-chip",
+                  title: t("memory.explorer.filterArchivedHint"),
+                  onClick: () => setArchivedOnly(!archivedOnly)
+                }, t("memory.explorer.filterArchived")),
+                heatAvailable && h("button", {
                   className: heatSort ? "mneme-chip mneme-active" : "mneme-chip",
                   title: t("memory.explorer.heatSortHint"),
                   onClick: () => {
@@ -6348,23 +6567,28 @@ window.__ModuleLoader__.load({
                   }
                 }, t("memory.explorer.heatSort"))
               )
-            ),
-            h("div", { className: "mneme-xcolhead" }, t("memory.explorer.types")),
-            h("button", {
-              className: type === "all" ? "mneme-xtype mneme-active" : "mneme-xtype",
-              onClick: () => setType("all")
-            }, h("span", { className: "mneme-xdot mneme-xdot--all", "aria-hidden": "true" }), h("span", null, t("memory.tab.all")), h("span", { className: "mneme-xcount2" }, String(items.length))),
-            knownTypes.concat(extraTypes).map((key) =>
-              h("button", {
-                key,
-                className: type === key ? "mneme-xtype mneme-active" : "mneme-xtype",
-                onClick: () => setType(key)
-              },
-                h("span", { className: "mneme-xdot", style: { color: memoryTypeColor(key) }, title: typeLabel(t, key), "aria-hidden": "true" }),
-                h("span", null, typeLabel(t, key)),
-                h("span", { className: "mneme-xcount2" }, String(counts[key]))
-              ))
+            )
           ),
+          h("div", { className: "mneme-xcontent" },
+            h("div", { className: "mneme-xbrowsebar" },
+              h("button", {
+                className: type === "all" ? "mneme-xtype mneme-active" : "mneme-xtype",
+                onClick: () => setType("all")
+              }, h("span", { className: "mneme-xdot mneme-xdot--all", "aria-hidden": "true" }), h("span", null, t("memory.tab.all")), h("span", { className: "mneme-xcount2" }, String(items.length))),
+              knownTypes.concat(extraTypes).map((key) =>
+                h("button", {
+                  key,
+                  className: type === key ? "mneme-xtype mneme-active" : "mneme-xtype",
+                  onClick: () => setType(key)
+                },
+                  h("span", { className: "mneme-xdot", style: { color: memoryTypeColor(key) }, title: typeLabel(t, key), "aria-hidden": "true" }),
+                  h("span", null, typeLabel(t, key)),
+                  h("span", { className: "mneme-xcount2" }, String(counts[key]))
+                )),
+              h("span", { className: "mneme-xcount", style: { marginLeft: "auto" } }, t("memory.explorer.count").replace("{n}", String(visible.length))),
+              h("button", { className: "mneme-footbtn", onClick: () => setReloadKey((k) => k + 1) },
+                h(Icon, { name: "refresh", size: 12 }), t("memory.explorer.refresh"))
+            ),
           viewMode === "cards"
             ? h("div", { className: "mneme-cards" },
                 loading
@@ -6469,8 +6693,11 @@ window.__ModuleLoader__.load({
               )
             ),
             ),
+          ),
       // 详情抽屉：卡片/时间线共用，选中即从右侧滑出（替代旧底部面板）。
       // 两步删除确认在抽屉内完成；编辑/归档经 /update 落库并同步本地视图。
+      // 保持为 .mneme-xmain 直接子元素：抽屉锚在 xmain 的 relative 层上，随
+      // 两栏改版内容区变宽，抽屉锚点不变。
       selected && h(MemoryDrawer, {
         key: selected.id,
         t,
