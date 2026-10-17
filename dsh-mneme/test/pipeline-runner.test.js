@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import { writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { createExecutionRecorder, projectRootOf, MAX_BUFFERED_EVENTS } from "../src/pipeline-runner.js";
 import { validatePipeline } from "../src/pipeline.js";
 
@@ -351,6 +354,79 @@ test("dispose 摘掉监听，之后的窗口全清", () => {
   assert.equal(f.hasListener(), false);
   assert.equal(rec.status({ session }).open, false);
   rec.dispose(); // 重复 dispose 不报错
+});
+
+// ---------------------------------------------------------------------------
+// P3（丙）：确认时刻的观察旁挂 + tool 不符检出
+// 设计见 mneme-research/mo-foundations/10 号；丙 = 旁挂文件，不动已发布的账本契约
+// ---------------------------------------------------------------------------
+test("P3：给了 memoryDir 时，confirm 把观察旁挂 + 报出 tool 不符", () => {
+  const f = fakeCtx();
+  let written = null;
+  const rec = createExecutionRecorder({
+    ctx: f.ctx,
+    resolvePipeline: () => PIPE,
+    persistRun: (root, id, run) => { written = { run }; },
+    memoryDir: "D:/mem-test"     // 注入（真实现里来自 config.memoryDir）
+  });
+  const session = { id: "s1", header: { cwd: "C:\\proj" } };
+  rec.start({ session, pipelineId: "demo" });
+  // 实际敲的是 node --test，不是步骤声明的 npm test → 人确认后应报不符
+  f.emit(session, { type: "tool/call", data: { callId: "c1", name: "pwsh", arguments: '{"command":"node --test test/x.test.js"}' } });
+  f.emit(session, { type: "tool/result", data: { callId: "c1", message: { isError: false } } });
+  rec.stop({ session });
+  const confirmed = rec.confirm({ session, answers: { P6: "done" } });
+
+  assert.equal(confirmed.ok, true);
+  assert.equal(confirmed.toolMismatches.length, 1, "声明 npm test 未出现 → 一条不符");
+  assert.equal(confirmed.toolMismatches[0].declared, "npm test");
+  assert.equal(confirmed.observationsSaved.ok, true, "观察已旁挂");
+  assert.equal(confirmed.observationsSaved.lines, 1, "node --test 一条");
+});
+
+test("P3：没给 memoryDir 时静默关闭——旁挂 skipped，但 mismatch 照算（不落盘的那半不连累这半）", () => {
+  const f = fakeCtx();
+  const rec = createExecutionRecorder({ ctx: f.ctx, resolvePipeline: () => PIPE, persistRun: () => {} });
+  const session = { id: "s1", header: { cwd: "C:\\proj" } };
+  rec.start({ session, pipelineId: "demo" });
+  f.emit(session, { type: "tool/call", data: { callId: "c1", name: "pwsh", arguments: '{"command":"node --test x"}' } });
+  f.emit(session, { type: "tool/result", data: { callId: "c1", message: { isError: false } } });
+  rec.stop({ session });
+  const confirmed = rec.confirm({ session, answers: { P6: "done" } });
+
+  assert.equal(confirmed.ok, true);
+  assert.equal(confirmed.observationsSaved.skipped, true, "没配 memoryDir = P3 旁挂关");
+  assert.equal(confirmed.toolMismatches.length, 1, "检出与旁挂是两件事，各自独立");
+});
+
+test("P3：旁挂写失败不连累记账（账本才是唯一事实）", () => {
+  const f = fakeCtx();
+  let written = false;
+  // 占位文件：往「一个文件路径的下面」建目录必然 ENOTDIR（node mkdirSync 实测）
+  const blocker = join(tmpdir(), "mo-p3-blocker-" + Date.now());
+  writeFileSync(blocker, "x", "utf8");
+  const rec = createExecutionRecorder({
+    ctx: f.ctx,
+    resolvePipeline: () => PIPE,
+    persistRun: () => { written = true; },
+    memoryDir: blocker,          // <memoryDir>/observations/... 的父级是个文件 → mkdir 抛
+    logger: { warn: () => {} }
+  });
+  try {
+    const session = { id: "s1", header: { cwd: "C:\\proj" } };
+    rec.start({ session, pipelineId: "demo" });
+    f.emit(session, { type: "tool/call", data: { callId: "c1", name: "pwsh", arguments: '{"command":"npm test"}' } });
+    f.emit(session, { type: "tool/result", data: { callId: "c1", message: { isError: false } } });
+    rec.stop({ session });
+    const confirmed = rec.confirm({ session, answers: { P6: "done" } });
+
+    assert.equal(confirmed.ok, true, "旁挂炸了，记账也必须成功");
+    assert.equal(written, true, "账本照写");
+    assert.equal(confirmed.observationsSaved.ok, false, "旁挂如实报未成");
+    assert.equal(confirmed.toolMismatches.length, 0, "声明 npm test 且观察到了它 → 无不符");
+  } finally {
+    rmSync(blocker, { force: true });
+  }
 });
 
 test("projectRootOf 与 scope.js 同口径：header 优先，不在时退回请求头", () => {

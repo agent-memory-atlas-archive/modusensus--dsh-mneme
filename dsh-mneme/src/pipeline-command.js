@@ -169,6 +169,19 @@ function describeConfirm(result, language) {
     if (result.notDone?.length) parts.push(t.notDone(result.notDone.join("、")));
     if (result.unsure?.length) parts.push(t.unsure(result.unsure.join("、")));
     if (result.unanswered?.length) parts.push(t.unanswered(result.unanswered.join("、")));
+    // P3 的核心产出：你说这步做了，但声明的命令这次一次都没出现。
+    // 三种可能（声明该改 / 本来不必敲 / 记错了）必须由人判——系统只负责把矛盾摆出来。
+    if (result.toolMismatches?.length) {
+      const rows = result.toolMismatches.map((m) => {
+        const seen = m.observedTop?.length ? `；本次实际看到 ${m.observedTop.join("、")}` : "；本次没有可对照的动作";
+        return `  ${m.stepId}（${m.title}）：声明 ${m.declared}，本次未出现${seen}`;
+      });
+      parts.push(t.mismatch(result.toolMismatches.length, rows.join("\n")));
+    }
+    // 旁挂回执：给不给只取决于 memoryDir 是否配置——静默关闭是设计，不是失败
+    if (result.observationsSaved?.ok) {
+      parts.push(t.obsSaved(result.observationsSaved.file));
+    }
     return parts.filter(Boolean).join("\n");
   }
   switch (result.reason) {

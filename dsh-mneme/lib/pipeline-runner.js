@@ -42,6 +42,8 @@ import { openRun } from "./pipeline-exec.js";
 import { pairObservations } from "./pipeline-observe.js";
 import { tallyActivities } from "./pipeline-activities.js";
 import { buildProposal, runFromAnswers } from "./pipeline-confirm.js";
+import { observationDir, saveObservations, toolMismatches } from "./pipeline-observations.js";
+import { projectKey } from "./candidates.js";
 
 /** 一个窗口最多缓冲多少条会话事件。忘了 stop 时，这是内存的兜底。 */
 export const MAX_BUFFERED_EVENTS = 4000;
@@ -99,7 +101,10 @@ export function createExecutionRecorder({
   resolvePipeline = defaultResolvePipeline,
   persistRun = appendRun,
   now = () => new Date(),
-  maxBufferedEvents = MAX_BUFFERED_EVENTS
+  maxBufferedEvents = MAX_BUFFERED_EVENTS,
+  // P3（丙）：观察旁挂的根目录。null = 不落旁挂（P3 静默关闭）。
+  // 与 resolvePipeline/persistRun 同款依赖注入——runner 不读 config，测试不碰真文件系统。
+  memoryDir = null
 } = {}) {
   const windows = new Map(); // sessionId → { pipeline, projectRoot, run, events, truncated }
   // 已结账、等人确认的会话：sessionId → { pipeline, projectRoot, proposal, stats }
@@ -197,6 +202,9 @@ export function createExecutionRecorder({
         pipeline: w.pipeline,
         projectRoot: w.projectRoot,
         proposal,
+        // P3（丙）：把本次观察清单带进待确认状态。confirm 时它有三个用途：
+        // 旁挂落盘 / tool 不符检出 / 回执展示。memoryDir 为空时不带（P3 关）。
+        activities: activityTally.activities,
         stats: {
           truncated: w.truncated,
           notCommands,
@@ -262,6 +270,40 @@ export function createExecutionRecorder({
       } catch (error) {
         return { ok: false, reason: "write-failed", detail: String(error?.message ?? error), ...p.stats };
       }
+
+      // ── P3：人确认过的事实，与本次观察到的动作对一遍 ──────────────────
+      // ① tool 不符检出：人说了 done、但声明的 tool 在本次动作里没出现。
+      //    这是「步骤表可能与实际行为脱节」的信号（实测：gh pr merge --rebase 在
+      //    21723 次调用里出现 0 次）。**只报告，不改步骤表**——改表是人的动作。
+      const doneIds = new Set(result.run.steps.filter((s) => !s.skipped).map((s) => s.id));
+      let toolMismatchesResult = { ok: true, items: [] };
+      if (Array.isArray(p.activities)) {
+        toolMismatchesResult = toolMismatches({
+          pipeline: p.pipeline,
+          confirmedDone: doneIds,
+          activities: p.activities
+        });
+      }
+      // ② 观察旁挂（丙）：memoryDir 给了才落。写失败**不连累记账**——旁挂是
+      // 可再生的辅助数据（同一 run 重走一遍就有），账本才是唯一事实。
+      let observationsSaved = null;
+      if (memoryDir && Array.isArray(p.activities)) {
+        const key = projectKey(p.projectRoot);
+        const odir = observationDir({ memoryDir, projectKey: key });
+        if (odir) {
+          try {
+            observationsSaved = saveObservations({
+              dir: odir,
+              pipelineId: p.pipeline.id,
+              confirmAt: result.run.at,
+              activities: p.activities
+            });
+          } catch (error) {
+            logger?.warn?.(`dsh-mneme: 观察旁挂写入失败（不影响记账）：${String(error)}`);
+          }
+        }
+      }
+
       return {
         ok: true,
         pipelineId: p.pipeline.id,
@@ -270,6 +312,11 @@ export function createExecutionRecorder({
         notDone: result.notDone,
         unsure: result.unsure,
         unanswered: result.unanswered,
+        // P3 的两个产出：不符清单（人判「声明该改还是本来不必敲」）与旁挂回执
+        toolMismatches: toolMismatchesResult.ok ? toolMismatchesResult.items : [],
+        observationsSaved: observationsSaved
+          ? { ok: true, file: observationsSaved.file, lines: observationsSaved.lines, duplicate: observationsSaved.duplicate === true }
+          : { ok: false, skipped: true },
         ...p.stats
       };
     },

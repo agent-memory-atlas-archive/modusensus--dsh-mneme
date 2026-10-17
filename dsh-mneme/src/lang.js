@@ -295,7 +295,8 @@ export const STR = {
       unsure: (list) => `你说不确定，没有写进账：${list}`,
       unanswered: (list) => `没提到的步骤没有写进账：${list}`,
       nothingToConfirm: "没有待确认的清单。先 /mo-run start <工作流 id>，走一遍，再 /mo-run stop。",
-      noAnswers: (notDone, unsure, unanswered) =>
+      mismatch: (n, rows) => `⚠️ 有 ${n} 步你说做了、但声明的命令这次一次都没出现（是声明该改、还是本来不必敲？由你判）：\n${rows}`,
+      obsSaved: (file) => `本次观察已旁挂：${file}`,      noAnswers: (notDone, unsure, unanswered) =>
         `一条都没确认，**没有落盘**。你说「没做」的 ${notDone} 步、不确定的 ${unsure} 步、没提到的 ${unanswered} 步。\n确认「做了」的步骤才会写账：/mo-run confirm <步骤 id>`,
       badValue: (stepId, value) => `${stepId} 的回答「${value}」不合法。只认「做了」（或不写标记）/「没做」写作 -/「不确定」写作 ?`,
       unknownStep: (stepId) => `没有这一步：${stepId}`,
@@ -308,7 +309,8 @@ export const STR = {
       unsure: (list) => `You were unsure; not written to the ledger: ${list}`,
       unanswered: (list) => `Steps you did not mention were not written to the ledger: ${list}`,
       nothingToConfirm: "Nothing to confirm. Run /mo-run start <pipeline id>, walk through it, then /mo-run stop.",
-      noAnswers: (notDone, unsure, unanswered) =>
+      mismatch: (n, rows) => `⚠️ ${n} step(s) you marked done never showed their declared command this pass (stale declaration, or simply not needed? your call):\n${rows}`,
+      obsSaved: (file) => `Observations side-written to: ${file}`,      noAnswers: (notDone, unsure, unanswered) =>
         `Nothing was confirmed; **nothing was persisted**. Not-done: ${notDone}, unsure: ${unsure}, unmentioned: ${unanswered}.\nOnly steps confirmed as done are recorded: /mo-run confirm <step id>`,
       badValue: (stepId, value) => `Answer "${value}" for ${stepId} is invalid. Use done (no marker) / - for not-done / ? for unsure.`,
       unknownStep: (stepId) => `No such step: ${stepId}`,
