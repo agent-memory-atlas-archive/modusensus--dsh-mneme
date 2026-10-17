@@ -166,6 +166,10 @@ const FEATURE_FLAG_BOOLEANS = [
   // 这个键稳定暴露出来——键若不在 effective 里，客户端静默少键、一个座位都不注册。
   // 默认关（beta、opt-in）；顶层扁平键，因此不需要 NESTED_FLAG_PATHS 条目。
   "actionPipelineEnabled",
+  // v0.9.0 第二批：M.O. 执行记账（`/mo-run` 开窗 → 窗口内命令被记成一条 run）。
+  // 与上面那个键分开：那个管「看图的座位」，这个管「往账本里写」。默认关（beta、
+  // opt-in），顶层扁平键，不需要 NESTED_FLAG_PATHS 条目。
+  "actionRunEnabled",
   // 人格定义页（beta）：注入器渲染人格段的顶层总闸（双闸门的 config 半边；对象内
   // 的 persona.enabled 是 per-agent 半边，存 user_settings 的 "persona" 键，见
   // getPersona/setPersona）。默认关（beta、opt-in，老用户行为逐字节不变）；不进
