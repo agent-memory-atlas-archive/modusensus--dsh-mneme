@@ -31,6 +31,9 @@ on:
 
 permissions:
   contents: write
+  # npm provenance 用 OIDC 而不是长期 token 签名：publish 步骤要能取 id-token，
+  # 否则 --provenance 会直接报错（2026-10 审计的供应链项）。
+  id-token: write
 
 jobs:
   # ── 1. 版本号管理：tag ↔ package.json ↔ CHANGELOG 三方一致 ──────────────
@@ -128,7 +131,9 @@ jobs:
           if npm view "@modusensus/dsh-mneme@${V}" version >/dev/null 2>&1; then
             echo "v${V} already published on registry — skipping"
           else
-            npm publish --access public
+            # --provenance：把 tarball 与这次 commit / workflow 绑成可验证的 attestation，
+            # 消费者能确认「这个版本确实从这条 commit 发出来」，而不是相信 registry 上的名字。
+            npm publish --access public --provenance
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
