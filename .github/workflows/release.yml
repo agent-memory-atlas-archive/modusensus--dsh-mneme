@@ -29,9 +29,11 @@ on:
         type: boolean
         default: false
 
-# 权限按 job 发放：只有 publish 需要 contents: write（建 Release 前的 tag 校验）
-# 与 id-token: write（npm provenance 走 OIDC）。verify/test/notify 只读代码，
-# 工作流级给写权限等于把它们全变成可被依赖链利用的提权面（CWE-250）。
+# 权限按 job 发放，工作流级一律只读：
+#   publish → id-token: write（npm provenance 走 OIDC，不需要长期 token）
+#   release → contents: write（建/改 GitHub Release）
+# verify/test/notify 只读代码。工作流级给写权限等于把它们全变成可被依赖链
+# 利用的提权面（CWE-250）。
 permissions:
   contents: read
 

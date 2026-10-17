@@ -119,7 +119,9 @@ function readBody(req, res) {
       body += chunk;
     });
     req.on("end", () => resolve(overflow ? null : body));
-    req.on("error", () => resolve(""));
+    // 超限后再来 transport error 也必须保留超限状态：否则调用点会拿着空串
+    // 继续往 store 写（PUT /persona 把 "" 解析成 {}，覆盖既有设置）。
+    req.on("error", () => resolve(overflow ? null : ""));
   });
 }
 

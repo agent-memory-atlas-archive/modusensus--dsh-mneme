@@ -135,6 +135,25 @@ test("超大请求体回 413，且不落库", async () => {
   assert.equal(service.all().length, before, "超限请求不得留下任何记忆");
 });
 
+test("超限后又来 transport error，仍回 413 且不写库", async () => {
+  // readBody 的超限状态必须活过 error 分支：旧实现 error 时 resolve("")，
+  // 调用点只认 null，于是拿着空串继续走 → PUT /persona 把 "" 解析成 {}，
+  // 覆盖既有设置。这条锁的就是「413 发出去了，但后面的写入还在跑」。
+  const { routes, settings } = setup("secret-token");
+  settings.setRules(["别丢"]);
+  const huge = Buffer.from("x".repeat(5 * 1024 * 1024));
+  const r = new EventEmitter();
+  r.url = "/api/dsh-mneme/rules";
+  r.method = "PUT";
+  r.headers = { authorization: "Bearer secret-token" };
+  const res = new FakeRes();
+  const done = handler(routes, "/api/dsh-mneme/rules").handler(r, res);
+  process.nextTick(() => { r.emit("data", huge); r.emit("error", new Error("boom")); });
+  await done;
+  assert.equal(res.statusCode, 413);
+  assert.deepEqual(settings.getRules(), ["别丢"], "error 分支不得让空体落库");
+});
+
 test("超大请求体不会清空画像／规则", async () => {
   // 这是最要命的一条：readBody 旧实现超限回空串 → parseBody 得到 {} →
   // setProfile("") / setRules([]) 把既有内容静默清掉。413 必须在碰 store 之前。
