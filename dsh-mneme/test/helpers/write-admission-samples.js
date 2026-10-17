@@ -47,7 +47,11 @@ export const SAMPLE_VALUES = {
     ".eyJzdWIiOiIxMjM0NTY3ODkwIn0",
     ".dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
   ),
-  stripeKey: assemble("sk_", "live_", "51H8Qw2KZvN3mPqRsTuVwXyZ0123456789abcdef")
+  stripeKey: assemble("sk_", "live_", "51H8Qw2KZvN3mPqRsTuVwXyZ0123456789abcdef"),
+  // 这条曾以整串字面量留在下面的 content 里，被 GitHub secret scanning 报成 openai_api_key
+  // （alert #1）。它是形状样本不是真凭据（正文就是 a-z、0-9 顺序串），但扫描器只看形状，
+  // 所以按上面第 32-34 行的口径统一走拼接，别让它再当例外。
+  openaiKey: assemble("sk-proj-", "abcdefghijklmnopqrstuvwxyz0123456789ABCD")
 };
 
 /** 密钥凭据类正样本。kind 与 label 是判据该报回来的东西。 */
@@ -73,7 +77,7 @@ export const SECRET_SAMPLES = [
     kind: "openai_key",
     label: "OpenAI API key",
     title: "调试记录",
-    content: "临时用 sk-proj-abcdefghijklmnopqrstuvwxyz0123456789ABCD 调了一次",
+    content: `临时用 ${SAMPLE_VALUES.openaiKey} 调了一次`,
     why: "sk-/sk-proj- 前缀 + 长串"
   },
   {

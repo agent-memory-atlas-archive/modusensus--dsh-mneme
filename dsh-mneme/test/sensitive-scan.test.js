@@ -205,3 +205,32 @@ test("长文本上的回溯有上界：写阻塞类回归的计时护栏", () =>
     assert.ok(ms < 2000, `${text.length} 字符耗时 ${ms.toFixed(1)}ms，超 2000ms 预算（回溯上界被破坏？）`);
   }
 });
+
+// 仓库文本守卫：语料里的凭据值必须以拼接形式存在，仓库里不得留下完整形状。
+// 触发这件事的是 GitHub secret scanning 的 alert #1——write-admission-samples.js 里
+// openai-key 那条曾经是整串字面量（同文件其它四条都已是 assemble 拼接），被报成
+// openai_api_key 的 open=true 告警。它本身不是泄露（正文是 a-z、0-9 的顺序串），
+// 但扫描器只看形状；而这条漏网说明「逐条记得改」靠不住，所以用一条测试把它钉住：
+// 以后谁再往语料里加字面量，这里先红，不用等 GitHub 来通知。
+test("语料里不留完整形状的凭据字面量（secret scanning alert #1 的回归锁）", async () => {
+  const { readFile, readdir } = await import("node:fs/promises");
+  const helpersDir = new URL("./helpers/", import.meta.url);
+  const files = (await readdir(helpersDir)).filter((f) => f.endsWith(".js"));
+  // 形状与 src/sensitive-scan.js 的规则同源：形状一致才谈得上「扫描器会认」。
+  const rules = [
+    { re: /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/, what: "OpenAI key" },
+    { re: /\bghp_[A-Za-z0-9]{36}\b/, what: "GitHub PAT" },
+    { re: /\bxoxb-[A-Za-z0-9-]{20,}\b/, what: "Slack token" }
+  ];
+  for (const file of files) {
+    const text = await readFile(new URL(file, helpersDir), "utf8");
+    for (const { re, what } of rules) {
+      const hit = text.match(re);
+      assert.equal(
+        hit,
+        null,
+        `${file} 里出现了完整的 ${what} 字面量（${hit?.[0]?.slice(0, 12)}…）：按 assemble 拼接，别整串写`
+      );
+    }
+  }
+});
