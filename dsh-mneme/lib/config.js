@@ -869,7 +869,6 @@ export const Config = z.object({
   // 也走 feature_flags（FEATURE_FLAG_BOOLEANS 白名单），面板可启停=线上回滚开关。
   actionPipelineEnabled: z.boolean().default(false),
 
-<<<<<<< HEAD
   // M.O. 执行记账（v0.9.0 第二批）：`/mo-run` 显式开一次执行窗口，窗口内的命令执行
   // 才可能被记成一条 run。与上面那个键**分开**：上面管「看图的座位」，这个管
   // 「往账本里写」——看图和写账是两件事，混成一个键会让「只想看图」的人不知不觉
@@ -877,8 +876,8 @@ export const Config = z.object({
   //
   // 默认关（beta 必须 opt-in）。它挂在热路径上（每个会话事件都过一次监听），
   // 所以轻量档要关掉：`LIGHT_MODE_OFF` 里有它。
-  actionRunEnabled: z.boolean().default(false)
-=======
+  actionRunEnabled: z.boolean().default(false),
+
   // --- 人格定义页（beta）---------------------------------------------------
   // 注入器渲染人格段的顶层总闸（双闸门的 config 半边；user_settings "persona"
   // 键内的 persona.enabled 是 per-agent 半边，两闸同真才渲染）。API 的 effective
@@ -889,7 +888,6 @@ export const Config = z.object({
   // 显式勾选仍然赢（同 actionPipelineEnabled 的定性）。
   // 也走 feature_flags（FEATURE_FLAG_BOOLEANS 白名单），面板可启停=线上回滚开关。
   personaEnabled: z.boolean().default(false)
->>>>>>> origin/main
 });
 
 // Fields forced to false by the light-mode preset. Everything not listed here
