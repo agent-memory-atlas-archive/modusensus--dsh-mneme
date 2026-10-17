@@ -291,7 +291,16 @@ window.__ModuleLoader__.load({
         "memory.settings.personaReplyStylePlaceholder": "例如：先给结论再解释；用人在用的词，不用机制名",
         "memory.settings.personaSave": "保存人格",
         "memory.settings.personaSaved": "人格已保存",
-        "memory.settings.personaEnabledToggle": "启用这张人格卡",
+        "memory.settings.personaSaveFailed": "保存失败",
+        "memory.settings.personaEnabledToggle": "启用这张卡",
+        "memory.settings.personaEnabledOn": "已启用——身份命中的会话会注入这张卡",
+        "memory.settings.personaEnabledOff": "未启用——这个身份的会话将使用默认卡",
+        "memory.settings.personaDefaultCard": "默认卡（兜底）",
+        "memory.settings.personaAdd": "添加卡",
+        "memory.settings.personaAddPlaceholder": "输入 agent 身份名（如 zephyr），按它寻址注入",
+        "memory.settings.personaEditingDefault": "正在编辑：默认卡——没有命中任何身份卡的会话用它",
+        "memory.settings.personaEditingFor": "正在编辑身份卡：",
+        "memory.settings.personaDeleteCard": "删除这张卡",
         "memory.settings.personaView": "Agent 眼中的你（注入生效文本）",
         "memory.settings.personaViewHint": "以下是每一轮实际注入的用户画像与规则，只读。",
         "memory.settings.personaViewEmpty": "画像与规则均为空——Agent 每轮只会看到记忆库。",
@@ -954,7 +963,16 @@ window.__ModuleLoader__.load({
         "memory.settings.personaReplyStylePlaceholder": "e.g. conclusion first; plain words over jargon",
         "memory.settings.personaSave": "Save Persona",
         "memory.settings.personaSaved": "Persona saved",
-        "memory.settings.personaEnabledToggle": "Enable this persona card",
+        "memory.settings.personaSaveFailed": "Save failed",
+        "memory.settings.personaEnabledToggle": "Enable this card",
+        "memory.settings.personaEnabledOn": "On — sessions matching this identity get this card",
+        "memory.settings.personaEnabledOff": "Off — sessions with this identity fall back to the default card",
+        "memory.settings.personaDefaultCard": "Default (fallback)",
+        "memory.settings.personaAdd": "Add card",
+        "memory.settings.personaAddPlaceholder": "Agent identity (e.g. zephyr) used to address injection",
+        "memory.settings.personaEditingDefault": "Editing: default card — used by sessions matching no identity card",
+        "memory.settings.personaEditingFor": "Editing identity card:",
+        "memory.settings.personaDeleteCard": "Delete this card",
         "memory.settings.personaView": "You, as the agent sees you (injected text)",
         "memory.settings.personaViewHint": "The profile and rules actually injected every turn. Read-only.",
         "memory.settings.personaViewEmpty": "Profile and rules are both empty — the agent only sees the memory store.",
@@ -3390,10 +3408,14 @@ window.__ModuleLoader__.load({
       const [newCmd, setNewCmd] = react.useState({ name: "", description: "", instruction: "" });
       const [saved, setSaved] = react.useState(false);
       const [cmdError, setCmdError] = react.useState("");
-      // 人格卡（beta）：name/personality/replyStyle 三字段草稿 + 卡内开关；
+      // 人格卡（beta，v1.2 多卡）：default 卡草稿 + byAgent 卡列表 + 当前编辑位；
       // provenance 是 v1.5 协作式人格的预留位，v1 只透传不编辑。
-      const [persona, setPersona] = react.useState({ name: "", personality: "", replyStyle: "", enabled: false });
+      const [personaDefault, setPersonaDefault] = react.useState({ name: "", personality: "", replyStyle: "", enabled: false });
+      const [personaByAgent, setPersonaByAgent] = react.useState({});
+      const [personaEditing, setPersonaEditing] = react.useState("default");
+      const [personaNewName, setPersonaNewName] = react.useState("");
       const [personaSaved, setPersonaSaved] = react.useState(false);
+      const [personaError, setPersonaError] = react.useState("");
       const [vector, setVector] = react.useState({ enabled: false, baseUrl: "", apiKey: "", model: "" });
       const [vectorSaved, setVectorSaved] = react.useState(false);
       const [reindexing, setReindexing] = react.useState(false);
@@ -3465,14 +3487,22 @@ window.__ModuleLoader__.load({
           setRules(Array.isArray(r.rules) ? r.rules : []);
           setCommands(Array.isArray(c.commands) ? c.commands : []);
           setVector(v.config || { enabled: false, baseUrl: "", apiKey: "", model: "" });
-          // 人格卡：旧后端无 /persona（404）时保持默认空卡，不阻塞其它卡片
+          // 人格卡：旧后端无 /persona（404）时保持默认空卡，不阻塞其它卡片。
+          // v1.2 多卡形 {default, byAgent}；旧单对象形读作 default（后端已兼容，
+          // 这里双保险再判一次形状）。
           const pj = ps && ps.persona && typeof ps.persona === "object" ? ps.persona : {};
-          setPersona({
-            name: typeof pj.name === "string" ? pj.name : "",
-            personality: typeof pj.personality === "string" ? pj.personality : "",
-            replyStyle: typeof pj.replyStyle === "string" ? pj.replyStyle : "",
-            enabled: pj.enabled === true
+          const isMulti = "default" in pj || "byAgent" in pj;
+          const dRaw = isMulti ? (pj.default ?? {}) : pj;
+          const bRaw = isMulti && pj.byAgent && typeof pj.byAgent === "object" ? pj.byAgent : {};
+          const norm = (c) => ({
+            name: typeof c?.name === "string" ? c.name : "",
+            personality: typeof c?.personality === "string" ? c.personality : "",
+            replyStyle: typeof c?.replyStyle === "string" ? c.replyStyle : "",
+            enabled: c?.enabled === true
           });
+          setPersonaDefault(norm(dRaw));
+          setPersonaByAgent(Object.fromEntries(Object.entries(bRaw).map(([k, c]) => [k, norm(c)])));
+          setPersonaEditing("default");
         } catch { /* ignore */ }
       }, []);
 
@@ -3548,21 +3578,64 @@ window.__ModuleLoader__.load({
         } catch { /* ignore */ }
       }
 
-      // 人格卡保存：整对象 PUT（后端 setPersona 只挑白名单字段）；saved 提示同
-      // profile 卡节奏（1.5s 自消）。
-      async function savePersona(next) {
+      // 人格卡保存（v1.2 多卡）：全量多卡形 PUT（{default, byAgent}，后端全量
+      // 替换语义）。保存失败必须冒提示——v1 的静默 catch 曾把 404 吞成「看起来
+      // 保存了」（后端未重装配时 PUT 打 404），桉桉实测踩中，此处不再静默。
+      async function savePersonaCards(nextDefault, nextByAgent) {
         try {
-          await apiFetch("/api/dsh-mneme/persona", {
+          const res = await apiFetch("/api/dsh-mneme/persona", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ persona: next })
+            body: JSON.stringify({ persona: { default: nextDefault, byAgent: nextByAgent } })
           });
+          if (!res.ok) throw new Error("HTTP " + res.status);
           setPersonaSaved(true);
+          setPersonaError("");
           announce(t("memory.settings.personaSaved"));
           setTimeout(() => setPersonaSaved(false), 1500);
-        } catch { /* ignore */ }
+        } catch (err) {
+          setPersonaError((err && err.message) || "failed");
+          setTimeout(() => setPersonaError(""), 4000);
+        }
       }
-      const setPersonaField = (key, value) => setPersona((c) => ({ ...c, [key]: value }));
+      // 当前编辑位的卡：default 或 byAgent[editing]；草稿即编辑位状态本身。
+      const personaEditingCard = personaEditing === "default"
+        ? personaDefault
+        : personaByAgent[personaEditing] || { name: "", personality: "", replyStyle: "", enabled: false };
+      const updatePersonaCard = (key, value) => {
+        if (personaEditing === "default") setPersonaDefault((c) => ({ ...c, [key]: value }));
+        else setPersonaByAgent((c) => ({ ...c, [personaEditing]: { ...(c[personaEditing] || { name: "", personality: "", replyStyle: "", enabled: false }), [key]: value } }));
+      };
+      const saveEditingPersona = () => savePersonaCards(personaDefault, personaByAgent);
+      const toggleEditingPersona = (checked) => {
+        if (personaEditing === "default") {
+          const next = { ...personaDefault, enabled: checked };
+          setPersonaDefault(next);
+          savePersonaCards(next, personaByAgent);
+        } else {
+          const next = { ...(personaByAgent[personaEditing] || { name: "", personality: "", replyStyle: "", enabled: false }), enabled: checked };
+          setPersonaByAgent((c) => ({ ...c, [personaEditing]: next }));
+          savePersonaCards(personaDefault, { ...personaByAgent, [personaEditing]: next });
+        }
+      };
+      const addPersonaCard = () => {
+        const id = personaNewName.trim();
+        if (!id || id === "default" || personaByAgent[id]) return;
+        const fresh = { name: id, personality: "", replyStyle: "", enabled: false };
+        const next = { ...personaByAgent, [id]: fresh };
+        setPersonaByAgent(next);
+        setPersonaNewName("");
+        setPersonaEditing(id);
+        savePersonaCards(personaDefault, next);
+      };
+      const removePersonaCard = (id) => {
+        if (id === "default" || !personaByAgent[id]) return;
+        const next = { ...personaByAgent };
+        delete next[id];
+        setPersonaByAgent(next);
+        if (personaEditing === id) setPersonaEditing("default");
+        savePersonaCards(personaDefault, next);
+      };
 
       async function putRules(next) {
         await apiFetch("/api/dsh-mneme/rules", {
@@ -3762,49 +3835,91 @@ window.__ModuleLoader__.load({
             saved && h("span", { className: "mneme-saved" }, t("memory.settings.profileSaved"))
           )
         ),
-        // 人格卡（beta）— who the agent is：名字/性格/回复要求 + 卡内开关。
-        // 卡内开关只是 persona.enabled 半边；总闸 personaEnabled 在功能开关的
-        // 「它什么时候写进去」组里，双闸同真才注入（设计稿④双层闸门）。
+        // 人格卡（beta，v1.2 多卡）— who the agent is：多张角色卡按会话身份注入。
+        // 卡内开关只是该卡 enabled 半边；总闸 personaEnabled 在功能开关组，双闸同真。
         h("section", { className: "mneme-set-card" },
           h("div", { className: "mneme-set-title" }, t("memory.settings.persona")),
           h("div", { className: "mneme-set-desc" }, t("memory.settings.personaHint")),
-          h("div", { className: "mneme-set-row", style: { justifyContent: "space-between" } },
-            h("span", { className: "mneme-set-ruletext" }, t("memory.settings.personaEnabledToggle")),
+          // 卡列表：default + 各 byAgent 卡，点选切换编辑位；default 标注兜底位
+          h("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
+            h("button", {
+              type: "button",
+              className: "mneme-btn" + (personaEditing === "default" ? " mneme-btn--active" : ""),
+              onClick: () => setPersonaEditing("default")
+            }, t("memory.settings.personaDefaultCard")),
+            Object.keys(personaByAgent).map((id) =>
+              h("span", { key: id, style: { display: "inline-flex", alignItems: "center", gap: 2 } },
+                h("button", {
+                  type: "button",
+                  className: "mneme-btn" + (personaEditing === id ? " mneme-btn--active" : ""),
+                  onClick: () => setPersonaEditing(id)
+                }, id),
+                h("button", {
+                  type: "button",
+                  className: "mneme-set-del",
+                  title: t("memory.settings.personaDeleteCard"),
+                  "aria-label": t("memory.settings.personaDeleteCard") + " " + id,
+                  onClick: () => removePersonaCard(id)
+                }, "×")
+              ))
+          ),
+          // 添加卡：输入 agent 身份名（注入时按它寻址）
+          h("div", { style: { display: "flex", gap: 8 } },
+            h("input", {
+              className: "mneme-set-input",
+              style: { marginBottom: 0 },
+              value: personaNewName,
+              placeholder: t("memory.settings.personaAddPlaceholder"),
+              onChange: (e) => setPersonaNewName(e.target.value),
+              onKeyDown: (e) => { if (e.key === "Enter") addPersonaCard(); }
+            }),
+            h("button", { className: "mneme-btn", onClick: addPersonaCard }, t("memory.settings.personaAdd"))
+          ),
+          // 编辑位标题：default 卡 vs 具体身份卡
+          h("div", { className: "mneme-set-desc" },
+            personaEditing === "default"
+              ? t("memory.settings.personaEditingDefault")
+              : t("memory.settings.personaEditingFor") + " " + personaEditing),
+          // 可见字段标签（v1.1 反馈：aria-label 看不见，框上要有字）
+          h("div", { className: "mneme-featnumlabel" }, t("memory.settings.personaEnabledToggle")),
+          h("div", { className: "mneme-set-row" },
             h("input", {
               type: "checkbox",
-              checked: persona.enabled === true,
+              checked: personaEditingCard.enabled === true,
               "aria-label": t("memory.settings.personaEnabledToggle"),
-              onChange: (e) => {
-                const next = { ...persona, enabled: e.target.checked };
-                setPersona(next);
-                savePersona(next);
-              }
-            })
+              onChange: (e) => toggleEditingPersona(e.target.checked)
+            }),
+            h("span", { className: "mneme-set-ruletext" },
+              personaEditingCard.enabled === true
+                ? t("memory.settings.personaEnabledOn")
+                : t("memory.settings.personaEnabledOff"))
           ),
+          h("div", { className: "mneme-featnumlabel" }, t("memory.settings.personaName")),
           h("input", {
             className: "mneme-set-input",
-            value: persona.name,
+            value: personaEditingCard.name,
             placeholder: t("memory.settings.personaNamePlaceholder"),
-            "aria-label": t("memory.settings.personaName"),
-            onChange: (e) => setPersonaField("name", e.target.value)
+            onChange: (e) => updatePersonaCard("name", e.target.value)
           }),
+          h("div", { className: "mneme-featnumlabel" }, t("memory.settings.personaPersonality")),
           h("textarea", {
             className: "mneme-set-input mneme-set-input--area",
-            value: persona.personality,
+            value: personaEditingCard.personality,
             placeholder: t("memory.settings.personaPersonalityPlaceholder"),
-            "aria-label": t("memory.settings.personaPersonality"),
-            onChange: (e) => setPersonaField("personality", e.target.value)
+            onChange: (e) => updatePersonaCard("personality", e.target.value)
           }),
+          h("div", { className: "mneme-featnumlabel" }, t("memory.settings.personaReplyStyle")),
           h("textarea", {
             className: "mneme-set-input mneme-set-input--area",
-            value: persona.replyStyle,
+            value: personaEditingCard.replyStyle,
             placeholder: t("memory.settings.personaReplyStylePlaceholder"),
-            "aria-label": t("memory.settings.personaReplyStyle"),
-            onChange: (e) => setPersonaField("replyStyle", e.target.value)
+            onChange: (e) => updatePersonaCard("replyStyle", e.target.value)
           }),
           h("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
-            h("button", { className: "mneme-btn", onClick: () => savePersona(persona) }, t("memory.settings.personaSave")),
-            personaSaved && h("span", { className: "mneme-saved" }, t("memory.settings.personaSaved"))
+            h("button", { className: "mneme-btn", onClick: saveEditingPersona }, t("memory.settings.personaSave")),
+            personaSaved && h("span", { className: "mneme-saved" }, t("memory.settings.personaSaved")),
+            personaError && h("span", { className: "mneme-saved", style: { color: "var(--dsw-danger, #d33)" } },
+              t("memory.settings.personaSaveFailed") + " (" + personaError + ")")
           )
         ),
         // Agent 眼中的画像（只读）— 注入生效文本：profile + rules 原样展示。

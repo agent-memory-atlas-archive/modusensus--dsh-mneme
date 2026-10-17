@@ -373,9 +373,10 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
   });
 
   // --- agent persona（人格定义页，beta） -------------------------------------
-  // 形状照抄 /profile 路由（设计稿②）：写方法走 requireAuth + readBody + parseBody；
-  // setPersona 只挑白名单字段（settings.js PERSONA_FIELDS），坏体传非对象时
-  // setPersona 容错为空人格——面板口径是「坏值显示为空可重写」，不 500。
+  // 形状照抄 /profile 路由（设计稿②）：写方法走 requireAuth + readBody + parseBody。
+  // v1.2 多卡：GET 回全量 { default, byAgent }；PUT 双形——单对象形（旧面板）只更新
+  // default 且 byAgent 保留（合并语义，settings.setPersona 内判形状），多卡形全量
+  // 替换。坏体守卫：jsonOk=false 时保值回显，不清空库内现值。
   register({
     kind: "exact",
     path: "/api/dsh-mneme/persona",

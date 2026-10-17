@@ -2027,3 +2027,31 @@ test("persona page ships settings card, master switch and i18n (beta v1)", () =>
     "the master-switch hint must document the two-gate semantics"
   );
 });
+
+// v1.2 多卡回归：卡列表 CRUD 可见、字段标签渲染为可见元素（v1.1 反馈：
+// aria-label 看不见）、保存失败必须冒可见错误（v1 静默 catch 吞 404 教训）。
+test("persona card is multi-card with visible field labels and save-failure error", () => {
+  for (const key of [
+    "memory.settings.personaDefaultCard",
+    "memory.settings.personaAdd",
+    "memory.settings.personaAddPlaceholder",
+    "memory.settings.personaEditingDefault",
+    "memory.settings.personaEditingFor",
+    "memory.settings.personaDeleteCard",
+    "memory.settings.personaSaveFailed",
+    "memory.settings.personaEnabledOn",
+    "memory.settings.personaEnabledOff"
+  ]) {
+    const occurrences = clientSource.split(`"${key}"`).length - 1;
+    assert.ok(occurrences >= 2, `i18n key ${key} must exist in both zh and en (got ${occurrences})`);
+  }
+  // 多卡接线：加卡/删卡/切换/保存全链函数存在
+  for (const fn of ["addPersonaCard", "removePersonaCard", "savePersonaCards", "setPersonaEditing"]) {
+    assert.ok(clientSource.includes(fn), `multi-card wiring must include ${fn}`);
+  }
+  // 可见字段标签：三个字段名的 t() 调用出现在 label 元素（mneme-featnumlabel）
+  const labelBlock = clientSource.match(/mneme-featnumlabel[^]{0,120}personaName/);
+  assert.ok(labelBlock, "persona field labels must be visible (featnumlabel class), not aria-only");
+  // 保存失败提示：personaError 状态有渲染路径（非仅 setState）
+  assert.ok(clientSource.includes("t(\"memory.settings.personaSaveFailed\")"), "save failure must render an error line");
+});
