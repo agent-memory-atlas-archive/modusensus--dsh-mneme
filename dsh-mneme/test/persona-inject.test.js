@@ -97,5 +97,49 @@ test("persona text goes through escapePromptVars (no raw braces)", () => {
   store.close();
 });
 
+// ---- v1.2 多卡寻址：按会话身份取卡，取不到落 default ------------------------
+
+test("session identity hit: byAgent card wins over default", () => {
+  const { store, settings, settingsCtx } = setup({ personaEnabled: true });
+  settings.setPersona({ name: "Amarre", enabled: true }); // default
+  settings.setPersonaFor("zephyr", { name: "泽菲尔", personality: "冷危占有", enabled: true });
+  const ctxWithId = { agent: { session: { header: { agentPreset: "zephyr" } } } };
+  const text = settingsCtx.text(ctxWithId);
+  assert.ok(text.includes("你的人格名字：泽菲尔"), "byAgent card injected");
+  assert.ok(!text.includes("Amarre"), "default card not injected when identity hit");
+  store.close();
+});
+
+test("session identity miss: falls back to default card", () => {
+  const { store, settings, settingsCtx } = setup({ personaEnabled: true });
+  settings.setPersona({ name: "Amarre", enabled: true });
+  settings.setPersonaFor("zephyr", { name: "泽菲尔", enabled: true });
+  const ctxUnknown = { agent: { session: { header: { agentPreset: "unknown-bot" } } } };
+  const text = settingsCtx.text(ctxUnknown);
+  assert.ok(text.includes("Amarre"), "default on identity miss");
+  assert.ok(!text.includes("泽菲尔"), "other card not leaked");
+  store.close();
+});
+
+test("identity card disabled (enabled=false) falls back to default, not partial card", () => {
+  const { store, settings, settingsCtx } = setup({ personaEnabled: true });
+  settings.setPersona({ name: "Amarre", enabled: true });
+  settings.setPersonaFor("zephyr", { name: "泽菲尔", personality: "冷", enabled: false });
+  const ctxWithId = { agent: { session: { header: { agentPreset: "zephyr" } } } };
+  const text = settingsCtx.text(ctxWithId);
+  assert.ok(text.includes("Amarre"), "disabled id card → default");
+  assert.ok(!text.includes("泽菲尔"), "disabled card never partially injected");
+  store.close();
+});
+
+test("session without header (mock/old host) behaves exactly like v1 (default)", () => {
+  const { store, settings, settingsCtx } = setup({ personaEnabled: true });
+  settings.setPersona({ name: "Amarre", personality: "轻松幽默", enabled: true });
+  const text = settingsCtx.text({}); // 无 session.header → default，与 v1 一致
+  assert.ok(text.includes("你的人格名字：Amarre"));
+  assert.ok(text.includes("人格性格设定：轻松幽默"));
+  store.close();
+});
+
 // 期望值工具：直接写明文（本组用例不含需转义字符，escapePromptVars 为恒等）。
 function escapeless(s) { return s; }

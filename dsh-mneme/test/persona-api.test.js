@@ -64,7 +64,7 @@ test("internal GET /persona returns current persona without auth", async () => {
   const res = new FakeRes();
   await route.handler(req("/api/dsh-mneme/persona"), res);
   assert.equal(res.statusCode, 200);
-  assert.equal(JSON.parse(res.body).persona.name, "Amarre");
+  assert.equal(JSON.parse(res.body).persona.default.name, "Amarre");
   store.close();
 });
 
@@ -75,7 +75,7 @@ test("internal PUT /persona without token is rejected and store untouched", asyn
   const res = new FakeRes();
   await route.handler(req("/api/dsh-mneme/persona", "PUT", { persona: { name: "evil" } }), res);
   assert.equal(res.statusCode, 401);
-  assert.deepEqual(settings.getPersona(), {});
+  assert.deepEqual(settings.getPersona(), { default: {}, byAgent: {} });
   store.close();
 });
 
@@ -85,12 +85,33 @@ test("internal PUT /persona with token round-trips; corrupt JSON body does not l
   const ok = new FakeRes();
   await route.handler(req("/api/dsh-mneme/persona", "PUT", { persona: { name: "Amarre", enabled: true } }, headers), ok);
   assert.equal(ok.statusCode, 200);
-  assert.equal(settings.getPersona().name, "Amarre");
+  assert.equal(settings.getPersona().default.name, "Amarre");
   const bad = new FakeRes();
   await route.handler(req("/api/dsh-mneme/persona", "PUT", "not json", headers), bad);
   // 路由层对坏 JSON 容错（parseBody 口径：坏体不清空库内值），原样回显现值
   assert.equal(bad.statusCode, 200);
-  assert.equal(settings.getPersona().name, "Amarre");
+  assert.equal(settings.getPersona().default.name, "Amarre");
+  store.close();
+});
+
+test("internal PUT /persona multi-card form replaces fully; legacy form merges default", async () => {
+  const { store, settings, route } = setupInternal("t");
+  const headers = { authorization: "Bearer t" };
+  // 先铺一张 byAgent 卡
+  settings.setPersonaFor("zephyr", { name: "泽菲尔", enabled: true });
+  // 旧形 PUT（单对象）：只动 default、byAgent 保留
+  const legacy = new FakeRes();
+  await route.handler(req("/api/dsh-mneme/persona", "PUT", { persona: { name: "Amarre-改", enabled: true } }, headers), legacy);
+  assert.equal(legacy.statusCode, 200);
+  assert.equal(settings.getPersona().default.name, "Amarre-改");
+  assert.equal(settings.getPersona().byAgent.zephyr.name, "泽菲尔", "legacy PUT keeps byAgent");
+  // 新形 PUT（多卡）：全量替换
+  const multi = new FakeRes();
+  await route.handler(req("/api/dsh-mneme/persona", "PUT", { persona: { default: { name: "默认卡", enabled: true }, byAgent: { zephyr: { name: "泽菲尔-新", enabled: true } } } }, headers), multi);
+  assert.equal(multi.statusCode, 200);
+  const got = settings.getPersona();
+  assert.equal(got.default.name, "默认卡");
+  assert.equal(got.byAgent.zephyr.name, "泽菲尔-新");
   store.close();
 });
 
@@ -119,21 +140,21 @@ test("standalone GET/PUT /persona behind Bearer gate round-trips", async () => {
   try {
     const get1 = await fetch(`${t.base}/persona`, { headers: t.auth });
     assert.equal(get1.status, 200);
-    assert.deepEqual((await get1.json()).persona, {});
+    assert.deepEqual((await get1.json()).persona, { default: {}, byAgent: {} });
     const put = await fetch(`${t.base}/persona`, {
       method: "PUT",
       headers: { ...t.auth, "content-type": "application/json" },
       body: JSON.stringify({ persona: { name: "Zelphi", enabled: false } })
     });
     assert.equal(put.status, 200);
-    assert.equal((await put.json()).persona.name, "Zelphi");
+    assert.equal((await put.json()).persona.default.name, "Zelphi");
     const bad = await fetch(`${t.base}/persona`, {
       method: "PUT",
       headers: { ...t.auth, "content-type": "application/json" },
       body: "not json"
     });
     assert.equal(bad.status, 400);
-    assert.equal(t.settings.getPersona().name, "Zelphi");
+    assert.equal(t.settings.getPersona().default.name, "Zelphi");
   } finally {
     t.close();
   }
@@ -144,7 +165,7 @@ test("standalone /persona without Bearer is 401", async () => {
   try {
     const res = await fetch(`${t.base}/persona`, { method: "PUT", body: "{}" });
     assert.equal(res.status, 401);
-    assert.deepEqual(t.settings.getPersona(), {});
+    assert.deepEqual(t.settings.getPersona(), { default: {}, byAgent: {} });
   } finally {
     t.close();
   }

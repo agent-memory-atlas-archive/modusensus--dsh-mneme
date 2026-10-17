@@ -50,6 +50,48 @@ function parsePersona(raw) {
   }
 }
 
+// 多卡模型（v1.2）：存储形为 { default: <卡>, byAgent: { <agentId>: <卡>, … } }。
+// 兼容层：v1 存的是单对象（有 PERSONA_FIELDS 键、无 default/byAgent 键），读侧
+// 判形状——单对象原样落 default 位，旧数据零迁移。byAgent 的键是 agent 身份
+// id（注入时按会话身份寻址，取不到落 default）。default 卡不可删（兜底位）。
+function parsePersonaStore(raw) {
+  try {
+    const value = JSON.parse(raw);
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return { default: {}, byAgent: {} };
+    }
+    // 新形：含 default 或 byAgent 键 → 按多卡解析
+    if ("default" in value || "byAgent" in value) {
+      const byAgent = {};
+      if (value.byAgent && typeof value.byAgent === "object" && !Array.isArray(value.byAgent)) {
+        for (const [agentId, card] of Object.entries(value.byAgent)) {
+          const parsed = parsePersona(JSON.stringify(card ?? {}));
+          if (Object.keys(parsed).length) byAgent[String(agentId)] = parsed;
+        }
+      }
+      return { default: parsePersona(JSON.stringify(value.default ?? {})), byAgent };
+    }
+    // 旧形：v1 单对象 → 整体作 default（字段白名单在 parsePersona 内裁）
+    return { default: parsePersona(raw), byAgent: {} };
+  } catch {
+    return { default: {}, byAgent: {} };
+  }
+}
+
+function serializePersonaStore(store) {
+  const out = {
+    default: parsePersona(JSON.stringify(store?.default ?? {})),
+    byAgent: {}
+  };
+  if (store?.byAgent && typeof store.byAgent === "object") {
+    for (const [agentId, card] of Object.entries(store.byAgent)) {
+      const parsed = parsePersona(JSON.stringify(card ?? {}));
+      if (Object.keys(parsed).length) out.byAgent[String(agentId)] = parsed;
+    }
+  }
+  return JSON.stringify(out);
+}
+
 // --- feature flags（功能开关）白名单 -----------------------------------------
 // 面板可逐项开关的后端能力。设计约束：
 // 1. 键名与类型必须和 config.js schema 同名同型，这份白名单是唯一校验源
@@ -435,20 +477,61 @@ export function createSettings(db) {
 
     /**
      * Agent persona (name / personality / replyStyle + enabled gate), stored as
-     * one JSON key. Write side keeps only whitelisted fields; read side is
-     * tolerant of corruption (returns {} — never throws) so a bad write can
-     * always be overwritten from the panel.
+     * one JSON key. v1.2 多卡：存储形 { default, byAgent }，旧 v1 单对象读作
+     * default 兼容。getPersona 返回全量多卡形（面板用）；getPersonaFor 按 agent
+     * 身份取卡（注入用），身份缺失/无卡/卡 enabled=false 均落 default。
      */
     getPersona() {
-      return parsePersona(getSetting("persona") ?? "{}");
+      return parsePersonaStore(getSetting("persona") ?? "{}");
     },
     setPersona(input) {
-      const src = typeof input === "object" && input !== null && !Array.isArray(input) ? input : {};
-      const out = {};
-      for (const key of PERSONA_FIELDS) {
-        if (src[key] !== undefined) out[key] = src[key];
+      // 双形兼容：单对象形 = 只更新 default、byAgent 保留（旧面板/旧调用方合并语义）；
+      // 多卡形 = 全量替换。坏体（非对象）在此不落库不抛错，保值由调用方守卫。
+      if (typeof input !== "object" || input === null || Array.isArray(input)) return;
+      if ("default" in input || "byAgent" in input) {
+        setSetting("persona", serializePersonaStore(input));
+        return;
       }
-      setSetting("persona", JSON.stringify(out));
+      const current = parsePersonaStore(getSetting("persona") ?? "{}");
+      current.default = parsePersona(JSON.stringify(input));
+      setSetting("persona", serializePersonaStore(current));
+    },
+    /** Per-agent lookup for the injector: id card → default fallback. */
+    getPersonaFor(agentId) {
+      const store = parsePersonaStore(getSetting("persona") ?? "{}");
+      const id = typeof agentId === "string" && agentId.trim() ? agentId.trim() : "";
+      if (id) {
+        const card = store.byAgent[id];
+        if (card && card.enabled === true) return card;
+      }
+      return store.default;
+    },
+    /** Replace one byAgent card wholesale (panel save); default 不可经此改。 */
+    setPersonaFor(agentId, card) {
+      const id = typeof agentId === "string" && agentId.trim() ? agentId.trim() : "";
+      if (!id || id === "default") return false;
+      const store = parsePersonaStore(getSetting("persona") ?? "{}");
+      const clean = parsePersona(JSON.stringify(
+        typeof card === "object" && card !== null && !Array.isArray(card) ? card : {}
+      ));
+      if (Object.keys(clean).length) store.byAgent[id] = clean;
+      else delete store.byAgent[id];
+      setSetting("persona", serializePersonaStore(store));
+      return true;
+    },
+    /** byAgent 键列表（面板卡列表用，default 不在其中）。 */
+    listPersonas() {
+      return Object.keys(parsePersonaStore(getSetting("persona") ?? "{}").byAgent);
+    },
+    /** 删一张 byAgent 卡；default 不可删（返回 false）。 */
+    removePersona(agentId) {
+      const id = typeof agentId === "string" && agentId.trim() ? agentId.trim() : "";
+      if (!id || id === "default") return false;
+      const store = parsePersonaStore(getSetting("persona") ?? "{}");
+      if (!(id in store.byAgent)) return false;
+      delete store.byAgent[id];
+      setSetting("persona", serializePersonaStore(store));
+      return true;
     },
 
     /** All custom commands, sorted by name. */
