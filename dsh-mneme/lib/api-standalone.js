@@ -23,6 +23,12 @@ import { parseReclaimJson, readReclaimFields, reclaimReply, RECLAIM_UNAVAILABLE 
 const DEFAULT_PORT = 8790;
 const DEFAULT_HOST = "127.0.0.1";
 const MAX_PORT_ATTEMPTS = 20;
+// 请求体与分页上界（防御，不是功能）：与宿主内 api.js 的 MAX_REQUEST_BODY_BYTES /
+// MAX_PAGE_LIMIT / MAX_SEARCH_TOP_K 同值同义——两张数据面的口径必须一致，否则
+// 「从哪张脸进来」会决定一次请求能吃掉多少内存。
+const MAX_REQUEST_BODY_BYTES = 4 * 1024 * 1024;
+const MAX_PAGE_LIMIT = 1000;
+const MAX_SEARCH_TOP_K = 200;
 
 /**
  * Listen with automatic EADDRINUSE recovery. Tries the configured port, then
@@ -86,11 +92,23 @@ function isAuthorized(req, apiToken) {
   return timingSafeEqual(Buffer.from(token), Buffer.from(apiToken));
 }
 
-/** Collect the request body as text (tolerant of transport errors). */
+/**
+ * Collect the request body as text (tolerant of transport errors).
+ *
+ * 超过 MAX_REQUEST_BODY_BYTES 后停止累积、继续排空连接：解析空串得到 {}，
+ * 调用方的字段校验会把它变成 invalid-* 400，内存不随 Content-Length 增长。
+ */
 function readBody(req) {
   return new Promise((resolve) => {
     let body = "";
-    req.on("data", (chunk) => { body += chunk; });
+    let bytes = 0;
+    let overflow = false;
+    req.on("data", (chunk) => {
+      if (overflow) return;
+      bytes += chunk.length;
+      if (bytes > MAX_REQUEST_BODY_BYTES) { overflow = true; body = ""; return; }
+      body += chunk;
+    });
     req.on("end", () => resolve(body));
     req.on("error", () => resolve(""));
   });
@@ -364,7 +382,8 @@ export function createStandaloneApi({ service, store, config = {}, logger, setti
       //     internal /api/dsh-mneme/list) ------------------------------------
       if (req.method === "GET" && pathname === "/memories") {
         const type = url.searchParams.get("type") ?? undefined;
-        const limit = Number(url.searchParams.get("limit") ?? 50);
+        // 上界是防御：limit 直接进 SQL LIMIT（见 MAX_PAGE_LIMIT 注释）。
+        const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), MAX_PAGE_LIMIT);
         const offset = Number(url.searchParams.get("offset") ?? 0);
         const order = url.searchParams.get("order") ?? undefined;
         const minRaw = url.searchParams.get("minImportance");
@@ -585,7 +604,8 @@ export function createStandaloneApi({ service, store, config = {}, logger, setti
       // --- GET /search: unified recall pipeline (keyword + vector + BM25) ----
       if (req.method === "GET" && pathname === "/search") {
         const q = url.searchParams.get("q") ?? "";
-        const limit = Number(url.searchParams.get("topK") ?? url.searchParams.get("limit") ?? 20);
+        // 上界是防御：topK 直接进召回（见 MAX_SEARCH_TOP_K 注释）。
+        const limit = Math.min(Number(url.searchParams.get("topK") ?? url.searchParams.get("limit") ?? 20), MAX_SEARCH_TOP_K);
         const mode = url.searchParams.get("mode") ?? "auto";
         const rerank = url.searchParams.get("rerank") !== "false";
         const occurredFrom = url.searchParams.get("occurred_from") ?? null;
@@ -630,7 +650,7 @@ export function createStandaloneApi({ service, store, config = {}, logger, setti
       if (req.method === "GET" && pathname === "/context") {
         const q = (url.searchParams.get("q") ?? "").trim();
         const maxItemsRaw = Number(url.searchParams.get("topK") ?? url.searchParams.get("limit") ?? 5);
-        const maxItems = Number.isInteger(maxItemsRaw) && maxItemsRaw > 0 ? maxItemsRaw : 5;
+        const maxItems = Number.isInteger(maxItemsRaw) && maxItemsRaw > 0 ? Math.min(maxItemsRaw, MAX_SEARCH_TOP_K) : 5;
         // threshold 是 importance 阈值（injectCandidates 语义），与 /search 的
         // 相似度 threshold 同名不同义——文档已点名，勿混。
         const thresholdRaw = Number(url.searchParams.get("threshold") ?? 3);

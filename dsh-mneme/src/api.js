@@ -41,6 +41,16 @@ function sendAttachment(res, status, contentType, filename, body) {
 // defaults in config.js (externalApiPort / externalApiHost).
 const EXTERNAL_API_DEFAULTS = { enabled: false, port: 8790, host: "127.0.0.1" };
 
+// 请求体上限（防御，不是功能）：readBody 只累加字符串，不设上限时一个超大 body
+// 就能把进程内存拉到 Content-Length 那个量级。4 MiB 远高于任何真实写入（记忆
+// 正文、导入的 markdown、面板 patch 都远小于它）。
+const MAX_REQUEST_BODY_BYTES = 4 * 1024 * 1024;
+// 分页上界（防御）：list/search 的参数直接进 SQL LIMIT，无上界时
+// ?limit=100000 会让一次免鉴权 GET 把全库序列化出来（2026-10 审计：免鉴权读面
+// + 浏览器简单请求 = 廉价 DoS）。1000/200 远高于面板与 CLI 的任何真实用法。
+const MAX_PAGE_LIMIT = 1000;
+const MAX_SEARCH_TOP_K = 200;
+
 /** Merge persisted external-api kv over the defaults for client display. */
 function fullExternalConfig(kv = {}) {
   return {
@@ -83,11 +93,24 @@ function requireAuth(req, res, apiToken) {
   return false;
 }
 
-/** Collect the request body as text (tolerant of empty/invalid bodies). */
+/**
+ * Collect the request body as text (tolerant of empty/invalid bodies).
+ *
+ * 超过 MAX_REQUEST_BODY_BYTES 后停止累积并继续排空连接（不 destroy：客户端该
+ * 收到一个明确的 400，而不是连接被掐断）；解析空串得到 {}，调用方的字段校验
+ * 会把它变成 invalid-* 400，与「body 不合法」同一条路径。
+ */
 function readBody(req) {
   return new Promise((resolve) => {
     let body = "";
-    req.on("data", (chunk) => { body += chunk; });
+    let bytes = 0;
+    let overflow = false;
+    req.on("data", (chunk) => {
+      if (overflow) return;
+      bytes += chunk.length;
+      if (bytes > MAX_REQUEST_BODY_BYTES) { overflow = true; body = ""; return; }
+      body += chunk;
+    });
     req.on("end", () => resolve(body));
     req.on("error", () => resolve(""));
   });
@@ -244,7 +267,8 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
       try {
         const url = new URL(req.url, "http://localhost");
         const type = url.searchParams.get("type") ?? undefined;
-        const limit = Number(url.searchParams.get("limit") ?? 50);
+        // 上界是防御：参数直接进 SQL LIMIT（见 MAX_PAGE_LIMIT 注释）。
+        const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), MAX_PAGE_LIMIT);
         const offset = Number(url.searchParams.get("offset") ?? 0);
         // order=chrono: pure newest-first for paged browsing; default keeps
         // the importance-ranked order other callers rely on.
@@ -319,7 +343,8 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
       try {
         const url = new URL(req.url, "http://localhost");
         const q = url.searchParams.get("q") ?? "";
-        const limit = Number(url.searchParams.get("topK") ?? url.searchParams.get("limit") ?? 20);
+        // 上界是防御：topK 直接进召回（见 MAX_SEARCH_TOP_K 注释）。
+        const limit = Math.min(Number(url.searchParams.get("topK") ?? url.searchParams.get("limit") ?? 20), MAX_SEARCH_TOP_K);
         // mode selects the recall strategy (defaults to auto):
         //   auto    (default) keyword first, vector fills remaining slots
         //   hybrid  vector first, keyword fills remaining slots; scores of
@@ -1260,6 +1285,10 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
     path: "/api/dsh-mneme/export",
     handler(req, res) {
       try {
+        // 导出是「全库 + 含 archived/forgotten 的全字段」的一次读，敏感度不低于
+        // 写面：它必须与写路由同门。历史漏项——这条路由长期没有鉴权分支，配了
+        // apiToken 也照旧对任何调用方开放（2026-10 审计 P0）。
+        if (!requireAuth(req, res, apiToken)) return;
         const url = new URL(req.url, "http://localhost");
         const format = url.searchParams.get("format") ?? "json";
         if (format !== "json" && format !== "markdown") {
@@ -1552,9 +1581,14 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
             sendJson(res, 200, { config: fullExternalConfig(settings.setExternalApi(patch)) });
           });
         }
-        // GET: always hand back a token — the standalone server generates its
-        // own on first enabled boot, but the panel displays it before that,
-        // so materialize and persist one here.
+        // GET 回的是能解锁整个 8790 数据面的 Bearer，敏感度等同写面：必须与
+        // PUT 同门。未配置 apiToken 时 isAuthorized 恒真（既有的 fail-open 模型，
+        // 见 SECURITY.md「安全模型」一节），所以默认配置下面板仍旧即装即用。
+        if (!requireAuth(req, res, apiToken)) return;
+        // GET: hand back a token — the standalone server generates its own on
+        // first enabled boot, but the panel displays it before that, so
+        // materialize and persist one here. 只有通过上面那道门才会走到这里，
+        // 否则「未鉴权的 GET 顺手写库」就是一条不需要凭证的写路径。
         const kv = settings.getExternalApi() ?? {};
         if (!kv.token) {
           kv.token = randomBytes(24).toString("base64url");
