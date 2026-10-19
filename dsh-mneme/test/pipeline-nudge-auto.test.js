@@ -34,6 +34,20 @@ function tick(ms = 5) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * 等到条件成立。队列是**链式**排程（跑完一个再 defer 下一个），所以「两个项目都跑完」
+ * 至少要等两个宏任务;固定 tick(30) 在满载的 CI 上会假阴性——全量跑时其它测试文件
+ * 同时解压 zstd，一次 setTimeout(0) 被拉长就可能超过 30ms。这里只等该等的东西。
+ */
+async function waitFor(predicate, timeout = 2000) {
+  const started = Date.now();
+  while (!predicate()) {
+    if (Date.now() - started > timeout) return false;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  return true;
+}
+
 test("自动沉淀只认 turn/end：中途事件不排队、不预跑", async () => {
   const ctx = fakeCtx();
   const calls = [];
@@ -108,7 +122,7 @@ test("冷却按项目分账：另一个项目不受影响，也不许并成一�
   });
   ctx.emit(sessionAt("D:/a"), { type: "turn/end" });
   ctx.emit(sessionAt("D:/b"), { type: "turn/end" });
-  await tick(30);
+  assert.ok(await waitFor(() => roots.length === 2), "两个项目都该被跑到");
   assert.deepEqual(roots.sort(), ["D:/a", "D:/b"], "两个项目各跑一次，跨项目不并账");
   auto();
 });
