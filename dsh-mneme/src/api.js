@@ -2044,13 +2044,20 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
           // 还是「会话目录读不到」——两者在候选列表上都表现为空。
           const where = resolveProjectSessionDir({ projectRoot: project, deadline });
           if (!where.sessionDir) {
-            // no-sessions-dir / unreadable 是**环境问题**（读不到），回 503 让调用方
-            // 知道这不是答案；no-bucket / bad-project 是**关于这个项目的答案**，回 200。
-            // budget-exceeded 也是环境问题（扫不完 ≠ 没有），但原因不同，单独一个 error 码。
-            const envProblem = where.reason === "no-sessions-dir" || where.reason === "unreadable" || where.reason === "budget-exceeded";
+            // no-sessions-dir / unreadable / budget-exceeded / bucket-limit 都是**环境问题**
+            // （读不到、没扫完、没扫全），回 503 让调用方知道这不是答案；
+            // no-bucket / bad-project 是**关于这个项目的答案**，回 200。
+            const envProblem = where.reason === "no-sessions-dir"
+              || where.reason === "unreadable"
+              || where.reason === "budget-exceeded"
+              || where.reason === "bucket-limit";
             sendJson(res, envProblem ? 503 : 200, {
               error: envProblem
-                ? (where.reason === "budget-exceeded" ? "nudge-attribution-budget-exceeded" : "nudge-sessions-unreadable")
+                ? (where.reason === "budget-exceeded"
+                    ? "nudge-attribution-budget-exceeded"
+                    : where.reason === "bucket-limit"
+                      ? "nudge-attribution-bucket-limit"
+                      : "nudge-sessions-unreadable")
                 : undefined,
               contract: "mneme.nudge/v1",
               attribution: where,

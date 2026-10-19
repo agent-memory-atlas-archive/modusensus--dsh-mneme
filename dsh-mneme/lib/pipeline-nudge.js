@@ -256,6 +256,8 @@ export function readSessionCwd(file) {
  *   unreadable     桶在，但所有会话头的 cwd 都读不出来——**这一条必须与 no-bucket 分开**：
  *                  前者是「读不到」，后者是「确实没有」，混起来就等于把故障报成空结果。
  *   budget-exceeded 预算用光还没扫完——同样**不是**关于这个项目的答案（见 deadline 参数）。
+ *   bucket-limit   桶数超过 maxBuckets 被截断，且截断范围内没找到这个项目——**也不是**
+ *                  「确实没有」：目标可能就在被截掉的那部分里（同日评审抓出）。
  *
  * `deadline` 是这次解析的绝对截止时刻（毫秒）。不给就扫到底（测试与离线批处理要完整
  * 结果）。为什么要它：这一层是**同步**的，最多 500 个桶 × 3 个文件，全都走同步 I/O；
@@ -280,13 +282,19 @@ export function resolveProjectSessionDir({
   } catch {
     return { sessionDir: null, bucket: null, reason: "no-sessions-dir", sessionsRoot: root, bucketsScanned: 0, filesRead: 0 };
   }
-  const buckets = [];
+  const allBuckets = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    buckets.push(entry.name);
-    if (buckets.length >= maxBuckets) break;
+    allBuckets.push(entry.name);
   }
-  buckets.sort();
+  // 先收全、再排序、最后截断——与 findSessionFiles 同一条规矩。早前是「边收边截」：
+  // 到 500 个就 break，然后才 sort()，于是**留下哪 500 个由文件系统遍历顺序决定**。
+  // 目标项目的桶一旦落在被截掉的那部分，函数就返回 no-bucket——把一次截断报成
+  // 「这个项目确实没有会话」，正好是本文件反复在防的「读不到 vs 确实没有」
+  // （v0.9.3 评审抓出）。
+  allBuckets.sort();
+  const bucketsTruncated = allBuckets.length > maxBuckets;
+  const buckets = bucketsTruncated ? allBuckets.slice(0, maxBuckets) : allBuckets;
   let filesRead = 0;
   let bucketsWithCwd = 0;
   const outOfBudget = () => deadline !== null && Number.isFinite(deadline) && Date.now() > deadline;
@@ -300,6 +308,8 @@ export function resolveProjectSessionDir({
         reason: "budget-exceeded",
         sessionsRoot: root,
         bucketsScanned: buckets.length,
+        bucketsTotal: allBuckets.length,
+        bucketsTruncated,
         filesRead
       };
     }
@@ -316,6 +326,8 @@ export function resolveProjectSessionDir({
           reason: "budget-exceeded",
           sessionsRoot: root,
           bucketsScanned: buckets.length,
+          bucketsTotal: allBuckets.length,
+          bucketsTruncated,
           filesRead
         };
       }
@@ -331,6 +343,8 @@ export function resolveProjectSessionDir({
           matchedCwd: cwd,
           sessionsRoot: root,
           bucketsScanned: buckets.length,
+          bucketsTotal: allBuckets.length,
+          bucketsTruncated,
           filesRead
         };
       }
@@ -340,9 +354,18 @@ export function resolveProjectSessionDir({
     sessionDir: null,
     bucket: null,
     // 桶里一个 cwd 都读不出来 → 是读不了，不是没有。
-    reason: buckets.length === 0 ? "no-sessions-dir" : bucketsWithCwd === 0 ? "unreadable" : "no-bucket",
+    // 截断且没命中 → 也不是「确实没有」：目标可能就在被截掉的那部分里。
+    reason: buckets.length === 0
+      ? "no-sessions-dir"
+      : bucketsWithCwd === 0
+        ? "unreadable"
+        : bucketsTruncated
+          ? "bucket-limit"
+          : "no-bucket",
     sessionsRoot: root,
     bucketsScanned: buckets.length,
+    bucketsTotal: allBuckets.length,
+    bucketsTruncated,
     filesRead
   };
 }

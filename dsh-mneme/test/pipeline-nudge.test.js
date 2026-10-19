@@ -1153,3 +1153,39 @@ test("nudgeForProject：归属解析超预算时 skipped 并如实带 budget-exc
     assert.equal(doc.counts.candidates, 0);
   });
 });
+
+test("桶数超过 maxBuckets：先排序再截断，截断没命中报 bucket-limit 而不是 no-bucket", () => {
+  // 评审抓出的第二个「读不到装成确实没有」：早前是边收边截（到 500 个就 break、
+  // 然后才 sort），留下哪 500 个由文件系统遍历顺序决定；目标项目的桶一旦落在被
+  // 截掉的那部分，就返回 no-bucket —— 一次截断被报成「这个项目没有会话」。
+  withDir((dir) => {
+    const projectRoot = join(dir, "proj");
+    mkdirSync(projectRoot, { recursive: true });
+    const elsewhere = join(dir, "somewhere-else");
+    mkdirSync(elsewhere, { recursive: true });
+    // 四个桶：字母序 aaa-1, aaa-2, ws-bucket, zz-1。目标在 ws-bucket。
+    // 无关桶里也放**真会话**（cwd 指向别处），这样 bucketsWithCwd > 0，
+    // 唯一剩下的原因就是截断本身——否则会先命中 unreadable，测不到这条。
+    const home = fakeDshHome(dir, { bucket: "ws-bucket", cwd: projectRoot });
+    fakeDshHome(dir, { bucket: "aaa-1", cwd: elsewhere });
+    fakeDshHome(dir, { bucket: "aaa-2", cwd: elsewhere });
+    fakeDshHome(dir, { bucket: "zz-1", cwd: elsewhere });
+
+    // 只扫前 2 个（aaa-1、aaa-2）：目标被挤出，且这不是「它没有会话」。
+    const miss = resolveProjectSessionDir({ dshHome: home, projectRoot, maxBuckets: 2 });
+    assert.equal(miss.reason, "bucket-limit", "被截断 ≠ 这个项目没有会话");
+    assert.notEqual(miss.reason, "no-bucket");
+    assert.equal(miss.bucketsTruncated, true);
+    assert.equal(miss.bucketsScanned, 2);
+    assert.equal(miss.bucketsTotal, 4, "总数与扫描数都要报，截断才看得见");
+
+    // 放宽到 3 个：字母序把 ws-bucket 包进来 → 命中。
+    const hit = resolveProjectSessionDir({ dshHome: home, projectRoot, maxBuckets: 3 });
+    assert.equal(hit.reason, "matched", "留下谁由字母序决定，不由遍历序决定");
+
+    // 不截断时依然是真答案那套，且 truncated 明确为 false。
+    const full = resolveProjectSessionDir({ dshHome: home, projectRoot, maxBuckets: 999 });
+    assert.equal(full.reason, "matched");
+    assert.equal(full.bucketsTruncated, false);
+  });
+});
