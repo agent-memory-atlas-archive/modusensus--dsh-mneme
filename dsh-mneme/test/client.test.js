@@ -1926,11 +1926,49 @@ test("M.O. empty-state, list and scope copy exist in both languages", () => {
     "memory.actions.scope.project",
     "memory.actions.scope.global",
     "memory.actions.scope.none",
-    "memory.actions.broken"
+    "memory.actions.broken",
+    // 手动沉淀的全部回执：这八句里缺任何一句，按钮点下去就是一行 key 裸奔，
+    // 而那恰好是「点了没反应」的观感来源。
+    "memory.actions.distill.action",
+    "memory.actions.distill.busy",
+    "memory.actions.distill.hint",
+    "memory.actions.distill.noProject",
+    "memory.actions.distill.saved",
+    "memory.actions.distill.none",
+    "memory.actions.distill.noSessions",
+    "memory.actions.distill.unreadable",
+    "memory.actions.distill.failed"
   ]) {
     const hits = (clientSource.match(new RegExp(`"${key.replace(/\./g, "\\.")}":`, "g")) || []).length;
     assert.equal(hits, 2, `${key} must exist in both zh and en (got ${hits})`);
   }
+});
+
+// 手动沉淀按钮：面板上「立即跑一次」的唯一入口。锁三件事，每件都对应一种会静默坏掉的情形：
+//   ① 它必须打 POST 且带上项目根——GET 是预览、不写盘，打成 GET 就成了「点了永远 0 条」；
+//   ② materialize 不许出现：按钮只产提议，落草稿是另一个决定；
+//   ③ 没有 project 时必须禁用——服务端只会回 400，点了必然失败的按钮比没有按钮更糟。
+test("M.O. pane offers a manual distill that posts the project root", () => {
+  const bodyOf = (name) => {
+    const start = clientSource.indexOf(`function ${name}(`);
+    assert.ok(start > -1, `${name} must exist`);
+    const next = clientSource.slice(start + 1).indexOf("\n    function ");
+    return clientSource.slice(start, next > -1 ? start + 1 + next : clientSource.length);
+  };
+  const bar = bodyOf("PipelineDistillButton");
+  assert.ok(bar.includes('"/api/dsh-mneme/nudge?project="'), "the button must hit the nudge route");
+  assert.ok(bar.includes("encodeURIComponent(project)"), "the project root must travel with the request");
+  assert.ok(bar.includes('method: "POST"'), "a preview GET writes nothing — the button must POST");
+  assert.ok(!bar.includes("materialize"), "the button must never materialize a draft");
+  assert.ok(bar.includes("!project"), "the button must be disabled when the project is unknown");
+  assert.ok(bar.includes("503"), "an unreadable session log must be told apart from an empty result");
+  // 座位：按钮挂在清单头上，且清单要拿到 project——漏传的话按钮永远禁用，
+  // 界面上看起来只是「这个功能没做好」。
+  assert.ok(bodyOf("PipelineWorkflowList").includes("PipelineDistillButton"), "the control belongs in the list header");
+  assert.ok(
+    bodyOf("PipelineBrowser").includes("activeId, onOpen: setPicked, project }"),
+    "the browser must hand the project root down to the list"
+  );
 });
 
 // 画布能放大缩小。锁的重点不是「有没有缩放」，而是滚轮那一条必须**自己挂非被动监听**：

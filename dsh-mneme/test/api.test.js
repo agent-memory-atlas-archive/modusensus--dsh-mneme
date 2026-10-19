@@ -747,7 +747,8 @@ test("GET /api/dsh-mneme/features returns empty overrides and effective config d
   // 两个都是嵌套对象子字段，都进 NESTED_FLAG_PATHS）。
   // 合并 #451（人格页）后的真实计数：98（本批前）+ actionRunEnabled + personaEnabled = 99
   // #471 再 + 2 = 101。
-  assert.equal(Object.keys(data.effective).length, 101);
+  // v0.9.3 新增 actionNudgeEnabled（M.O. 自动沉淀；顶层扁平键）= 102。
+  assert.equal(Object.keys(data.effective).length, 102);
   assert.equal(data.effective.dreamSkipInvalid, true);
   assert.equal(data.effective.allowCrossTypeMerge, false);
   assert.equal(data.effective.dreamMergeGuard, true);
@@ -792,6 +793,10 @@ test("GET /api/dsh-mneme/features returns empty overrides and effective config d
   assert.equal(data.effective.actionRunEnabled, false);
   // 人格页（beta）：注入总闸默认关，effective 必须能读到（同 #254 坑形防线）。
   assert.equal(data.effective.personaEnabled, false);
+  // v0.9.3：M.O. 自动沉淀的第三个键。与 actionPipelineEnabled（看图）、
+  // actionRunEnabled（记账）都不是一件事——它挂 session/event 并解压会话日志，
+  // 是三者里最重的一条，所以独立开关、默认关、且进 LIGHT_MODE_OFF。
+  assert.equal(data.effective.actionNudgeEnabled, false);
   // 新增字符串 / URL / 枚举键
   assert.equal(data.effective.localEmbedModel, "Xenova/bge-small-zh-v1.5");
   assert.equal(data.effective.ollamaBaseUrl, "http://localhost:11434");

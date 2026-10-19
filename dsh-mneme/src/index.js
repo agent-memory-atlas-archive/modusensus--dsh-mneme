@@ -24,6 +24,9 @@ import { createSettings } from "./settings.js";
 import { createCommandManager } from "./commands.js";
 import { createExecutionRecorder } from "./pipeline-runner.js";
 import { registerMoRunCommand } from "./pipeline-command.js";
+// M.O. 自动沉淀的触发侧（冷却 / 排队 / 兜底）。挖掘与落盘在 pipeline-nudge.js，
+// 这里只管「什么时候跑」。两者分开的理由见 src/pipeline-nudge-auto.js 文件头。
+import { createNudgeAutoRun } from "./pipeline-nudge-auto.js";
 import { createVectorIndex } from "./vector-index.js";
 // semantic(embedder/reranker/boot 回填)纯搬移至 src/semantic.js(PR2):宿主与
 // daemon(dsh-mneme-serve,#363)共用同一套装配,原文件保留 barrel 出口。
@@ -588,6 +591,18 @@ export const apply = (ctx, config) => {
       list: () => []
     }, embedder, { vectorIndex, reranker }, cfg.apiToken, cfg, maintenance);
     disposers.push(api.dispose);
+  }
+
+  // M.O. 自动沉淀（v0.9.3）：项目里重复走的那套动作，自动变成 memoryDir 里的一条
+  // 「提议」，等人确认后才可能进仓库。默认关（actionNudgeEnabled）。
+  //
+  // 为什么位置在这里而不是和 M.O. 记账同段：`disposers` 声明在 :532，而记账块在它
+  // 之前（TDZ）——照抄过去会在插件加载时直接抛 ReferenceError。这里已在其后。
+  //
+  // 为什么挂 session/event 却又要进轻量档黑名单：它读的是 zstd 会话日志（同步解压），
+  // 是本插件里最重的一条后台路径；且它只产「提议」，关掉不影响记忆本身的正确性。
+  if (cfg.actionNudgeEnabled === true) {
+    disposers.push(createNudgeAutoRun({ ctx, memoryDir, logger: ctx.logger }));
   }
 
   // Standalone external API (v0.7.12): plain node:http server for ecosystem

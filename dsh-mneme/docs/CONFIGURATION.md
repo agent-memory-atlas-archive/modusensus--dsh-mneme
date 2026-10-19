@@ -283,8 +283,9 @@
 | `externalApiHost` | `127.0.0.1` | 绑定地址 | 改成非回环 = 把整个记忆库暴露给网络，自负其责 |
 | `disableMemorySearch` | `false` | 对模型隐藏 `memory_search` 工具（v0.8.5） | 慢/轻量模型的工具往返节流；隐藏即不可调 |
 | `disableMemoryArchive` | `false` | 对模型隐藏 `memory_archive` 工具 | 同上 |
-| `actionPipelineEnabled` | `false` | M.O.（手法）只读视图的门控：做法图谱 + 对话行结算卡 | opt-in beta；只是纯 UI 入口、不引入重型后台路径，故不进 `LIGHT_MODE_OFF`。写账另有独立的执行记账键（`/mo-run`），看图 ≠ 写账 |
+| `actionPipelineEnabled` | `false` | M.O. 只读视图的门控：做法图谱 + 对话行结算卡 | opt-in beta；只是纯 UI 入口、不引入重型后台路径，故不进 `LIGHT_MODE_OFF`。写账另有独立的执行记账键（`/mo-run`），看图 ≠ 写账 |
 | `actionRunEnabled` | `false` | M.O. 执行记账：`/mo-run` 开一次执行窗口，窗口内命令执行才可能被记成一条 run | opt-in beta；挂在热路径（每个会话事件都过一次监听），故 `LIGHT_MODE_OFF` 里有它 |
+| `actionNudgeEnabled` | `false` | M.O. 自动沉淀：每轮结束（`turn/end`）后挖一次「这个项目重复走的动作」，结果落成 `memoryDir/proposals/<项目键>/` 里的提议，等人确认 | opt-in beta；三个 M.O. 键里最重的一条——挂 `session/event` 且要**同步解压 zstd 会话日志**（本机 118 份实测 16.2s，单次预算 `budgetMs`=4s 兜底），故 `LIGHT_MODE_OFF` 里有它。**永不自动落草稿**：`materialize` 恒 false，进仓库必须是人的显式动作 |
 
 ## 运行时与本地模型
 
@@ -316,7 +317,7 @@
 `autoReindexOnBoot` · `hybridInject` · `injectGuidanceEnabled` · `searchSemanticDedup` ·
 `selectiveInjectEnabled` · `bm25SearchEnabled` · `entityRecallEnabled` ·
 `graphAnchoringEnabled` · `graphWeightEnabled` · `graphInjectHint` · `graphPassiveConfirm` ·
-`actionRunEnabled` ·
+`actionRunEnabled` · `actionNudgeEnabled` ·
 `dreamNarrativeEnabled` · `documentMemoryEnabled` · `heatEnabled` · `continuityRescueEnabled` ·
 `preInjectGate.enabled`（#380） · `distillRecords.enabled`（#399）
 

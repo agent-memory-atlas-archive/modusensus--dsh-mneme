@@ -531,12 +531,12 @@ window.__ModuleLoader__.load({
         "memory.features.heatEnabled.hint": "开：像遗忘曲线一样给记忆降温，长期没用过的往后排、不占注入名额；关：一直按相关度排（热度衰减，默认关）",
         "memory.features.documentMemoryEnabled": "长文档只存一张摘要卡",
         "memory.features.documentMemoryEnabled.hint": "开：Agent 写的长文档在记忆里只放「摘要卡」，正文仍由 Agent 保管、按需读取，注入只带摘要；关：整篇都往上下文里带（document 型记忆，默认关）",
-        // --- v0.9.0 M.O.（Modus Operandi · 手法，beta）---
+        // --- v0.9.0 M.O.（Modus Operandi，beta）---
         // M.O. = Modus Operandi，拉丁语「一个人一贯的做事方式」；也是 org 词根
         // modus（modusensus）。界面主显示 M.O.，设置项 hint 第一句给全名。
         "memory.actions.beta": "beta",
         "memory.actions.notice": "提炼结果是候选，可能有错、过时、会被推翻。",
-        "memory.actions.title": "M.O. · 手法",
+        "memory.actions.title": "M.O. · 工作流",
         "memory.actions.open": "打开 M.O.",
         "memory.actions.viewFull": "完整视图",
         "memory.actions.openPane": "在右栏打开完整视图",
@@ -588,13 +588,24 @@ window.__ModuleLoader__.load({
         "memory.actions.broken": "有文件读不出来：",
         "memory.actions.empty.title": "这个项目里还没有工作流",
         "memory.actions.empty.body": "工作流的本体住在项目里的 .mneme/pipelines/ 下——跟着仓库走，能被提交、能被 review、能被 CI 读。做法被复用第二次才算节点类型，第一次只是实例；同一路径被走通两次之后，它才会从会话里被提炼出来、落到那个目录里。",
+        "memory.actions.distill.action": "现在沉淀一次",
+        "memory.actions.distill.busy": "正在读会话…",
+        "memory.actions.distill.hint": "看一遍这个项目自己的会话日志，把反复走通的动作挖成提议。只写提议，不落草稿、不改仓库。",
+        "memory.actions.distill.noProject": "读不到会话的工作目录，所以不知道该看哪个项目的日志",
+        "memory.actions.distill.saved": "已提出 {n} 条提议（本次挖到 {m} 条候选）",
+        "memory.actions.distill.none": "这一遍没挖到新的重复动作",
+        "memory.actions.distill.noSessions": "这个项目还没有自己的会话日志，先攒几轮再来",
+        "memory.actions.distill.unreadable": "会话日志读不出来（这是环境问题，不是「没有重复动作」）",
+        "memory.actions.distill.failed": "这一遍没跑完，详见插件日志",
         "memory.actions.noRuns": "这一条还没有运行记录，所以每个节点都还是候选。",
         "memory.actions.settle.title": "本次运行",
         "memory.actions.settle.line": "「{title}」",
         "memory.actions.settle.used": "本次复用 {n} 条做法（勾选为被用上）",
         "memory.actions.settle.refutedWarn": "本次路径里有已被推翻的节点，结果仅供参考",
         "memory.features.actionPipelineEnabled": "M.O.（beta）",
-        "memory.features.actionPipelineEnabled.hint": "⚠️ 开发中：目前只有「看」这一层能用，自己沉淀和触发都还没做，建议暂时保持关闭。Modus Operandi（手法）：把真实会话里反复走通的「做法」连成一张只读图谱——会话头图标、右栏完整视图、每次运行的结算卡。重启 DSH 后生效",
+        "memory.features.actionPipelineEnabled.hint": "只读视图：把真实会话里反复走通的动作连成一张图谱——会话头图标、右栏完整视图、每次运行的结算卡。看 ≠ 写：沉淀由「M.O. 自动沉淀」单独开，执行记账由 /mo-run 单独开。Modus Operandi（工作流）。重启 DSH 后生效",
+        "memory.features.actionNudgeEnabled": "自动沉淀工作流（beta）",
+        "memory.features.actionNudgeEnabled.hint": "开：每轮结束后看一眼这个项目自己的会话日志，把反复走通的动作挖成记忆库里的一条「提议」，等你确认才可能变成工作流。只产草稿、不自动启用、不往仓库里塞文件。挂热路径且要解压日志，轻量档会强制关掉。重启 DSH 后生效",
         "memory.features.resilientModelDownload": "模型下载断了能续上",
         "memory.features.resilientModelDownload.hint": "开：下载中断后从断点续传并自动重试；关：中断就整份重来（断点续传，默认开）",
         "memory.features.searchSemanticDedup": "搜到意思相同的只留一条",
@@ -1254,13 +1265,24 @@ window.__ModuleLoader__.load({
         "memory.actions.broken": "Some files could not be read:",
         "memory.actions.empty.title": "No workflows in this project yet",
         "memory.actions.empty.body": "A workflow lives in the project, under .mneme/pipelines/ — it travels with the repository: committable, reviewable, readable by CI. A practice becomes a node type on its second reuse; the first run is just an instance. Once the same path has been walked twice it gets distilled out of the session and lands in that directory.",
+        "memory.actions.distill.action": "Distill now",
+        "memory.actions.distill.busy": "Reading sessions…",
+        "memory.actions.distill.hint": "Scan this project's own session logs and mine repeated actions into proposals. Writes proposals only — no drafts, no repository changes.",
+        "memory.actions.distill.noProject": "The session's working directory is unknown, so there is no project to scan",
+        "memory.actions.distill.saved": "{n} proposal(s) written ({m} candidate(s) mined this pass)",
+        "memory.actions.distill.none": "No new repeated action this pass",
+        "memory.actions.distill.noSessions": "This project has no session logs of its own yet — come back after a few turns",
+        "memory.actions.distill.unreadable": "The session logs could not be read (an environment problem, not an empty result)",
+        "memory.actions.distill.failed": "This pass did not finish; see the plugin log",
         "memory.actions.noRuns": "No runs recorded for this workflow yet, so every step is still a candidate.",
         "memory.actions.settle.title": "This run",
         "memory.actions.settle.line": "\"{title}\"",
         "memory.actions.settle.used": "Reused {n} steps this run (checked = actually used)",
         "memory.actions.settle.refutedWarn": "This path contains refuted steps; take the result with caution",
         "memory.features.actionPipelineEnabled": "M.O. (beta)",
-        "memory.features.actionPipelineEnabled.hint": "⚠️ Under development: only the viewing layer works today — self-distillation and triggering are not built yet, so leave this off for now. Modus Operandi: the ways of working that actually got walked through in real sessions, drawn as a read-only graph — session-header icon, full sidebar view, and a per-run settlement card. Takes effect after restarting DSH",
+        "memory.features.actionPipelineEnabled.hint": "Read-only view: the ways of working that actually got walked through in real sessions, drawn as a graph — session-header icon, full sidebar view, and a per-run settlement card. Viewing is not writing: distillation has its own switch below, and run accounting has its own (/mo-run). Modus Operandi. Takes effect after restarting DSH",
+        "memory.features.actionNudgeEnabled": "Auto-distill workflows (beta)",
+        "memory.features.actionNudgeEnabled.hint": "On: after each turn, look at this project's own session logs and mine the actions it keeps repeating into a proposal in the memory store — it still needs your sign-off before becoming a workflow. Drafts only; never auto-activates; never writes files into the repo. Hooks a hot path and decompresses logs, so light mode forces it off. Takes effect after restarting DSH",
         "memory.features.resilientModelDownload": "Model downloads resume after interruption",
         "memory.features.resilientModelDownload.hint": "On: downloads continue from where they stopped and retry automatically. Off: an interrupted download starts over (resumable downloads, on by default)",
         "memory.features.searchSemanticDedup": "Keep one entry when search hits near-duplicates",
@@ -2351,6 +2373,17 @@ window.__ModuleLoader__.load({
       ".mneme-pipe-wfMeta{display:block;margin-top:3px;font-size:12px;color:var(--mneme-fg-dim)}",
       ".mneme-pipe-wfId{display:block;margin-top:2px;font-size:11px;color:var(--mneme-fg-dim)}",
       ".mneme-pipe-broken{flex:none;font-size:12px;line-height:17px;color:var(--mneme-warn);padding:6px 14px 0}",
+      // 手动沉淀：按钮与回执占一行。回执用 --mneme-fg-dim 而不是 --mneme-warn——
+      // 「这一遍没挖到」是正常结果，不是警告；只有「读不出来」才是故障，那也由文案说清，
+      // 不靠颜色区分（红黄两色在深浅主题里最容易一起掉对比度）。
+      ".mneme-pipe-distill{flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px}",
+      ".mneme-pipe-distillBtn{border:1px solid var(--dsw-alias-border-l2);background:0 0;border-radius:8px;cursor:pointer;color:var(--mneme-fg-dim);font-family:inherit;font-size:12px;line-height:16px;padding:2px 9px}",
+      ".mneme-pipe-distillBtn:hover:enabled{background:var(--dsw-alias-interactive-bg-hover)}",
+      ".mneme-pipe-distillBtn:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}",
+      // 禁用态用虚线边而不是降透明度：整块降 opacity 会把文字一起压到 AA 以下，
+      // 而「为什么禁用」本来就由 title 说明（读不到会话工作目录）。
+      ".mneme-pipe-distillBtn:disabled{cursor:not-allowed;border-style:dashed;color:var(--mneme-fg-dim)}",
+      ".mneme-pipe-distillNote{color:var(--mneme-fg-dim);line-height:17px;min-width:0}",
     ].join("\n");
     if (typeof document !== "undefined" && document.querySelector(`style[data-plugin-css="${CSS_TAG}"]`) === null) {
       const tag = document.createElement("style");
@@ -2923,7 +2956,10 @@ window.__ModuleLoader__.load({
       // （关=一个座位都不注册，见 apply 内的 M.O. 块）。独立成组只解决「混在
       // enhance 末位」；可见层由 FEATURE_FIRST_SCREEN 决定（见其注释），
       // 本轮已把组名提进首屏——组成员资格不决定可见性。
-      { key: "group.mo", items: ["actionPipelineEnabled"] },
+      // 同一组的三个键是**三件独立能力**，不是一条链的三段：看图（座位闸门）、
+      // 自动沉淀（写提议到记忆库）、执行记账（/mo-run 开窗）。各自默认关，
+      // 开了任何一个都不会顺带打开另一个——写能力必须由人一项一项点。
+      { key: "group.mo", items: ["actionPipelineEnabled", "actionNudgeEnabled"] },
       { key: "group.enhance", items: ["entityExtractionEnabled", "codingRetrospect", "rerankEnabled", "resilientModelDownload", "searchSemanticDedup", "bm25SearchEnabled", "heatEnabled", "documentMemoryEnabled",
         // 人格定义页（beta）：注入总闸。分组随 enhance（行为开关，非座位闸门）；
         // 人格内容在设置页「个性化」区的人格卡。
@@ -7603,8 +7639,62 @@ window.__ModuleLoader__.load({
     // 条目清单（名字 + 规模 + 作用域）：图上方的**选择器**。
     // 它解决的是「这是哪条工作流」——一进来就是一张图时这个问题没有落点，多条之间也没得选。
     // 但它不占整屏：图和它同屏，见下面的 PipelineBrowser。
+    // 「现在就跑一次」。自动沉淀只在 turn/end 之后跑、还有 10 分钟冷却，所以人想立刻
+    // 看到结果时没有入口。这里的 POST 与自动跑走**同一条** nudgeForProject，区别只有
+    // materialize：按钮永远不落草稿，只把提议写进记忆库——升格仍然要人批。
+    // project 为空（会话里读不到 cwd）时按钮是禁用的：服务端只会回 400，
+    // 而一个点了必然失败的按钮比没有按钮更糟。
+    function PipelineDistillButton(props) {
+      const { t, project } = props;
+      const [busy, setBusy] = useState(false);
+      const [note, setNote] = useState("");
+      const disabled = busy || !project;
+      const run = () => {
+        if (disabled) return;
+        setBusy(true);
+        setNote("");
+        apiFetch("/api/dsh-mneme/nudge?project=" + encodeURIComponent(project), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({})
+        })
+          .then((res) => res.json().then((j) => ({ ok: res.ok, status: res.status, body: j || {} })))
+          .then(({ ok, status, body }) => {
+            if (!ok) {
+              // 503 = 会话日志读不到（环境问题），其余是这一跑本身失败。两句不能合并：
+              // 「读不到」和「没有重复动作」在界面上长得一样时，人就只能瞎猜。
+              setNote(t(status === 503
+                ? "memory.actions.distill.unreadable"
+                : "memory.actions.distill.failed"));
+              return;
+            }
+            if (body.skipped) {
+              setNote(t("memory.actions.distill.noSessions"));
+              return;
+            }
+            const saved = (body.counts && body.counts.savedProposals) || 0;
+            const found = (body.counts && body.counts.candidates) || 0;
+            setNote(found === 0
+              ? t("memory.actions.distill.none")
+              : t("memory.actions.distill.saved").replace("{n}", String(saved)).replace("{m}", String(found)));
+          })
+          .catch(() => setNote(t("memory.actions.distill.failed")))
+          .then(() => setBusy(false));
+      };
+      return h("span", { className: "mneme-pipe-distill" },
+        h("button", {
+          type: "button",
+          className: "mneme-pipe-distillBtn",
+          disabled,
+          title: !project ? t("memory.actions.distill.noProject") : t("memory.actions.distill.hint"),
+          onClick: run
+        }, busy ? t("memory.actions.distill.busy") : t("memory.actions.distill.action")),
+        note ? h("span", { className: "mneme-pipe-distillNote", role: "status" }, note) : null
+      );
+    }
+
     function PipelineWorkflowList(props) {
-      const { t, data, activeId, onOpen } = props;
+      const { t, data, activeId, onOpen, project } = props;
       const list = (data && data.available) || [];
       const scopeOf = (row) => (row.scope === "global"
         ? t("memory.actions.scope.global")
@@ -7614,6 +7704,7 @@ window.__ModuleLoader__.load({
           h("span", null, t("memory.actions.list.heading")),
           h("span", null, t("memory.actions.list.count").replace("{n}", String(list.length)))
         ),
+        h(PipelineDistillButton, { t, project }),
         list.length
           ? list.map((row) => h("button", {
               key: row.id,
@@ -7664,7 +7755,7 @@ window.__ModuleLoader__.load({
         className: "mneme-pipe",
         style: { height: "100%", display: "flex", flexDirection: "column", minHeight: "0" }
       },
-        h(PipelineWorkflowList, { t, data: listDoc, activeId, onOpen: setPicked }),
+        h(PipelineWorkflowList, { t, data: listDoc, activeId, onOpen: setPicked, project }),
         h(PipelineView, { t, data: detailDoc })
       );
     }

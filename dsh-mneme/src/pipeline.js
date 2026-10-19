@@ -1,5 +1,5 @@
 /**
- * M.O.（Modus Operandi · 手法）工作流的**读侧**。
+ * M.O.（Modus Operandi）工作流的**读侧**。
  *
  * 本体的落点是仓库（`<项目>/.mneme/pipelines/*.json`），不是记忆库：
  * 工作流是要跑的东西，必须能提交、能 PR、能 review、能被 CI 读、能整版回退；
@@ -15,9 +15,9 @@
  *
  * **两层来源**（2026-10-15 定）：项目层在前、全局层在后，顺序即优先级。
  * 一条工作流默认属于某个项目，跟着项目走；装一次插件就在所有项目里看到同一套
- * 「全局手法」，正是设计备忘要避免的局面——本机活跃记忆里 95.7% 的
+ * 「全局工作流」，正是设计备忘要避免的局面——本机活跃记忆里 95.7% 的
  * `workspace_scope` 为空，「全局」于是变成谁都不看的杂物堆。全局层留着的唯一
- * 理由是接那些**跨项目复用**的手法，而跨项目复用是一个要留痕的显式动作。
+ * 理由是接那些**跨项目复用**的工作流，而跨项目复用是一个要留痕的显式动作。
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, join, posix as pathPosix, win32 as pathWin32 } from "node:path";
@@ -33,7 +33,7 @@ const basenameWin32 = pathWin32.basename;
  *
  * 它只是**兜底层**，不是默认住处：默认住处是 `projectPipelineDir()`。发布包里今天
  * 没有 `pipelines/`（目录为空即不进包），所以全局层通常是空的——**这正是想要的**：
- * 一条手法该不该跨项目用，得是一个人说出来的动作，而不是装插件时顺手塞进去的默认。
+ * 一条工作流该不该跨项目用，得是一个人说出来的动作，而不是装插件时顺手塞进去的默认。
  */
 export function defaultPipelineDir() {
   return join(dirname(fileURLToPath(import.meta.url)), "..", "pipelines");

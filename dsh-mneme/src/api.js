@@ -18,6 +18,14 @@ import { loadRunsById, runsDir, RUNS_SUFFIX } from "./pipeline-runs.js";
 import { observationDir, loadObservationsById } from "./pipeline-observations.js";
 import { projectKey } from "./candidates.js";
 import { readCandidateDoc } from "./candidates.js";
+// M.O. 自动沉淀：/nudge 是 pipeline-nudge.js 的第一个运行时消费者（此前它只有测试在用，
+// 是个孤儿模块——「不能自动沉淀工作流」的根因）。
+import {
+  resolveProjectSessionDir,
+  nudgeForProject,
+  NUDGE_BOUNDARIES,
+  NUDGE_AUTO_BUDGET_MS
+} from "./pipeline-nudge.js";
 
 // headers：少数端点（/export 附件下载）需要追加 Content-Disposition 等响应头。
 function sendJson(res, status, payload, headers = {}) {
@@ -1849,7 +1857,7 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
     }
   });
 
-  // --- M.O.（Modus Operandi · 手法）工作流 ---
+  // --- M.O.（Modus Operandi）工作流 ---
   // 只读端点，读的是**项目里**的 `<项目>/.mneme/pipelines/*.json`（文件头在
   // src/pipeline.js），项目层优先、插件包里那份降级成全局层；投影成
   // mneme.pipeline/v1 交给面板与 agent——两边读同一份，画面只是它的投影。
@@ -1989,6 +1997,84 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
           detail: String((error && error.message) || error)
         });
       }
+    }
+  });
+
+  // --- M.O. 自动沉淀（nudge）---
+  // 读+写两种方法同路：GET 是**预览**（不落盘），POST 是**真跑**（落提议、可落草稿）。
+  // 为什么不全放 GET：GET 会被浏览器预取、被面板刷新反复调用，而这一跑要解压几十份
+  // zstd 会话日志（同步 I/O,本机实测 16.2s）。预览走 GET 时才关掉提议落盘
+  // （persistProposals:false）——否则每刷一次面板就往 memoryDir 里塞一批文件。
+  //
+  // policy 是 token-write 而不是 open：GET 免 token（与 /pipeline、/candidates 同级的
+  // 只读预览），POST 要 token——它会写盘，写盘面一律受门控。
+  register({
+    kind: "exact",
+    path: "/api/dsh-mneme/nudge",
+    policy: "token-write",
+    handler(req, res) {
+      const method = String(req.method || "GET").toUpperCase();
+      const run = (body) => {
+        try {
+          const url = new URL(req.url, "http://localhost");
+          const project = url.searchParams.get("project");
+          // 与 /pipeline、/candidates 同一条规矩：不是绝对路径就拒掉，不能静默退成全局。
+          if (project !== null && !isAbsolute(project)) {
+            sendJson(res, 400, { error: "project-not-absolute", detail: project });
+            return;
+          }
+          // 归属解析先做、单独回执：解析不到桶时要能说清是「这个项目还没跑过会话」
+          // 还是「会话目录读不到」——两者在候选列表上都表现为空。
+          const where = resolveProjectSessionDir({ projectRoot: project });
+          if (!where.sessionDir) {
+            // no-sessions-dir / unreadable 是**环境问题**（读不到），回 503 让调用方
+            // 知道这不是答案；no-bucket / bad-project 是**关于这个项目的答案**，回 200。
+            const envProblem = where.reason === "no-sessions-dir" || where.reason === "unreadable";
+            sendJson(res, envProblem ? 503 : 200, {
+              error: envProblem ? "nudge-sessions-unreadable" : undefined,
+              contract: "mneme.nudge/v1",
+              attribution: where,
+              skipped: true,
+              skippedReason: "no-session-attribution",
+              counts: { candidates: 0, buckets: 0, sessionsWithCandidates: 0, savedProposals: 0, draftsWritten: 0 },
+              available: [],
+              drafts: [],
+              boundaries: NUDGE_BOUNDARIES
+            });
+            return;
+          }
+          const memoryDir = (config && typeof config.memoryDir === "string" && config.memoryDir.trim())
+            ? config.memoryDir
+            : "~/.dsh/memory";
+          const doc = nudgeForProject({
+            projectRoot: project,
+            memoryDir,
+            attribution: where,
+            // GET 只预览：不落提议、不落草稿。写动作一律要 POST。
+            persistProposals: method !== "GET" && method !== "HEAD",
+            // 落草稿是「往仓库里塞文件」，必须显式要（body.materialize），默认不落。
+            materialize: body && body.materialize === true,
+            // 面板预览给短预算：宁可少看几份并如实标 budgetExceeded，也不能让一次
+            // 刷新把宿主主线程按住十几秒。POST（显式真跑）给完整预算。
+            budgetMs: (method === "GET" || method === "HEAD") ? NUDGE_AUTO_BUDGET_MS : NUDGE_AUTO_BUDGET_MS * 3
+          });
+          sendJson(res, 200, doc);
+        } catch (error) {
+          sendJson(res, 500, {
+            error: "nudge-failed",
+            detail: String((error && error.message) || error)
+          });
+        }
+      };
+      if (method === "PUT" || method === "POST") {
+        readBody(req, res).then((text) => {
+          // readBody 已经回过 413：null 就是「别再往下走」。
+          if (text === null) return;
+          run(parseBody(text));
+        });
+        return;
+      }
+      run(null);
     }
   });
 

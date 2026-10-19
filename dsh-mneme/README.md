@@ -64,7 +64,7 @@ dsh web
 | `memory_register_document` | 登记 agent 产长文档的指针行（#230：摘要 + `doc_path` + evidence 落 `document` 类型；正文留在磁盘、由 agent 自管，注册口唯一，旁路写入被拒） |
 | `memory_runtime` | 本地推理运行时的状态 / 供给 / 校验（v0.7.32，自管运行时三档取件） |
 
-### 工作流（M.O. · 手法，v0.9 beta）
+### 工作流（M.O.，v0.9 beta）
 
 记忆库答的是「这件事**为什么**这么办」，答不了「这件事**到底怎么跑**」。v0.9 把后者从记忆库里的一行文字变成项目里可提交、可 review、可被 CI 读的一份文件——一条工作流一个 JSON：
 
@@ -267,11 +267,11 @@ v0.3.0 起新增**记忆基因**层：从记忆里抽取**命名实体**、**带
 
 > 完整版本说明见 [CHANGELOG](CHANGELOG.md) 与各版本 [GitHub Release](https://github.com/slow-stack/mneme/releases)；当前特性以本 README 正文与[配置表](#-配置)为准。早期版本中的实验性功能（Wiki-Link、tag 系统等）已在 v0.7.11 移除，详见 CHANGELOG 对应条目。
 
-🧬 Gene → 🛡️ 审计加固 → 💤 Sleep Mode → 🕸️ 召回融合与图谱 → ✨ 面板体验 → 🌡️ 自进化记忆 → 🔐 作用域隔离 → 🌐 MCP 生态 → 🧭 M.O. 手法（项目级工作流，v0.9 beta）
+🧬 Gene → 🛡️ 审计加固 → 💤 Sleep Mode → 🕸️ 召回融合与图谱 → ✨ 面板体验 → 🌡️ 自进化记忆 → 🔐 作用域隔离 → 🌐 MCP 生态 → 🧭 M.O.（项目级工作流，v0.9 beta）
 
 | 版本 | 主题 |
 |------|------|
-| **v0.9.0**（2026-10-17） | M.O.（Modus Operandi · 手法）beta：工作流本体住 `<项目>/.mneme/pipelines/`、候选分层与升格判据、面板清单与图同屏（`actionPipelineEnabled` 默认关）；设置面板折叠线挪到「新手之外」并按人话重写 22 个条目名（#427）；安全与供应链加固（39 条路由声明式鉴权、OSV 有漏洞即失败、发布带 provenance） |
+| **v0.9.0**（2026-10-17） | M.O.（Modus Operandi）beta：工作流本体住 `<项目>/.mneme/pipelines/`、候选分层与升格判据、面板清单与图同屏（`actionPipelineEnabled` 默认关）；设置面板折叠线挪到「新手之外」并按人话重写 22 个条目名（#427）；安全与供应链加固（39 条路由声明式鉴权、OSV 有漏洞即失败、发布带 provenance） |
 | **v0.9.1**（2026-10-18） | M.O. 从「看得见」跑到「跑得出账」：执行窗口由 `/mo-run start` / `/mo-run stop` 显式划开、运行账落 `<项目>/.mneme/pipelines/<id>.runs.jsonl`（账本坏了与从没跑过严格分开）、归属只出候选、观察旁挂与脱节检出、步骤 `assert` / `optional`、R1/R2 提议；沉淀链从真实会话日志挖 draft 工作流（判据恒 `null`，答案只能由人补）；人格定义页 v1 → v1.2（按 agent 寻址多卡，默认关）；面板、向量与检查更新的一圈修复（#448 / #450 / #460）；Release 正文改分层渲染 |
 | **v0.9.2**（2026-10-19） | 让「看不见的失败」显形：功能开关的第三态「待重启」把「面板显示已改 ≠ 运行时已改」摆到界面上（#481）；作用域级可逆闸门让一路记忆能被单独按下与松开、不必改配置重启（#471，默认关）；巩固用的 `dreamMaxTokens` 默认值撞服务商上限、八天 180 次全失败，面板现在能改、超上限还会自动降级重试（#478）；CLI 把 `--` 开头的值当新旗标的真实缺陷（一次 1/4096 概率的 CI 红揪出来的）、人格卡删除 × 永远不可见、自动蒸馏写入的行 100% 拿不到向量（#477） |
 | **v0.8.x** | 作用域隔离（agent / workspace 双维 + opt-in 硬过滤）、冲突队列人工裁决、生态化（stdio MCP server / 图召回轴 / 冷启动 / 注入截断） |
@@ -702,7 +702,7 @@ npm run sync       # 把 src/ 同步到 lib/（发布时由 prepack 钩子自动
 - [实体结构化记忆设计](docs/ENTITIES.md)
 - [语义增强架构](docs/SEMANTIC.md)
 - [本地模型部署指南](docs/LOCAL_MODEL.md)
-- [工作流（M.O. · 手法）：本体住项目，证据住记忆库](docs/WORKFLOWS.md)
+- [工作流（M.O.）：本体住项目，证据住记忆库](docs/WORKFLOWS.md)
 - [连续性抢救（#249 N3）：触发器口径与事件契约](docs/CONTINUITY.md)
 - [Sleep Mode：空闲四阶段深度维护](docs/SLEEP.md)
 - [存储与回收：表结构、保留期、`dsh-mneme reclaim`](docs/STORAGE.md)
