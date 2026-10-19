@@ -911,8 +911,9 @@ export const Config = z.object({
   //
   // 默认关（beta 必须 opt-in），并且进 LIGHT_MODE_OFF：它挂在 session/event 热路径上，
   // 且解压会话日志是**同步**的（本机 118 份实测 16.2s），轻量档最不该背这条路径。
-  // 触发侧另有 30 分钟/项目的冷却与 budgetMs 上限（见 src/pipeline-nudge.js 的
+  // 触发侧另有 10 分钟/项目的冷却与 budgetMs 上限（见 src/pipeline-nudge.js 的
   // NUDGE_AUTO_MIN_INTERVAL_MS 与 src/index.js 的装配注释）——旗标只是总闸。
+  // （冷却值以常量为准：早前这里写「30 分钟」，与实际 10 分钟不符。）
   actionNudgeEnabled: z.boolean().default(false),
 
   // --- 人格定义页（beta）---------------------------------------------------

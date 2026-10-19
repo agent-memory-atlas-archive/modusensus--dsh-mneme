@@ -217,3 +217,43 @@ test("/nudge：GET 只预览不落盘，POST 才写提议；materialize 默认�
     }
   });
 });
+
+test("/nudge：PATCH/DELETE 一律 405，绝不落进「不是 GET/HEAD 就算写」的分支", async () => {
+  // 这条是从评审里捞出来的真洞：persistProposals 按「method !== GET && !== HEAD」算，
+  // 而方法分流只拦 PUT/POST，于是带 token 的 PATCH/DELETE 会直落 run(null)、
+  // 当成写动作往 memoryDir 里落提议——一个不需要 body 的静默写盘口，正好打在
+  // 这个端点「GET 只预览、写动作一律要 POST」的卖点上。
+  await withDir(async (dir) => {
+    const projectRoot = join(dir, "proj");
+    mkdirSync(projectRoot, { recursive: true });
+    const memoryDir = join(dir, "memory");
+    const dshHome = join(dir, "dsh-home");
+    const calls = [
+      { name: "skill", args: { name: "alpha" } },
+      { name: "skill", args: { name: "beta" } }
+    ];
+    writeSession(dshHome, { bucket: "ws-bucket", sessionId: "sess-a", cwd: projectRoot, calls });
+    writeSession(dshHome, { bucket: "ws-bucket", sessionId: "sess-b", cwd: projectRoot, calls });
+
+    const prev = process.env.DSH_HOME;
+    process.env.DSH_HOME = dshHome;
+    try {
+      const { route } = setup({ apiToken: "secret-token", memoryDir });
+      for (const verb of ["PATCH", "DELETE"]) {
+        const res = new FakeRes();
+        // 带合法 token：证明拦住它的是方法白名单，不是鉴权。
+        await route.handler(req("/api/dsh-mneme/nudge?project=" + encodeURIComponent(projectRoot), verb, {}, { authorization: "Bearer secret-token" }), res);
+        assert.equal(res.statusCode, 405, verb + " 必须回 405");
+        const doc = JSON.parse(res.body);
+        assert.equal(doc.error, "method-not-allowed");
+        assert.equal(doc.allow, "GET, HEAD, POST, PUT");
+        assert.equal(res.headers?.Allow, "GET, HEAD, POST, PUT", "405 要带 Allow 头");
+      }
+      // 最硬的一条：这里必须**一个文件都没落**。只看状态码会漏掉「先写再报错」。
+      assert.equal(existsSync(join(memoryDir, "proposals")), false, "PATCH/DELETE 不许落提议");
+    } finally {
+      if (prev === undefined) delete process.env.DSH_HOME;
+      else process.env.DSH_HOME = prev;
+    }
+  });
+});

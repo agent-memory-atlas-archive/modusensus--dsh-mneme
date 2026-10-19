@@ -255,12 +255,19 @@ export function readSessionCwd(file) {
  *   no-bucket      扫完了，没有任何桶的会话头指向这个项目（这个项目确实还没跑过会话）
  *   unreadable     桶在，但所有会话头的 cwd 都读不出来——**这一条必须与 no-bucket 分开**：
  *                  前者是「读不到」，后者是「确实没有」，混起来就等于把故障报成空结果。
+ *   budget-exceeded 预算用光还没扫完——同样**不是**关于这个项目的答案（见 deadline 参数）。
+ *
+ * `deadline` 是这次解析的绝对截止时刻（毫秒）。不给就扫到底（测试与离线批处理要完整
+ * 结果）。为什么要它：这一层是**同步**的，最多 500 个桶 × 3 个文件，全都走同步 I/O；
+ * 调用方手里的 `budgetMs` 原先只约束后面的挖掘，约束不到这里——一条「真卡就调
+ * budgetMs」的建议对这段路径是空话（v0.9.3 评审抓出）。
  */
 export function resolveProjectSessionDir({
   dshHome = process.env.DSH_HOME || join(homedir(), ".dsh"),
   projectRoot = null,
   maxBuckets = 500,
-  filesPerBucket = 3
+  filesPerBucket = 3,
+  deadline = null
 } = {}) {
   const target = normalizeProjectPath(projectRoot);
   if (!target) {
@@ -282,12 +289,36 @@ export function resolveProjectSessionDir({
   buckets.sort();
   let filesRead = 0;
   let bucketsWithCwd = 0;
+  const outOfBudget = () => deadline !== null && Number.isFinite(deadline) && Date.now() > deadline;
   for (const bucket of buckets) {
+    // 桶循环里查预算：每个桶都可能要 readdir + 读 3 个文件，全同步，
+    // 一次解析跑满 500 个桶就是几百毫秒到几秒不等。
+    if (outOfBudget()) {
+      return {
+        sessionDir: null,
+        bucket: null,
+        reason: "budget-exceeded",
+        sessionsRoot: root,
+        bucketsScanned: buckets.length,
+        filesRead
+      };
+    }
     const dir = join(root, bucket);
     // 每个桶只读前几个文件：同一个桶里所有会话的 cwd 必然相同（桶是按工作区分的），
     // 读三个只是给「第一个文件正好是截断的」留余量，不是要把整个桶扫一遍。
     const found = findSessionFiles(dir, { limit: filesPerBucket });
     for (const file of found.files.slice(0, filesPerBucket)) {
+      // 文件循环里也查：filesPerBucket 可被调用方调大，3 是最小值不是上限。
+      if (outOfBudget()) {
+        return {
+          sessionDir: null,
+          bucket: null,
+          reason: "budget-exceeded",
+          sessionsRoot: root,
+          bucketsScanned: buckets.length,
+          filesRead
+        };
+      }
       const cwd = readSessionCwd(file);
       filesRead += 1;
       if (!cwd) continue;
@@ -1377,7 +1408,12 @@ export function nudgeForProject({
   kinds = DEFAULT_NUDGE_KINDS,
   attribution = null
 } = {}) {
-  const where = attribution || resolveProjectSessionDir({ dshHome, projectRoot });
+  // 归属解析自己也可能很贵（同步扫桶 500 个），所以它也要吃同一个预算。调用方给了现成的
+  // attribution 就不再解析（`/nudge` 路由就是这么做的：它先解析一次才能决定要不要回 400）。
+  // 这里**自己算**截止点而不是多接一个 deadline 参数：两处各算一次会出现「解析用 A 截止、
+  // 挖掘用 B 截止」的双预算，那种不一致以后没人查得出来。
+  const budgetDeadline = Number.isFinite(budgetMs) && budgetMs > 0 ? now + budgetMs : null;
+  const where = attribution || resolveProjectSessionDir({ dshHome, projectRoot, deadline: budgetDeadline });
   if (!where || !where.sessionDir) {
     return {
       contract: "mneme.nudge/v1",

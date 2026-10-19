@@ -1112,3 +1112,44 @@ test("nudgeForProject：「读不到」与「确实没有」必须分开报", ()
     assert.equal(resolveProjectSessionDir({ dshHome: homeMissing, projectRoot }).reason, "no-sessions-dir");
   });
 });
+
+test("归属解析也吃 budgetMs：预算用光报 budget-exceeded，不冒充 no-bucket", () => {
+  // 评审抓出：resolveProjectSessionDir 最多同步扫 500 个桶 × 3 个文件，原先完全不看
+  // budgetMs，于是 PR 正文那句「真卡就调 budgetMs」对这段路径是空话。
+  // 这里用「截止点已经过去」来构造，不依赖真实耗时，确定性。
+  withDir((dir) => {
+    const projectRoot = join(dir, "proj");
+    mkdirSync(projectRoot, { recursive: true });
+    const home = fakeDshHome(dir, { cwd: projectRoot });
+    // 已经过期的截止点 → 连一个桶都不该扫。
+    const stalled = resolveProjectSessionDir({ dshHome: home, projectRoot, deadline: Date.now() - 1 });
+    assert.equal(stalled.reason, "budget-exceeded");
+    assert.equal(stalled.sessionDir, null);
+    assert.equal(stalled.filesRead, 0, "超预算时一个会话文件都不该读");
+    // 不给 deadline = 扫到底，行为与改动前一致（测试与离线批处理要完整结果）。
+    assert.equal(resolveProjectSessionDir({ dshHome: home, projectRoot }).reason, "matched");
+  });
+});
+
+test("nudgeForProject：归属解析超预算时 skipped 并如实带 budget-exceeded", () => {
+  withDir((dir) => {
+    const projectRoot = join(dir, "proj");
+    mkdirSync(projectRoot, { recursive: true });
+    const home = fakeDshHome(dir, { cwd: projectRoot });
+    // now 往前推 10s + budget 4s → 截止点在过去，模拟「预算已经被前面的活花掉了」。
+    const doc = nudgeForProject({
+      projectRoot,
+      dshHome: home,
+      memoryDir: join(dir, "memory"),
+      now: Date.now() - 10000,
+      budgetMs: 4000,
+      persistProposals: false
+    });
+    assert.equal(doc.skipped, true);
+    assert.equal(doc.skippedReason, "no-session-attribution");
+    // 关键：原因必须能区别于「这个项目确实没跑过会话」（no-bucket）——否则一次
+    // 扫不完会被读成「这个项目很干净」。
+    assert.equal(doc.attribution.reason, "budget-exceeded");
+    assert.equal(doc.counts.candidates, 0);
+  });
+});
