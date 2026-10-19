@@ -64,8 +64,17 @@ test("多帧 zstd：**每一帧**都要解出来（只解第一帧是踩过的�
   assert.deepEqual(seen, ["第一帧的内容", "第二帧的内容", "第三帧的内容"], "三帧都要被回调到");
   assert.equal(stat.frames, 3);
   assert.equal(stat.failed, 0);
-  // 反证：证明这个夹具真能暴露「只解第一帧」——直接 zstdDecompressSync 只能拿到第一段
-  assert.equal(zlib.zstdDecompressSync(buf).toString("utf8"), "第一帧的内容");
+  // 反证：证明这个夹具真能暴露「只解第一帧」——数帧头，不依赖 Node 的 zstd 语义。
+  // 原来这行是 `zstdDecompressSync(buf)` 只解出第一段；Node 24.22.0 起整块解会吐出全部帧
+  // （nodejs/node#65865 让解码跨 chunk 边界），反证随之过期，所以改成数 magic。
+  // 注意这行锁的是「切帧判据仍是 magic」，**不是碰撞免疫**：payload 里撞上 magic 时
+  // 计数器与解码器会一起错（半片也解得出来），实测 frames 同样变成 4，这条测不出来。
+  let frameHeaders = 0;
+  for (let at = 0; (at = buf.indexOf(ZSTD_MAGIC, at)) !== -1; at += ZSTD_MAGIC.length) frameHeaders += 1;
+  assert.equal(frameHeaders, 3, "夹具必须是三帧，否则上面测不到「只解第一帧」");
+  // 帧头数 = 成功数 + 失败数，是实现的契约：`forEachFrame` 用 magic 切帧，每段要么解开要么记失败。
+  // 写成 `stat.frames` 只在 failed 恒为 0 时成立，那是巧合不是规矩。
+  assert.equal(frameHeaders, stat.frames + stat.failed, "帧头数必须交代得清：每一帧要么解开要么记失败");
 });
 
 test("多帧 zstd：每帧都解；截断产生的**半行**由 jsonl 层丢掉（宁可少一条，不要错一条）", () => {
