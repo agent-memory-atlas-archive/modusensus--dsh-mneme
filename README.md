@@ -10,7 +10,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3E63DD?style=flat-square" alt="license"></a>
   <a href="https://github.com/slow-stack/mneme/actions"><img src="https://img.shields.io/github/actions/workflow/status/slow-stack/mneme/ci.yml?style=flat-square&label=CI" alt="CI"></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-22%2B-3E63DD?style=flat-square&logo=nodedotjs&logoColor=white" alt="node"></a>
-  <a href="https://github.com/slow-stack/mneme"><img src="https://img.shields.io/badge/tests-2230%20passed-3E63DD?style=flat-square" alt="tests"></a>
+  <a href="https://github.com/slow-stack/mneme"><img src="https://img.shields.io/badge/tests-2257%20passed-3E63DD?style=flat-square" alt="tests"></a>
   <a href="https://codecov.io/gh/slow-stack/mneme"><img src="https://img.shields.io/codecov/c/github/slow-stack/mneme/main?style=flat-square" alt="coverage"></a>
   <a href="https://github.com/awesome-dsh-plugin/awesome-dsh-plugin"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="Awesome"></a>
 </p>
@@ -39,6 +39,7 @@
 | 2026-10-18 | **v0.9.1** | **M.O. 从「看得见」跑到「跑得出账」** — 工作流不再只有一张图：`/mo-run start <id>` 与 `/mo-run stop` 由人划出执行窗口，一次 run 落到 `<项目>/.mneme/pipelines/<id>.runs.jsonl`；归属只出候选（单条命令唯一归属实测 14.2%，所以「认不出来」是合法答案）；P1 回执列业务动作、P2 人确认才写账、P3 把「人说做了」与「观察里一次都没出现」的矛盾摆出来让人判。**机器从不替你下结论。** |
 | 2026-10-18 | **v0.9.1** | **人格定义页 v1.2**（beta，默认关）— 从一张卡变成按 agent 寻址的多张卡：设置键是 `{default, byAgent}`，v1 的单对象读作 `default`、零迁移；注入按会话身份寻址对应 agent 的卡，身份缺失落 `default`。 |
 | 2026-10-19 | **v0.9.2** | **让「看不见的失败」显形** — 这一版修的大多不是「缺功能」，是「坏了却不报」：功能开关一直是启动期生效，面板「已改」只说明值进了库，于是新增第三态「待重启」（[#481](https://github.com/slow-stack/mneme/pull/481)）；巩固的 `dreamMaxTokens` 默认值被原样当 `max_tokens` 发出去，撞上服务商上限后 180 次巩固 0 次成功，现在面板能改、超上限还会按服务商自己声明的上限自动降级（[#478](https://github.com/slow-stack/mneme/issues/478)）；自动蒸馏写入的行 100% 拿不到向量，注释承诺的「提交后补跑」从未存在（[#477](https://github.com/slow-stack/mneme/pull/477)）；CLI 把 `--` 开头的值当成新旗标——这个缺陷只在 token 前两位恰好掷中 `-`（约 1/4096）时现形，潜伏了整整一个发布周期。另新增作用域级可逆闸门（[#471](https://github.com/slow-stack/mneme/issues/471)，默认关）：让一路记忆能被单独按下与松开，不改配置、不重启。 |
+| 2026-10-20 | **v0.9.3** | **M.O. 从「挖得出来」跑到「会被叫去挖」** — 沉淀链的算法自 v0.9.1 起就写完了（多帧 zstd → 重复序列 → 缺席对照 → draft 草稿），可它在运行时**没有任何调用点**：全仓引用只出现在测试里。机器挖得出来、却永远不会被叫去挖——缺的从来不是算法，是**归属**与**触发**。这一版把三处接上：按会话头里的 `cwd` 反查项目桶（桶名是路径的**有损**变形，规则不在本仓，查不到就整跑跳过，而不是降级成全局普查——后者会把 A 项目的动作算到 B 头上，且结果看起来完全正常）；新增 `nudgeForProject` 把「归属 → 挖掘 → 落盘」收成一个入口；挂 `turn/end` 按项目跑，冷却 10 分钟、单次预算 4 秒、延到宏任务、一次一个项目、抛错只 `warn`。**它只产提议，不产草稿**（[#489](https://github.com/slow-stack/mneme/pull/489)）：升格仍然要人批，面板也多了「现在沉淀一次」，与自动跑同一条入口、区别只有不改仓库。同版修掉三处「坏了却不报」：作用域反查自 v0.8.0 起每次都抛错走降级、canonical 归一与成员校验静默失效（[#487](https://github.com/slow-stack/mneme/issues/487)）；`/nudge` 的写盘口只拦 `PUT`/`POST`，带 token 的 `PATCH`/`DELETE` 会静默写盘、归属解析不看预算、桶名边收边截把「没看全」报成「确实没有」；多帧 zstd 的反证断言绑了 Node 的整块解语义，24.22.0 起过期（[#490](https://github.com/slow-stack/mneme/pull/490)）。 |
 
 > 只记大改动，逐条细节见 [CHANGELOG](dsh-mneme/CHANGELOG.md)。
 
@@ -264,7 +265,7 @@ dsh-mneme-serve          # 默认 ~/.dsh/memory + 127.0.0.1:8790
 | **v0.6** | 会话生命周期：删对话 ≠ 删记忆 | ✅ |
 | **v0.7** | 自进化记忆：热度衰减 + 睡眠双保护 + 桌面端工作台/功能开关 | ✅ |
 | **v0.8** | 作用域隔离（agent/workspace 双维隔离 + 检索加权 + opt-in 硬过滤）+ 冲突队列人工裁决 + 归属显式声明 + 生态化（stdio MCP server / 图召回轴 / 冷启动 / 注入截断与状态条 / 蒸馏可靠性 / 注入形态与 agent 主动整理接口 / 配置说明与 issue 模板） | ✅ 已发布（至 v0.8.16） |
-| **v0.9** | M.O.（Modus Operandi）beta：项目级工作流本体 + 候选分层与升格判据 + 面板清单/图同屏；设置面板按「新手之外」重划折叠线（#427）；安全审计与供应链加固（声明式路由鉴权、OSV 阻断、发布签名）；**v0.9.1 补上写侧**：执行窗口、运行账、归属候选、观察旁挂与脱节检出、步骤 `assert`/`optional`、沉淀链草稿挖掘、人格定义页（按 agent 多卡）；**v0.9.2 让看不见的失败显形**：功能开关第三态「待重启」、作用域级可逆闸门（#471）、巩固 `max_tokens` 超上限自动降级（#478） | ✅ 已发布（v0.9.2） |
+| **v0.9** | M.O.（Modus Operandi）beta：项目级工作流本体 + 候选分层与升格判据 + 面板清单/图同屏；设置面板按「新手之外」重划折叠线（#427）；安全审计与供应链加固（声明式路由鉴权、OSV 阻断、发布签名）；**v0.9.1 补上写侧**：执行窗口、运行账、归属候选、观察旁挂与脱节检出、步骤 `assert`/`optional`、沉淀链草稿挖掘、人格定义页（按 agent 多卡）；**v0.9.2 让看不见的失败显形**：功能开关第三态「待重启」、作用域级可逆闸门（#471）、巩固 `max_tokens` 超上限自动降级（#478）；**v0.9.3 接通自动沉淀**：按会话头 `cwd` 反查项目桶、挂 `turn/end`、冷却 10 分钟、单次预算 4 秒，只产提议不产草稿（#489），并修作用域反查自 v0.8.0 起静默降级（#487）、`/nudge` 写盘口漏拦 `PATCH`/`DELETE`、多帧 zstd 反证断言绑 Node 整块解语义（#490） | ✅ 已发布（v0.9.3） |
 
 > 完整逐小版本说明见 [CHANGELOG](dsh-mneme/CHANGELOG.md)。
 
@@ -272,7 +273,7 @@ dsh-mneme-serve          # 默认 ~/.dsh/memory + 127.0.0.1:8790
 
 ```bash
 cd dsh-mneme && npm install
-npm test        # 2230 个测试
+npm test        # 2257 个测试
 npm run stress  # 三轴线压测
 npm run sync    # src → lib 同步
 ```
@@ -321,6 +322,7 @@ dsh-mneme 的机制设计与下列公开研究相互印证（以下引用均逐�
 | 2026-10-18 | **v0.9.1** | **M.O. goes from “visible” to “accounted for”** — workflows are more than a diagram now: `/mo-run start <id>` and `/mo-run stop` let a person draw the execution window, and a run is journaled to `<project>/.mneme/pipelines/<id>.runs.jsonl`. Attribution only produces candidates (exact single-command attribution measured at 14.2%, so “no idea” is a legitimate answer); P1 reports the business actions seen, P2 writes the ledger only after a human confirms, and P3 puts “the human said it ran” against “the observation never saw it” for the human to settle. **The machine never concludes for you.** |
 | 2026-10-18 | **v0.9.1** | **Persona page v1.2** (beta, off by default) — one card becomes per-agent cards: the setting is `{default, byAgent}`, a v1 single object reads as `default` with zero migration, and injection resolves the card by session identity, falling back to `default`. |
 | 2026-10-19 | **v0.9.2** | **Making silent failures visible** — most of what this release fixes isn't a missing feature, it's something broken that never said so. Feature flags have always taken effect at startup, so a lit "changed" badge only meant the value reached the database; there's now a third state, **pending restart** ([#481](https://github.com/slow-stack/mneme/pull/481)). The default `dreamMaxTokens` was sent verbatim as `max_tokens` and blew past provider caps: **180 consolidations, 0 successes** over eight days — the panel can now edit it, and an over-cap request retries once at the limit the provider itself declares ([#478](https://github.com/slow-stack/mneme/issues/478)). Rows written by auto-distillation got no vector at all; the "deferred to commit" the comment promised never existed ([#477](https://github.com/slow-stack/mneme/pull/477)). And the CLI treated values starting with `--` as new flags — a defect that only surfaces when a random token happens to begin with `-` (about 1/4096), which is why it hid for a whole release cycle. Also new: a **scope-level reversible gate** ([#471](https://github.com/slow-stack/mneme/issues/471), off by default) that pauses one scope without editing config or restarting. |
+| 2026-10-20 | **v0.9.3** | **M.O. goes from “diggable” to “actually summoned to dig”** — the distillation chain has been fully implemented since v0.9.1 (multi-frame zstd → repeated sequences → absence contrast → draft workflows), yet it had **no call site at runtime**: every reference in the repo lived in tests. The machine could dig, but nothing ever called it. What was missing was never the algorithm — it was **attribution** and **triggering**. This release wires up three things: resolving a project's session bucket from the `cwd` in the session header (bucket names are a **lossy** transform of paths whose rule lives outside this repo; when the lookup fails the whole run is skipped rather than degraded into a global sweep — the latter attributes project A's actions to project B, and the result looks perfectly normal); a new `nudgeForProject` that folds “attribute → mine → persist” into one entry point; and a `turn/end` hook that runs per project with a 10-minute cooldown, a 4-second budget, deferred to a macrotask, one project at a time, errors only warned. **It produces proposals, never drafts** ([#489](https://github.com/slow-stack/mneme/pull/489)): promotion still needs a human, and the panel gained a "distill now" button on the same entry point, differing only in that it does not touch the repo. The same version fixes three “broken but silent” defects: the scope reverse-lookup that had been throwing and silently degrading on every call since v0.8.0, disabling canonical normalization and membership checks ([#487](https://github.com/slow-stack/mneme/issues/487)); `/nudge`'s write gate, which only intercepted `PUT`/`POST` so a token-bearing `PATCH`/`DELETE` persisted proposals silently, plus attribution resolution ignoring the budget and bucket names being truncated while being collected — reporting “did not look at everything” as “there is genuinely nothing”; and a multi-frame zstd counter-assertion bound to Node's whole-buffer decode semantics, expired from 24.22.0 ([#490](https://github.com/slow-stack/mneme/pull/490)). |
 
 > Headlines only; see the [CHANGELOG](dsh-mneme/CHANGELOG.md) for the full list.
 
@@ -546,7 +548,7 @@ Community projects that wire mneme into more platforms — not part of this repo
 | **v0.6** | Session lifecycle: delete session ≠ delete memory | ✅ |
 | **v0.7** | Self-evolving memory: heat decay + sleep dual-protection + desktop workbench/feature toggles | ✅ |
 | **v0.8** | Scope isolation (agent/workspace stamping + retrieval weighting + opt-in hard filter) + conflict review queue + explicit attribution + ecosystem (stdio MCP server / graph recall axis / cold-start bootstrap / injection truncation & status bar / distill reliability / injection shaping & agent-driven organize / configuration reference & issue templates) | ✅ Released (up to v0.8.16) |
-| **v0.9** | M.O. (Modus Operandi) beta: project-level workflows + candidate tiering & promotion criteria + panel list-and-graph view; settings panel re-folded at "beyond the newcomer" (#427); security & supply-chain hardening (declarative route auth, OSV gate, signed releases); **v0.9.1 adds the write side**: execution windows, run ledger, attribution candidates, observation sidecar with drift detection, step `assert`/`optional`, draft mining from session logs, persona page (per-agent cards); **v0.9.2 makes silent failures visible**: feature-flag third state "pending restart", scope-level reversible gate (#471), automatic max_tokens downgrade for consolidation (#478) | ✅ Released (v0.9.2) |
+| **v0.9** | M.O. (Modus Operandi) beta: project-level workflows + candidate tiering & promotion criteria + panel list-and-graph view; settings panel re-folded at "beyond the newcomer" (#427); security & supply-chain hardening (declarative route auth, OSV gate, signed releases); **v0.9.1 adds the write side**: execution windows, run ledger, attribution candidates, observation sidecar with drift detection, step `assert`/`optional`, draft mining from session logs, persona page (per-agent cards); **v0.9.2 makes silent failures visible**: feature-flag third state "pending restart", scope-level reversible gate (#471), automatic max_tokens downgrade for consolidation (#478); **v0.9.3 wires up auto-distillation**: resolves the project bucket from the session header's `cwd`, hooks `turn/end`, 10-minute cooldown, 4-second budget, proposals only and never drafts (#489), and fixes the scope reverse-lookup that had been silently degrading since v0.8.0 (#487), the `/nudge` write gate missing `PATCH`/`DELETE`, and a multi-frame zstd counter-assertion bound to Node's whole-buffer decode semantics (#490) | ✅ Released (v0.9.3) |
 
 > Full per-minor-version changelog in [CHANGELOG](dsh-mneme/CHANGELOG.md).
 
@@ -554,7 +556,7 @@ Community projects that wire mneme into more platforms — not part of this repo
 
 ```bash
 cd dsh-mneme && npm install
-npm test        # 2230 tests
+npm test        # 2257 tests
 npm run stress  # three-axis stress test
 npm run sync    # src → lib sync
 ```

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-10-20
+
 ## 🆕 新增
 
 - **沉淀链接线：把「会自动沉淀工作流」从一句话变成一条能跑的路（`actionNudgeEnabled`，beta，默认关）**：`src/pipeline-nudge.js` 从 v0.9.1 起就完整实现了「多帧 zstd → 重复序列 → 缺席对照 → draft 草稿」，可它在运行时**没有任何调用点**——全仓引用只出现在 `test/pipeline-nudge.test.js` 里，也就是说机器挖得出来、却永远不会被叫去挖。缺的从来不是算法，是**归属**与**触发**：`nudgeFromSessions` 要的是一个项目的会话桶目录，而桶名是路径的**有损**变形（规则不在本仓），唯一可信来源是会话头里的 `cwd`。这一版把三处接上：①`resolveProjectSessionDir` 用 `cwd` 反查桶，查不到就**整跑跳过**（`skipped:true`）而不是降级成全局普查——后者会把 A 项目的动作算到 B 头上，而结果看起来完全正常；②新增 `nudgeForProject` 把「归属 → 挖掘 → 落盘」收成一个入口，调用方没有机会漏掉归属解析；③新增 `src/pipeline-nudge-auto.js` 挂在 `turn/end` 上按项目跑，冷却 10 分钟（**观测新鲜度**参数，不是性能参数）、单次预算 4 秒、延到 `setTimeout(0)` 的宏任务里跑（解压会话日志是同步 I/O，压在回合收尾那一帧上等于让每轮都卡一下）、一次只跑一个项目、抛错只 `warn` 不冒泡（`session/event` 那条链上还挂着摘要与续期）。**它只产提议，不产草稿**：自动跑恒 `materialize:false`，落进 `<memoryDir>/proposals/<项目键>/`；升格仍然要人批，`boundaries` 里那句 `autoActivate:false` 与跳过分支共用同一个常量（`NUDGE_BOUNDARIES`）——两条出口说两句不同的话，读的人就会以为其中一条忘了做。旗标与看图（`actionPipelineEnabled`）、记账（`actionRunEnabled`）**三件互相独立**，开任何一个都不会顺带打开另一个；它进 `LIGHT_MODE_OFF`，是三个 M.O. 键里最重的一个。
@@ -17,6 +19,12 @@
 ## 🐛 修复
 
 - **术语漂移：整个 M.O. 的「手法」改回「工作流」**：M.O.（Modus Operandi）从 v0.9.0 起在正文里一直写作「手法」，而它与同一个功能在其余位置的叫法（`工作流`、`workflow`、`pipelines`）并不是同一个词——一个功能两个名字，读者得先猜它们是不是一回事。改法覆盖 `src/` 24 处、面板 3 处、文档 11 处，**已发版的 CHANGELOG 条目与测试里作为夹具主题词的「手法」不改**（历史不追溯，夹具词锁的是路线图插入逻辑、不是产品术语）。`git grep 手法 -- src` 现为零命中。
+- **作用域反查自 v0.8.0 起每次都抛错走降级，canonical 归一与成员校验静默失效（#487）**：`scope.js` 曾裸读 `ctx?.workspaceRegistry`，而 `workspaceRegistry` 不在 `inject` 声明里（`index.js:45`）。cordis 4 的 `ctx` 是 Proxy，**裸读未注入属性会抛 `cannot get property ... without inject`，而不是返回 `undefined`**——于是 registry 反查自 v0.8.0 起必然抛错走降级：canonical path 归一与成员资格校验静默失效，`workspace_scope` 只剩会话原始 cwd。改为与 `webServer` 同一形状的免 inject 读取（`api.js:205` / `index.js:583`）：有 `ctx.reflect.get` 时走它，旧宿主的普通对象才裸读；**不加进 `inject`**——`index.js:39-44` 记着 v0.7.23 移出 `inject` 想支持 headless，结果 apply 阶段宿主未就绪直接崩。服务缺失（headless / 旧宿主 / 未激活）是合法状态，静默按「未提供」处理、不告警；真故障（`list()` 抛错）仍 `warnOnce` 一次并降级 `header.cwd`。回归锁用「读未声明属性即抛」的 Proxy 复刻真实宿主形状——既有三处 registry 测试都用普通对象伪造 ctx，而普通对象裸读不抛错，所以这条路径此前在测试里看着是通的。
+- **`/nudge` 的三处「没看全」被报成「确实没有」（#489 评审）**：① **写盘口**——方法分流只拦 `PUT`/`POST`，其余直落 `run(null)`，而 `persistProposals` 按「不是 `GET`/`HEAD` 就算写」算，于是带 token 的 `PATCH`/`DELETE` 会走进写入分支、把提议落进 `memoryDir`：一个不需要 body 的静默写盘口，与这个端点「`GET` 只预览、写动作一律要 `POST`」的卖点正好相反；改为入口白名单（`GET, HEAD, POST, PUT`），其余 405 + `Allow` 头，在 `readBody` 之前拦，测试同时锁状态码、`Allow` 头与「`memoryDir` 下一个文件都不许出现」（只看状态码会漏掉「先写再报错」）。② **预算外路径**——归属解析最多同步扫 500 个桶 × 3 个文件，原先完全不看 `budgetMs`，于是「真卡就调 `budgetMs`」这句话对这一段是空话；现在桶循环与文件循环里各查一次 `deadline`，超时回新 `reason: budget-exceeded`，在 `/nudge` 上按环境问题报 503（扫描没跑完不是「这个项目很干净」的答案），`nudgeForProject` 自己按同一条截止线转交，避免「解析用 A 截止、挖掘用 B 截止」的双预算。③ **截断谎报**——收集桶名时边收边截：数到 `maxBuckets` 就 `break`、之后才 `sort()`，于是留下哪 500 个由文件系统遍历顺序决定；目标项目的桶一旦落在被截掉的那部分，函数返回 `no-bucket`，而 `no-bucket` 的语义是「扫完了，确实没有」，一次截断就此被报成「这个项目没跑过会话」；改为先收全、排序、最后截断，新增 `reason: bucket-limit` 与 `bucketsTotal` / `bucketsTruncated` 两个读数。另修正 `config.js` 里「30 分钟/项目」的注释（实际 `NUDGE_AUTO_MIN_INTERVAL_MS` 是 10 分钟）。**一处如实说明**：把 `sort()` 去掉（先截断）这个变异**没有被测试咬住**——测试用临时目录的 `readdirSync` 顺序恰好是字母序，两种写法结果相同；要真正覆盖得有能控制 `readdir` 顺序的注入点，记为已知覆盖缺口，不假装它被锁住了。
+
+## 内部与测试
+
+- **多帧 zstd 的反证断言绑了 Node 的整块解语义，legacy 腿下一次 runner 升级就红（#490）**：`session-usage.test.js` 原反证断言 `zstdDecompressSync(buf)` 只能拿到第一帧，依赖的是「整块解只吐第一帧」这一 Node 旧行为；**24.22.0 起解码跨 chunk 边界也能解出所有帧**（nodejs/node#65865），断言在 `test-host-legacy`（装 latest 24.x）上过期——同一分支上 24.22.0 两条 legacy 腿全红、main 上 24.21.0 全绿，也就是说 main 那次「全绿」并不证明这个版本问题已经消失，runner 下次升到 24.22.0 就会红。改成数 zstd magic 帧头，既与产品代码 `forEachFrame` 的切帧判据同源、又不绑定解码器语义；第二行断言用 `stat.frames + stat.failed`——「帧头数 = 成功数 + 失败数」是实现契约，而「帧头数 = 成功数」只在 `failed` 恒为 0 时成立，是巧合不是规矩。**已知局限写进注释**：这条锁的是「切帧判据仍是 magic」，不是碰撞免疫——payload 里撞上 magic 时计数器与解码器会一起错（半片也解得出来），实测 `frames` 同样变成 4，这条测不出来。
 
 ## [0.9.2] - 2026-10-19
 
