@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## 🆕 新增
+
+- **沉淀链接线：把「会自动沉淀工作流」从一句话变成一条能跑的路（`actionNudgeEnabled`，beta，默认关）**：`src/pipeline-nudge.js` 从 v0.9.1 起就完整实现了「多帧 zstd → 重复序列 → 缺席对照 → draft 草稿」，可它在运行时**没有任何调用点**——全仓引用只出现在 `test/pipeline-nudge.test.js` 里，也就是说机器挖得出来、却永远不会被叫去挖。缺的从来不是算法，是**归属**与**触发**：`nudgeFromSessions` 要的是一个项目的会话桶目录，而桶名是路径的**有损**变形（规则不在本仓），唯一可信来源是会话头里的 `cwd`。这一版把三处接上：①`resolveProjectSessionDir` 用 `cwd` 反查桶，查不到就**整跑跳过**（`skipped:true`）而不是降级成全局普查——后者会把 A 项目的动作算到 B 头上，而结果看起来完全正常；②新增 `nudgeForProject` 把「归属 → 挖掘 → 落盘」收成一个入口，调用方没有机会漏掉归属解析；③新增 `src/pipeline-nudge-auto.js` 挂在 `turn/end` 上按项目跑，冷却 10 分钟（**观测新鲜度**参数，不是性能参数）、单次预算 4 秒、延到 `setTimeout(0)` 的宏任务里跑（解压会话日志是同步 I/O，压在回合收尾那一帧上等于让每轮都卡一下）、一次只跑一个项目、抛错只 `warn` 不冒泡（`session/event` 那条链上还挂着摘要与续期）。**它只产提议，不产草稿**：自动跑恒 `materialize:false`，落进 `<memoryDir>/proposals/<项目键>/`；升格仍然要人批，`boundaries` 里那句 `autoActivate:false` 与跳过分支共用同一个常量（`NUDGE_BOUNDARIES`）——两条出口说两句不同的话，读的人就会以为其中一条忘了做。旗标与看图（`actionPipelineEnabled`）、记账（`actionRunEnabled`）**三件互相独立**，开任何一个都不会顺带打开另一个；它进 `LIGHT_MODE_OFF`，是三个 M.O. 键里最重的一个。
+
+## 🎨 面板
+
+- **M.O. 面板多了「现在沉淀一次」：自动沉淀只在 `turn/end` 之后跑、还有冷却，人想立刻看结果时原本没有入口**：按钮走 `POST /api/dsh-mneme/nudge`，与自动跑**同一条** `nudgeForProject`，区别只有 `materialize` 恒关——它写提议、不改仓库。九句回执全部中英双语齐全，且刻意把三种结果说成三句不同的话：`saved`（提出 n 条）、`none`（这一遍没挖到新的重复动作）、`unreadable`（会话日志读不出来，是环境问题）。后两者在界面上长得一样时，人就只能瞎猜是「没东西」还是「坏了」。会话里读不到 `cwd` 时按钮**禁用**（服务端只会回 400，点了必然失败的按钮比没有按钮更糟）；禁用态用虚线边而不是降透明度——整块降 `opacity` 会把文字一起压到 AA 以下。顺带把 `lib/client.js` 里最后三处「手法」改词，并把 `actionPipelineEnabled` 的 hint 从「沉淀和触发都还没做，建议暂时保持关闭」改写成三件能力的真实分工。
+
+## 📚 文档
+
+- **`docs/WORKFLOWS.md` 新增 §10「自动沉淀：工作流从哪长出来」**：§1 里「一条新工作流从哪来」此前一直是零代码，这一节补上来源——产物表（提议/草稿/定稿各住哪、谁批准）、归属为什么不能拿全机会话去挖、四种 `reason` 里 `unreadable` 必须与 `no-bucket` 分开（前者是故障、后者是关于这个项目的答案，混起来等于把故障报成空结果，端点层因此一个回 503、一个回 200）、触发控制表（`turn/end` / 10 分钟 / 4 秒 / `setTimeout(0)` / 一次一个，每行都写了为什么是这个值），以及「提议落盘为什么必须单独一个开关」：`nudgeFromSessions` 原本只要算得出项目键就**无条件**写提议，而面板每刷一次就 GET 一次——那是每刷一次往记忆库里塞一批文件。`persistProposals` 因此独立出来，预览路由显式传 `false`，这也是 `/nudge` 的 policy 是 `token-write` 而不是 `open` 的原因。`SECURITY.md` 英中两张表同步登记（`/nudge` 同时进「开放读」与「受门控」两张清单），`docs/CONFIGURATION.md` 补 `actionNudgeEnabled` 键与轻量档清单。
+
+## 🐛 修复
+
+- **术语漂移：整个 M.O. 的「手法」改回「工作流」**：M.O.（Modus Operandi）从 v0.9.0 起在正文里一直写作「手法」，而它与同一个功能在其余位置的叫法（`工作流`、`workflow`、`pipelines`）并不是同一个词——一个功能两个名字，读者得先猜它们是不是一回事。改法覆盖 `src/` 24 处、面板 3 处、文档 11 处，**已发版的 CHANGELOG 条目与测试里作为夹具主题词的「手法」不改**（历史不追溯，夹具词锁的是路线图插入逻辑、不是产品术语）。`git grep 手法 -- src` 现为零命中。
+
 ## [0.9.2] - 2026-10-19
 
 ## 🆕 新增

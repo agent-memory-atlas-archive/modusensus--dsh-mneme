@@ -33,10 +33,12 @@ import {
   loadProposals,
   summarizeProposal,
   retirementProposals,
-  nudgeFromSessions
+  nudgeFromSessions,
+  nudgeForProject,
+  resolveProjectSessionDir
 } from "../src/pipeline-nudge.js";
 
-// 这组测试守的是 M.O. 的**沉淀链**：一条手法能不能从真实数据里自己长出来。
+// 这组测试守的是 M.O. 的**沉淀链**：一条工作流能不能从真实数据里自己长出来。
 // 三条不许越的分界线（见 src/pipeline-nudge.js 文件头），测试逐条守：
 //   1. 机器只写它真观察到的东西（措辞里不许出现编出来的判据，也不许漏本机路径）；
 //   2. 反事实判据的结论**永远不由机器给**（verdict 必须是 null，问题必须带着选项）；
@@ -210,7 +212,7 @@ test("挖掘：至少两个不同会话才算候选；同一段路出现两次�
   });
 });
 
-test("默认只挖能力级：内置工具的通用动作不算手法（本机 520 份日志实测那是噪音）", () => {
+test("默认只挖能力级：内置工具的通用动作不算工作流（本机 520 份日志实测那是噪音）", () => {
   withDir((dir) => {
     const sessions = join(dir, "sessions");
     for (const id of ["sess-a", "sess-b", "sess-c"]) {
@@ -221,7 +223,7 @@ test("默认只挖能力级：内置工具的通用动作不算手法（本机 5
     const read = readSessionObservations({ sessionDir: sessions });
     const segments = segmentObservations(read.observations);
     assert.deepEqual(DEFAULT_NUDGE_KINDS, ["skill", "mcp"]);
-    // 三个会话都出现了 read → pwsh，支持度足够高，但它是通用动作习惯，不是项目手法。
+    // 三个会话都出现了 read → pwsh，支持度足够高，但它是通用动作习惯，不是项目工作流。
     assert.deepEqual(mineRepeatedPatterns(segments), [], "默认口径下这类序列不该冒出来");
     // 显式开工具级才挖得到——而且要把「同一步连着走」重新折叠起来。
     const toolLevel = mineRepeatedPatterns(segments, { kinds: null });
@@ -522,7 +524,7 @@ test("清单行：反事实覆盖率与风险下限照实投影", () => {
     counterfactual: { verdict: null }
   };
   const row = summarizeProposal(proposal);
-  // 19/19 与 6/19 是两条不同的手法，清单上就该看得出来。
+  // 19/19 与 6/19 是两条不同的工作流，清单上就该看得出来。
   assert.deepEqual(row.contrast, { answered: 1, total: 2 });
   assert.equal(row.riskFloor, "R2", "整条的风险取下限里的最高档");
   assert.equal(row.verdict, null, "判据没有结论时清单里也是 null，不显示一个假结论");
@@ -729,7 +731,7 @@ test("回归·空回答不算「已答」：一条都没接受就不许推进状
   assert.equal(ok.applied.length, 1);
 });
 
-test("回归·跨工作区不并账：两个桶各一次不是「支持度 2 的同一手法」", () => {
+test("回归·跨工作区不并账：两个桶各一次不是「支持度 2 的同一工作流」", () => {
   withDir((dir) => {
     const sessions = join(dir, "sessions");
     const seq = [[sessionLine({ turn: 1, calls: [skill("alpha"), skill("beta")] })]];
@@ -1032,5 +1034,158 @@ test("回归·文件上限按排序截断，不按遍历顺序（选择偏差要
     assert.equal(read.totalFiles, 3);
     assert.equal(read.truncated, true);
     assert.equal(read.scannedFiles, 2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// nudgeForProject：把「归属解析」和「挖掘」绑成一次调用（v0.9.3 接线的入口）。
+// 守两件事：没有归属就**不许跑**（不能退化成无归属普查），预览不许写盘。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 造一个假 DSH_HOME：sessions/<桶>/<会话>/session.v4.jsonl.zstd，头行带 cwd。 */
+function fakeDshHome(dir, { bucket = "ws-bucket", cwd = null, sessions = ["sess-a"] } = {}) {
+  const home = join(dir, "dsh-home");
+  for (const id of sessions) {
+    const sub = join(home, "sessions", bucket, id);
+    mkdirSync(sub, { recursive: true });
+    const head = JSON.stringify({ time: 1700000000000, cwd });
+    const body = sessionLine({ turn: 1, calls: [skill("alpha"), skill("beta"), pwsh("npm test")] });
+    writeFileSync(join(sub, "session.v4.jsonl.zstd"), zlib.zstdCompressSync(Buffer.from([head, body].join("\n"), "utf8")));
+  }
+  return home;
+}
+
+test("nudgeForProject：归属解析不到就整跑跳过，绝不退化成「无归属普查」", () => {
+  withDir((dir) => {
+    const projectRoot = join(dir, "proj");
+    mkdirSync(projectRoot, { recursive: true });
+    const dshHome = fakeDshHome(dir, { cwd: join(dir, "somewhere-else") });
+    const doc = nudgeForProject({ projectRoot, dshHome, memoryDir: join(dir, "memory"), persistProposals: true });
+    assert.equal(doc.skipped, true);
+    assert.equal(doc.skippedReason, "no-session-attribution");
+    assert.equal(doc.attribution.reason, "no-bucket");
+    assert.equal(doc.counts.candidates, 0);
+    assert.equal(doc.counts.savedProposals, 0);
+    // 边界话术：跳过与跑完必须是同一句（同一个 NUDGE_BOUNDARIES 常量）。
+    assert.equal(doc.boundaries.autoActivate, false);
+    assert.equal(doc.boundaries.writesOnlyDrafts, true);
+    assert.equal(existsSync(join(dir, "memory", "proposals")), false, "没归属就不该建提议桶");
+  });
+});
+
+test("nudgeForProject：命中归属就真跑，预览（persistProposals:false）一个文件都不写", () => {
+  withDir((dir) => {
+    const projectRoot = join(dir, "proj");
+    mkdirSync(projectRoot, { recursive: true });
+    const memoryDir = join(dir, "memory");
+    const dshHome = fakeDshHome(dir, { cwd: projectRoot });
+    // 两个会话走同一段序列才够 NUDGE_MIN_SUPPORT=2（support 数的是**会话**，不是次数）。
+    fakeDshHome(dir, { cwd: projectRoot, sessions: ["sess-b"] });
+
+    const preview = nudgeForProject({ projectRoot, dshHome, memoryDir, persistProposals: false });
+    assert.equal(preview.skipped, false);
+    assert.equal(preview.attribution.reason, "matched");
+    assert.ok(preview.counts.candidates >= 1, "真数据里必须挖得出候选");
+    // 这一条是接线的关键：面板每刷一次就 GET 一次，预览绝不能往 memoryDir 里塞文件。
+    assert.equal(preview.counts.savedProposals, 0);
+    assert.equal(existsSync(join(memoryDir, "proposals")), false, "预览不落盘");
+
+    const real = nudgeForProject({ projectRoot, dshHome, memoryDir, persistProposals: true });
+    assert.equal(real.counts.savedProposals, real.counts.candidates);
+    assert.ok(existsSync(real.proposalsDir));
+    // 自动跑永不落草稿：materialize 默认 false，项目里不该多出 pipelines 目录。
+    assert.equal(real.counts.draftsWritten, 0);
+    assert.equal(existsSync(projectPipelineDir(projectRoot)), false);
+  });
+});
+
+test("nudgeForProject：「读不到」与「确实没有」必须分开报", () => {
+  withDir((dir) => {
+    const projectRoot = join(dir, "proj");
+    mkdirSync(projectRoot, { recursive: true });
+    // 桶在，但里面一个会话文件都没有 → 读不出任何 cwd → unreadable（故障），不是 no-bucket。
+    const homeEmpty = join(dir, "home-empty");
+    mkdirSync(join(homeEmpty, "sessions", "ws-bucket"), { recursive: true });
+    assert.equal(resolveProjectSessionDir({ dshHome: homeEmpty, projectRoot }).reason, "unreadable");
+    // 会话根根本不存在 → no-sessions-dir（新机器），同样是故障侧。
+    const homeMissing = join(dir, "home-missing");
+    assert.equal(resolveProjectSessionDir({ dshHome: homeMissing, projectRoot }).reason, "no-sessions-dir");
+  });
+});
+
+test("归属解析也吃 budgetMs：预算用光报 budget-exceeded，不冒充 no-bucket", () => {
+  // 评审抓出：resolveProjectSessionDir 最多同步扫 500 个桶 × 3 个文件，原先完全不看
+  // budgetMs，于是 PR 正文那句「真卡就调 budgetMs」对这段路径是空话。
+  // 这里用「截止点已经过去」来构造，不依赖真实耗时，确定性。
+  withDir((dir) => {
+    const projectRoot = join(dir, "proj");
+    mkdirSync(projectRoot, { recursive: true });
+    const home = fakeDshHome(dir, { cwd: projectRoot });
+    // 已经过期的截止点 → 连一个桶都不该扫。
+    const stalled = resolveProjectSessionDir({ dshHome: home, projectRoot, deadline: Date.now() - 1 });
+    assert.equal(stalled.reason, "budget-exceeded");
+    assert.equal(stalled.sessionDir, null);
+    assert.equal(stalled.filesRead, 0, "超预算时一个会话文件都不该读");
+    // 不给 deadline = 扫到底，行为与改动前一致（测试与离线批处理要完整结果）。
+    assert.equal(resolveProjectSessionDir({ dshHome: home, projectRoot }).reason, "matched");
+  });
+});
+
+test("nudgeForProject：归属解析超预算时 skipped 并如实带 budget-exceeded", () => {
+  withDir((dir) => {
+    const projectRoot = join(dir, "proj");
+    mkdirSync(projectRoot, { recursive: true });
+    const home = fakeDshHome(dir, { cwd: projectRoot });
+    // now 往前推 10s + budget 4s → 截止点在过去，模拟「预算已经被前面的活花掉了」。
+    const doc = nudgeForProject({
+      projectRoot,
+      dshHome: home,
+      memoryDir: join(dir, "memory"),
+      now: Date.now() - 10000,
+      budgetMs: 4000,
+      persistProposals: false
+    });
+    assert.equal(doc.skipped, true);
+    assert.equal(doc.skippedReason, "no-session-attribution");
+    // 关键：原因必须能区别于「这个项目确实没跑过会话」（no-bucket）——否则一次
+    // 扫不完会被读成「这个项目很干净」。
+    assert.equal(doc.attribution.reason, "budget-exceeded");
+    assert.equal(doc.counts.candidates, 0);
+  });
+});
+
+test("桶数超过 maxBuckets：先排序再截断，截断没命中报 bucket-limit 而不是 no-bucket", () => {
+  // 评审抓出的第二个「读不到装成确实没有」：早前是边收边截（到 500 个就 break、
+  // 然后才 sort），留下哪 500 个由文件系统遍历顺序决定；目标项目的桶一旦落在被
+  // 截掉的那部分，就返回 no-bucket —— 一次截断被报成「这个项目没有会话」。
+  withDir((dir) => {
+    const projectRoot = join(dir, "proj");
+    mkdirSync(projectRoot, { recursive: true });
+    const elsewhere = join(dir, "somewhere-else");
+    mkdirSync(elsewhere, { recursive: true });
+    // 四个桶：字母序 aaa-1, aaa-2, ws-bucket, zz-1。目标在 ws-bucket。
+    // 无关桶里也放**真会话**（cwd 指向别处），这样 bucketsWithCwd > 0，
+    // 唯一剩下的原因就是截断本身——否则会先命中 unreadable，测不到这条。
+    const home = fakeDshHome(dir, { bucket: "ws-bucket", cwd: projectRoot });
+    fakeDshHome(dir, { bucket: "aaa-1", cwd: elsewhere });
+    fakeDshHome(dir, { bucket: "aaa-2", cwd: elsewhere });
+    fakeDshHome(dir, { bucket: "zz-1", cwd: elsewhere });
+
+    // 只扫前 2 个（aaa-1、aaa-2）：目标被挤出，且这不是「它没有会话」。
+    const miss = resolveProjectSessionDir({ dshHome: home, projectRoot, maxBuckets: 2 });
+    assert.equal(miss.reason, "bucket-limit", "被截断 ≠ 这个项目没有会话");
+    assert.notEqual(miss.reason, "no-bucket");
+    assert.equal(miss.bucketsTruncated, true);
+    assert.equal(miss.bucketsScanned, 2);
+    assert.equal(miss.bucketsTotal, 4, "总数与扫描数都要报，截断才看得见");
+
+    // 放宽到 3 个：字母序把 ws-bucket 包进来 → 命中。
+    const hit = resolveProjectSessionDir({ dshHome: home, projectRoot, maxBuckets: 3 });
+    assert.equal(hit.reason, "matched", "留下谁由字母序决定，不由遍历序决定");
+
+    // 不截断时依然是真答案那套，且 truncated 明确为 false。
+    const full = resolveProjectSessionDir({ dshHome: home, projectRoot, maxBuckets: 999 });
+    assert.equal(full.reason, "matched");
+    assert.equal(full.bucketsTruncated, false);
   });
 });

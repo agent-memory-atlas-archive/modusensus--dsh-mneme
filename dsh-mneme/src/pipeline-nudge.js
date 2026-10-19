@@ -1,8 +1,8 @@
 /**
- * M.O. 沉淀链（nudge）：让手法**自己从数据里长出来**。
+ * M.O. 沉淀链（nudge）：让工作流**自己从数据里长出来**。
  *
  * 这一层补的是读侧之外缺的那一头。`pipeline.js` 能把人手写的 JSON 渲染成图、能从
- * 运行记录算状态；但「一条新手法从哪来」在那之前一直是零代码。本文件就是那个来源：
+ * 运行记录算状态；但「一条新工作流从哪来」在那之前一直是零代码。本文件就是那个来源：
  *
  *   会话/记忆里的观察  →  反复出现的同一段序列（候选）  →  反事实判据（请人回答）
  *                      →  status:"draft" 的草稿  →（人点头）→ active
@@ -79,9 +79,9 @@ export const NUDGE_MAX_CANDIDATES = 20;
  *
  * 这不是想当然定的，是拿本机 520 份真实会话日志跑出来的：工具级序列的支持度高得离谱
  * （`read → pwsh` 出现在 322 个会话、`write → pwsh` 253 个），但它们全是 agent 的
- * 通用动作习惯，不是项目手法——按那个口径挖，推给人的前八条全是这类噪音。
+ * 通用动作习惯，不是项目工作流——按那个口径挖，推给人的前八条全是这类噪音。
  * 能力级稀疏得多（真实数据里同一段能力序列只有两三个会话支持），但每一条都是
- * 「有人特意选了这个技能」的选择，那才可能是手法。
+ * 「有人特意选了这个技能」的选择，那才可能是工作流。
  *
  * 想挖工具级就显式传 `kinds: ["tool", ...]` 或 `kinds: null`（不过滤）——**别改默认值**，
  * 默认值一改，面板第一屏就变回噪音。
@@ -90,6 +90,36 @@ export const DEFAULT_NUDGE_KINDS = ["skill", "mcp"];
 
 /** 单次扫描最多读多少会话文件（目录膨胀时宁可报截断，也不要把一次刷新变成全盘扫描）。 */
 const MAX_SESSION_FILES = 2000;
+
+/**
+ * 自动沉淀的**最小间隔**（同一个项目两次自动跑之间）。
+ *
+ * 为什么需要它：解压会话日志是**同步** I/O，本机 118 份日志实测 16.2s。挂到
+ * `session/event` 上如果每轮都跑，长会话就是把宿主主线程反复按住。十分钟这个数是
+ * 取的「够久到不会在同一个工作段里反复触发，够短到当天的新习惯还来得及被看见」——
+ * 它不是性能参数，是**观测新鲜度**参数；真卡的话先调 budgetMs（那一条保证不卡）。
+ */
+export const NUDGE_AUTO_MIN_INTERVAL_MS = 10 * 60 * 1000;
+
+/**
+ * 自动沉淀的单次时间预算。超了就**带着已读到的部分收工**并如实标 `budgetExceeded`，
+ * 而不是把这一跑作废——半份观察好过零份，只要调用方知道它只看了后半截。
+ */
+export const NUDGE_AUTO_BUDGET_MS = 4000;
+
+/**
+ * 沉淀链的**边界**，写进每一份 return 的契约里。抽成一份常量是防「两条出口说法不一样」：
+ * 走完一整跑和提前收工给出的边界必须是同一句话，否则读契约的人得先猜自己拿到的是哪一种。
+ */
+export const NUDGE_BOUNDARIES = Object.freeze({
+  autoActivate: false,
+  autoAnswerCounterfactual: false,
+  writesOnlyDrafts: true,
+  // 机器给的风险只是下限；R3 永远只能由人给。
+  riskIsFloor: true,
+  // 支持度只在同一个工作区桶内累加；跨桶不并账。
+  crossProjectSupport: false
+});
 
 /** 会话日志文件名前缀。**不写死版本号**：本机同一棵树下并存 v4 / v3 / 无版本号三种。 */
 const SESSION_FILE_PREFIX = "session";
@@ -137,6 +167,207 @@ function expandHome(p) {
 /** 会话根目录。默认由 `DSH_HOME` 推导，**不写死本机路径**——仓库里出现盘符是红线。 */
 export function resolveSessionDir({ dshHome = process.env.DSH_HOME || join(homedir(), ".dsh") } = {}) {
   return join(String(dshHome), "sessions");
+}
+
+/**
+ * 路径规范化：只用来**比相等**，不用来读写文件（读写永远用原串）。
+ *
+ * 为什么要折：同一份工作目录在会话头里可能是 `C:\\Users\\x\\proj`、`c:/users/x/proj`、
+ * 末尾带不带分隔符三种写法之一，直接 `===` 会让归属解析**随机**命中或落空，而落空
+ * 的症状和「这个项目确实没会话」完全同形。
+ * 只在 win32 上折小写：POSIX 的文件名大小写敏感，在那里折小写会把
+ * `/a/Proj` 与 `/a/proj` 两个不同项目并成一个——那正是本仓最防的一类「合并两个项目的账」。
+ */
+export function normalizeProjectPath(p) {
+  if (typeof p !== "string") return null;
+  const trimmed = p.trim();
+  if (trimmed === "") return null;
+  let s = trimmed.replace(/\\/g, "/");
+  // 去掉末尾分隔符，但根（"/" 或 "C:/"）要留着——去掉就不是一个路径了。
+  s = s.replace(/\/+$/, "");
+  if (/^[A-Za-z]:$/.test(s)) s += "/";
+  if (s === "") s = "/";
+  return process.platform === "win32" ? s.toLowerCase() : s;
+}
+
+/**
+ * 一个会话文件里记的 `cwd`（会话日志首行的 `{"type":"session",...,"cwd":"…"}`）。
+ *
+ * 为什么读内容而不是反解桶名：桶名是工作区路径的**有损**变形（盘符后的 `-`、
+ * 空格被吃掉、中文按 UTF-16 码元转义），本机 19 个桶里反解实测多处对不上——
+ * 反解错的时候**不会报错**，只会把别的项目的账归到这个项目名下。会话头里的
+ * `cwd` 是宿主自己写的原文，没有歧义。
+ *
+ * 只解第一帧是性能选择（一份会话日志能到 1.5 MB、上百帧），但第一帧解不出时
+ * **继续扫后面几帧**：宁可多解几帧，也不要把「拿不准」报成「这个桶没有项目」。
+ */
+export function readSessionCwd(file) {
+  let buf;
+  try {
+    buf = readFileSync(file);
+  } catch {
+    return null;
+  }
+  let cwd = null;
+  const take = (text) => {
+    if (cwd) return;
+    for (const line of text.split("\n")) {
+      const t = line.trim();
+      // 快判：没有 "cwd" 的行连 JSON.parse 都不用做（一帧里绝大多数行是消息）。
+      if (!t || t[0] !== "{" || !t.includes('"cwd"')) continue;
+      try {
+        const obj = JSON.parse(t);
+        if (obj && typeof obj.cwd === "string" && obj.cwd.trim() !== "") {
+          cwd = obj.cwd;
+          return;
+        }
+      } catch {
+        // 半行/坏行：单行脏数据不该决定归属。
+      }
+    }
+  };
+  const start = buf.indexOf(ZSTD_MAGIC, 0);
+  if (start !== -1) {
+    let end = buf.indexOf(ZSTD_MAGIC, start + 4);
+    if (end === -1) end = buf.length;
+    try {
+      take(zlib.zstdDecompressSync(buf.subarray(start, end)).toString("utf8"));
+    } catch {
+      // 第一帧坏了：落到下面的整文件扫描。
+    }
+  }
+  if (!cwd) forEachZstdFrame(buf, take);
+  buf.fill(0);
+  return cwd;
+}
+
+/**
+ * 这个项目**自己的**会话桶目录（`<DSH_HOME>/sessions/<工作区桶>`）。
+ *
+ * 为什么非要它：`nudgeFromSessions` 只有在拿到「本项目自己的 sessionDir」时才敢给候选
+ * 贴项目名、写提议桶、落草稿；给不出就会降级成「无归属普查」（见那里的 `refused`）。
+ * 而桶名 → 项目这条路，除了会话头里的 `cwd` 没有可信来源。
+ *
+ * 返回里 `reason` 是给人看的那句话：
+ *   matched        找到了
+ *   bad-project    调用方没给项目根 / 给的不是路径
+ *   no-sessions-dir 会话根不存在（新机器、DSH 还没写过东西）
+ *   no-bucket      扫完了，没有任何桶的会话头指向这个项目（这个项目确实还没跑过会话）
+ *   unreadable     桶在，但所有会话头的 cwd 都读不出来——**这一条必须与 no-bucket 分开**：
+ *                  前者是「读不到」，后者是「确实没有」，混起来就等于把故障报成空结果。
+ *   budget-exceeded 预算用光还没扫完——同样**不是**关于这个项目的答案（见 deadline 参数）。
+ *   bucket-limit   桶数超过 maxBuckets 被截断，且截断范围内没找到这个项目——**也不是**
+ *                  「确实没有」：目标可能就在被截掉的那部分里（同日评审抓出）。
+ *
+ * `deadline` 是这次解析的绝对截止时刻（毫秒）。不给就扫到底（测试与离线批处理要完整
+ * 结果）。为什么要它：这一层是**同步**的，最多 500 个桶 × 3 个文件，全都走同步 I/O；
+ * 调用方手里的 `budgetMs` 原先只约束后面的挖掘，约束不到这里——一条「真卡就调
+ * budgetMs」的建议对这段路径是空话（v0.9.3 评审抓出）。
+ */
+export function resolveProjectSessionDir({
+  dshHome = process.env.DSH_HOME || join(homedir(), ".dsh"),
+  projectRoot = null,
+  maxBuckets = 500,
+  filesPerBucket = 3,
+  deadline = null
+} = {}) {
+  const target = normalizeProjectPath(projectRoot);
+  if (!target) {
+    return { sessionDir: null, bucket: null, reason: "bad-project", bucketsScanned: 0, filesRead: 0 };
+  }
+  const root = resolveSessionDir({ dshHome });
+  let entries;
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return { sessionDir: null, bucket: null, reason: "no-sessions-dir", sessionsRoot: root, bucketsScanned: 0, filesRead: 0 };
+  }
+  const allBuckets = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    allBuckets.push(entry.name);
+  }
+  // 先收全、再排序、最后截断——与 findSessionFiles 同一条规矩。早前是「边收边截」：
+  // 到 500 个就 break，然后才 sort()，于是**留下哪 500 个由文件系统遍历顺序决定**。
+  // 目标项目的桶一旦落在被截掉的那部分，函数就返回 no-bucket——把一次截断报成
+  // 「这个项目确实没有会话」，正好是本文件反复在防的「读不到 vs 确实没有」
+  // （v0.9.3 评审抓出）。
+  allBuckets.sort();
+  const bucketsTruncated = allBuckets.length > maxBuckets;
+  const buckets = bucketsTruncated ? allBuckets.slice(0, maxBuckets) : allBuckets;
+  let filesRead = 0;
+  let bucketsWithCwd = 0;
+  const outOfBudget = () => deadline !== null && Number.isFinite(deadline) && Date.now() > deadline;
+  for (const bucket of buckets) {
+    // 桶循环里查预算：每个桶都可能要 readdir + 读 3 个文件，全同步，
+    // 一次解析跑满 500 个桶就是几百毫秒到几秒不等。
+    if (outOfBudget()) {
+      return {
+        sessionDir: null,
+        bucket: null,
+        reason: "budget-exceeded",
+        sessionsRoot: root,
+        bucketsScanned: buckets.length,
+        bucketsTotal: allBuckets.length,
+        bucketsTruncated,
+        filesRead
+      };
+    }
+    const dir = join(root, bucket);
+    // 每个桶只读前几个文件：同一个桶里所有会话的 cwd 必然相同（桶是按工作区分的），
+    // 读三个只是给「第一个文件正好是截断的」留余量，不是要把整个桶扫一遍。
+    const found = findSessionFiles(dir, { limit: filesPerBucket });
+    for (const file of found.files.slice(0, filesPerBucket)) {
+      // 文件循环里也查：filesPerBucket 可被调用方调大，3 是最小值不是上限。
+      if (outOfBudget()) {
+        return {
+          sessionDir: null,
+          bucket: null,
+          reason: "budget-exceeded",
+          sessionsRoot: root,
+          bucketsScanned: buckets.length,
+          bucketsTotal: allBuckets.length,
+          bucketsTruncated,
+          filesRead
+        };
+      }
+      const cwd = readSessionCwd(file);
+      filesRead += 1;
+      if (!cwd) continue;
+      bucketsWithCwd += 1;
+      if (normalizeProjectPath(cwd) === target) {
+        return {
+          sessionDir: dir,
+          bucket,
+          reason: "matched",
+          matchedCwd: cwd,
+          sessionsRoot: root,
+          bucketsScanned: buckets.length,
+          bucketsTotal: allBuckets.length,
+          bucketsTruncated,
+          filesRead
+        };
+      }
+    }
+  }
+  return {
+    sessionDir: null,
+    bucket: null,
+    // 桶里一个 cwd 都读不出来 → 是读不了，不是没有。
+    // 截断且没命中 → 也不是「确实没有」：目标可能就在被截掉的那部分里。
+    reason: buckets.length === 0
+      ? "no-sessions-dir"
+      : bucketsWithCwd === 0
+        ? "unreadable"
+        : bucketsTruncated
+          ? "bucket-limit"
+          : "no-bucket",
+    sessionsRoot: root,
+    bucketsScanned: buckets.length,
+    bucketsTotal: allBuckets.length,
+    bucketsTruncated,
+    filesRead
+  };
 }
 
 /**
@@ -235,7 +466,7 @@ export function findSessionFiles(dir, { limit = MAX_SESSION_FILES } = {}) {
  * `bucket` 是**工作区桶**（会话文件往上数第三层目录名）。为什么非要带上它：
  * 会话目录在 DSH 侧按工作区分桶，`sessionId` 只是桶内那个会话目录名——两条不同工作区
  * 里的会话会拿到两个不同的 `sessionId`，于是一段序列在两个项目里各出现一次，就会被
- * 并成「支持度 2 的同一手法」。那是把两个项目的账合成一本，实测过（复核报告 §2.6）。
+ * 并成「支持度 2 的同一工作流」。那是把两个项目的账合成一本，实测过（复核报告 §2.6）。
  * 带上 bucket 之后，支持度只在同一个桶内累加。
  */
 export function observationsFromCalls(calls, { sessionId = null, bucket = null } = {}) {
@@ -305,7 +536,7 @@ export function toolCallsInLine(line) {
  * 取不到就落 null——落 null 的观察只会让支持度算不出来，不会假装成「同一个会话」
  * 或「同一个项目」。
  */
-export function readSessionObservations({ sessionDir = resolveSessionDir(), limit = MAX_SESSION_FILES } = {}) {
+export function readSessionObservations({ sessionDir = resolveSessionDir(), limit = MAX_SESSION_FILES, deadline = null } = {}) {
   const found = findSessionFiles(sessionDir, { limit });
   const files = found.files.slice(0, limit);
   const totalFiles = Number.isFinite(found.totalFiles) ? found.totalFiles : found.files.length;
@@ -315,6 +546,9 @@ export function readSessionObservations({ sessionDir = resolveSessionDir(), limi
     // 「目录在」与「目录真能列出来」分开报：否则「不可读」与「空目录」同形。
     readable: found.present && found.unreadable.length === 0,
     truncated: found.truncated === true || totalFiles > files.length,
+    // 时间预算用光而提前收工：与「文件数上限」是两种截断，必须分开报——否则
+    // 「扫了一部分」会伪装成「扫完了但没挖到」。面板与调用方据此说「只看了最近这些」。
+    budgetExceeded: false,
     totalFiles,
     scannedFiles: 0,
     frames: 0,
@@ -326,6 +560,14 @@ export function readSessionObservations({ sessionDir = resolveSessionDir(), limi
   };
 
   for (const file of files) {
+    // 预算到点就停：解压是**同步**的，一次全量扫描会把宿主主线程按住十几秒
+    // （本机 118 份日志实测 16.2s）。宁可少看几份并如实报出来，也不能让一次
+    // 面板点击变成整窗卡死——那会被当成插件坏了。
+    if (deadline !== null && Date.now() > deadline) {
+      result.budgetExceeded = true;
+      result.truncated = true;
+      break;
+    }
     let buf;
     try {
       buf = readFileSync(file);
@@ -387,7 +629,7 @@ export function segmentObservations(observations) {
 /**
  * 一段里某个位置的观察样本怎么并进模式：命令**取并**——风险下限要看过全部命令才敢说
  * 「没命中兜底清单」，只看第一条会把第三条里的 `git push` 漏掉。
- * 上限 12 条是内存护栏：同一个位置出现几百种不同命令时，它是噪音不是手法。
+ * 上限 12 条是内存护栏：同一个位置出现几百种不同命令时，它是噪音不是工作流。
  */
 const MAX_COMMANDS_PER_POSITION = 12;
 
@@ -580,12 +822,12 @@ export function filterSegmentsByKinds(segments, kinds) {
  * **极大模式**的交代。
  *
  * 极大模式（maximal pattern）：`A → B` 与 `A → B → C` 支持度相同时，只留长的那条。
- * 理由：`A → B` 是 `A → B → C` 的一段前缀，两条都推给人就是把同一条手法说两遍。
+ * 理由：`A → B` 是 `A → B → C` 的一段前缀，两条都推给人就是把同一条工作流说两遍。
  * 判据是**包含 + 会话集是子集**——只按字符串包含会把「支持度更低的短模式」也吞掉。
  *
  * **支持度只在同一个工作区桶内累加**（`key` 前缀带 bucket）：两个不同项目里各见过一次
- * 的同一段序列，不是「支持度 2 的同一手法」，而是两条各自只有一次的观察。混桶会凭空
- * 造出候选，并把别人的手法算到这个项目头上（复核报告 §2.6 实测过）。
+ * 的同一段序列，不是「支持度 2 的同一工作流」，而是两条各自只有一次的观察。混桶会凭空
+ * 造出候选，并把别人的工作流算到这个项目头上（复核报告 §2.6 实测过）。
  */
 export function mineRepeatedPatterns(segments, { minSupport = NUDGE_MIN_SUPPORT, minLength = NUDGE_MIN_LENGTH, maxLength = NUDGE_MAX_LENGTH, maxResults = NUDGE_MAX_CANDIDATES, kinds = DEFAULT_NUDGE_KINDS } = {}) {
   const scoped = filterSegmentsByKinds(segments, kinds);
@@ -786,7 +1028,7 @@ function runsForCandidate(candidate, runs) {
  * 能给的证据三类：
  *   · 复现：同一段序列在几个会话、几次回合、什么时间跨度里出现过（硬事实）；
  *   · 缺席对照：中间那一步「走过几次 / 少走几次」（硬事实，见 omissionContrast）；
- *   · 运行记录与失败记录：如果这条手法已经有 runs，或者人喂了记忆侧的失败行，一并报数。
+ *   · 运行记录与失败记录：如果这条工作流已经有 runs，或者人喂了记忆侧的失败行，一并报数。
  *
  * `failures` 传 `null`（默认）表示**记忆侧的失败记录还没接进来**，与「接进来了、
  * 确实一条都没有」是两件事，所以这里不给 `null`，而是给 `{ available, reason }`
@@ -905,12 +1147,12 @@ export function draftFromCandidate(candidate, { project = "", name = "", done = 
   }
   const raw = {
     id: String(candidate.id || ""),
-    name: name || `（待补）由重复观察提出的手法：${(candidate.names || []).join(" → ")}`,
+    name: name || `（待补）由重复观察提出的工作流：${(candidate.names || []).join(" → ")}`,
     project: project || TODO,
     version,
     status: "draft",
     done: done || `${TODO}整条怎么算完成`,
-    trigger: Array.isArray(trigger) && trigger.length ? trigger : [{ kind: "phrase", value: `${TODO}什么话该触发这条手法` }],
+    trigger: Array.isArray(trigger) && trigger.length ? trigger : [{ kind: "phrase", value: `${TODO}什么话该触发这条工作流` }],
     steps: candidate.steps.map((s, index) => ({
       id: s.id || `S${index + 1}`,
       phase: s.phase || "观察段",
@@ -1082,7 +1324,7 @@ export function summarizeProposal(proposal) {
     occurrences: proposal.occurrences ?? null,
     firstSeenAt: proposal.firstSeenAt || null,
     lastSeenAt: proposal.lastSeenAt || null,
-    // 反事实覆盖率：答过几步 / 一共几步。19/19 与 6/19 是两条不同的手法，清单上就该看得出来。
+    // 反事实覆盖率：答过几步 / 一共几步。19/19 与 6/19 是两条不同的工作流，清单上就该看得出来。
     contrast: {
       answered: (proposal.steps || []).filter((s) => Array.isArray(s.evidence) && s.evidence.length > 0).length,
       total: (proposal.steps || []).length
@@ -1096,7 +1338,7 @@ export function summarizeProposal(proposal) {
 /**
  * 已经在跑的工作流的自精简提议：跳过 ≥3 次 → 提议删掉这一步；绕开 ≥3 次 → 提议重画路径。
  * 计数与阈值全部来自 `pipeline.js`（那份是权威），这里只做两件事：把提议包成
- * **要人点头的形状**（带一个封闭问题），并把它和「新手法候选」放进同一条通路。
+ * **要人点头的形状**（带一个封闭问题），并把它和「新工作流候选」放进同一条通路。
  */
 export function retirementProposals(pipeline, { runs = [], now = Date.now(), observed = null } = {}) {
   // 四类提议各自的封闭问题与选项。判据都不能自动算（每类都是），把答案空间
@@ -1161,6 +1403,74 @@ export function retirementProposals(pipeline, { runs = [], now = Date.now(), obs
 }
 
 /**
+ * 一个项目的**自动沉淀入口**：先把项目解析到它自己的会话桶，再跑一次 `nudgeFromSessions`。
+ *
+ * 为什么这一层要单独存在：`nudgeFromSessions` 要求调用方**已经知道**这个项目的 `sessionDir`
+ * （给了 projectRoot 却不给 sessionDir 会被降级成无归属普查）。而真实调用方手里只有一个
+ * cwd。把「项目根 → 桶」和「跑一轮」焊在一起，是为了让调用方**没有机会**漏掉那一步而
+ * 静默退化成普查——退化的输出看上去一切正常，只是候选全都不属于任何项目。
+ *
+ * 解析不到桶时**不跑**，直接回一份空结果并带上 `attribution.reason`：不是省事，是因为
+ * 跑了也只能得到无归属普查，而它对「这个项目的工作流」这个问题的答案永远是错的。
+ * `skipped: true` 是关键——空列表必须能区分「没跑」与「跑了但没挖到」，否则调用方会把
+ * 一次归属失败当成「这个项目很干净」。
+ *
+ * `attribution` 参数允许调用方把**已经算好**的桶解析结果传进来：`/nudge` 路由要先做一遍
+ * 解析才能决定要不要回 400，再传进来就跑两遍（一遍扫桶、一遍真挖）。
+ */
+export function nudgeForProject({
+  projectRoot = null,
+  dshHome = undefined,
+  memoryDir = null,
+  project = "",
+  now = Date.now(),
+  budgetMs = NUDGE_AUTO_BUDGET_MS,
+  materialize = false,
+  persistProposals = true,
+  maxFiles = MAX_SESSION_FILES,
+  kinds = DEFAULT_NUDGE_KINDS,
+  attribution = null
+} = {}) {
+  // 归属解析自己也可能很贵（同步扫桶 500 个），所以它也要吃同一个预算。调用方给了现成的
+  // attribution 就不再解析（`/nudge` 路由就是这么做的：它先解析一次才能决定要不要回 400）。
+  // 这里**自己算**截止点而不是多接一个 deadline 参数：两处各算一次会出现「解析用 A 截止、
+  // 挖掘用 B 截止」的双预算，那种不一致以后没人查得出来。
+  const budgetDeadline = Number.isFinite(budgetMs) && budgetMs > 0 ? now + budgetMs : null;
+  const where = attribution || resolveProjectSessionDir({ dshHome, projectRoot, deadline: budgetDeadline });
+  if (!where || !where.sessionDir) {
+    return {
+      contract: "mneme.nudge/v1",
+      generatedAt: new Date(now).toISOString(),
+      attribution: where || { sessionDir: null, bucket: null, reason: "bad-project" },
+      skipped: true,
+      skippedReason: "no-session-attribution",
+      refused: null,
+      source: null,
+      segments: 0,
+      kinds: Array.isArray(kinds) ? kinds.slice() : null,
+      project: null,
+      proposalsDir: null,
+      counts: { candidates: 0, buckets: 0, sessionsWithCandidates: 0, savedProposals: 0, draftsWritten: 0 },
+      available: [],
+      drafts: [],
+      boundaries: NUDGE_BOUNDARIES
+    };
+  }
+  const doc = nudgeFromSessions({
+    sessionDir: where.sessionDir,
+    projectRoot,
+    memoryDir,
+    project,
+    now,
+    maxFiles,
+    kinds,
+    materialize,
+    persistProposals,
+    budgetMs
+  });
+  return { ...doc, attribution: where, skipped: false };
+}
+/**
  * 一次完整的沉淀跑：读真实会话日志 → 挖候选 → 算能算的对照 → 把提议落进 memoryDir →
  * （可选）把草稿落进项目。
  *
@@ -1168,7 +1478,7 @@ export function retirementProposals(pipeline, { runs = [], now = Date.now(), obs
  * 会把「提议」变成「既成事实」。所以 `materialize` 默认 false——要落就得有人开口。
  *
  * **会话范围与项目归属是一件事，不是两件**：会话目录在 DSH 侧按工作区分桶，桶名是
- * 工作区路径的有损变形、规则不在本仓。所以「这个项目的手法」只有在调用方给出
+ * 工作区路径的有损变形、规则不在本仓。所以「这个项目的工作流」只有在调用方给出
  * **这个项目自己的 `sessionDir`** 时才成立。给了 `projectRoot` 却没给 `sessionDir`
  * 时，这一跑会被**降级成「无归属的普查」**：候选不带项目名、不写任何项目的提议桶、
  * 不落草稿——绝不允许拿全机会话去冒充某个项目的账（复核报告 §2.6）。
@@ -1187,7 +1497,11 @@ export function nudgeFromSessions({
   maxFiles = MAX_SESSION_FILES,
   failures = null,
   kinds = DEFAULT_NUDGE_KINDS,
-  materialize = false
+  materialize = false,
+  budgetMs = 0,
+  // 提议落盘是**写**。预览（面板刷新一次就调一次）不能顺手往 memoryDir 里塞文件：
+  // 落盘要从这里显式关掉，不能靠调用方「记得别调」。默认 true 保持既有语义。
+  persistProposals = true
 } = {}) {
   const scoped = typeof sessionDir === "string" && sessionDir.trim() !== "";
   const dir = scoped ? sessionDir : resolveSessionDir({ dshHome });
@@ -1195,7 +1509,9 @@ export function nudgeFromSessions({
   // 那同样是「拿一批跨项目的观察去贴一个项目名」）。
   const attributionRefused = !scoped && Boolean(projectRoot || project);
   const allowedProjectRoot = attributionRefused ? null : projectRoot;
-  const read = readSessionObservations({ sessionDir: dir, limit: maxFiles });
+  // budgetMs > 0 才设截止点：测试与离线批处理要完整结果，面板要「不卡」。
+  const deadline = Number.isFinite(budgetMs) && budgetMs > 0 ? now + budgetMs : null;
+  const read = readSessionObservations({ sessionDir: dir, limit: maxFiles, deadline });
   const segments = segmentObservations(read.observations);
   const candidates = mineRepeatedPatterns(segments, { minSupport, minLength, maxLength, maxResults, kinds });
   const projectName = attributionRefused ? "" : project || (allowedProjectRoot ? projectLabel(allowedProjectRoot) : "");
@@ -1208,7 +1524,7 @@ export function nudgeFromSessions({
 
   const propDir = attributionRefused ? null : proposalDir({ memoryDir, projectRoot: allowedProjectRoot });
   const saved = [];
-  if (propDir) {
+  if (propDir && persistProposals !== false) {
     for (const c of enriched) saved.push(saveProposal(propDir, c).id);
   }
 
@@ -1244,6 +1560,7 @@ export function nudgeFromSessions({
       present: read.present,
       readable: read.readable,
       truncated: read.truncated,
+      budgetExceeded: read.budgetExceeded === true,
       totalFiles: read.totalFiles,
       scannedFiles: read.scannedFiles,
       frames: read.frames,
@@ -1268,14 +1585,6 @@ export function nudgeFromSessions({
     available: enriched.map(summarizeProposal),
     drafts,
     // 「这一刀不做的事」写进契约里，免得以后有人以为忘了做。
-    boundaries: {
-      autoActivate: false,
-      autoAnswerCounterfactual: false,
-      writesOnlyDrafts: true,
-      // 机器给的风险只是下限；R3 永远只能由人给。
-      riskIsFloor: true,
-      // 支持度只在同一个工作区桶内累加；跨桶不并账。
-      crossProjectSupport: false
-    }
+    boundaries: NUDGE_BOUNDARIES
   };
 }

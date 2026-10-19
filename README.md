@@ -31,7 +31,7 @@
 
 | 日期 | 版本 | 头条 |
 |------|------|------|
-| 2026-10-17 | **v0.9.0** | **M.O.（手法）beta** — 你的操作手法不再住在记忆库的一行文字里，而是住进项目仓库的 `.mneme/pipelines/<id>.json`：能提交、能 diff、能 PR、能被 CI 读。面板画的图和 agent 读的是同一份数据。配套「候选分层」：草稿先在 `<memoryDir>/candidates/` 攒着，走过两次**且**写得出反事实才提议升格——**升格不是降低标准，是补齐标准**。 |
+| 2026-10-17 | **v0.9.0** | **M.O. beta** — 你的工作流不再住在记忆库的一行文字里，而是住进项目仓库的 `.mneme/pipelines/<id>.json`：能提交、能 diff、能 PR、能被 CI 读。面板画的图和 agent 读的是同一份数据。配套「候选分层」：草稿先在 `<memoryDir>/candidates/` 攒着，走过两次**且**写得出反事实才提议升格——**升格不是降低标准，是补齐标准**。 |
 | 2026-10-17 | **v0.9.0** | **设置面板重排**（[#427](https://github.com/slow-stack/mneme/issues/427)）— 折叠线从「冷门」挪到「新手之外」：首屏只留 3 个总开关 + 作用域组，其余整组收进「全部设置」；22 个条目名从 `bm25SearchEnabled` 改说人话，并标注「默认 / 已改」。 |
 | 2026-10-17 | 加固 | **安全审计第一批**（[#462](https://github.com/slow-stack/mneme/pull/462)）— 外部访问 API 的 39 条路由全部改成**声明式鉴权**：漏写策略在装配期直接抛错，而不是运行时静默放行；`/export` 与 `GET /external-api` 补上鉴权门（此前未鉴权即可导出含归档/已遗忘的整库、并就地铸造 token）；请求体加 4 MiB 上限。 |
 | 2026-10-17 | 加固 | **路由策略重构**（[#464](https://github.com/slow-stack/mneme/pull/464)）— 鉴权从「每个 handler 自己记得写」变成「路由注册的必填字段」，23 处手写校验归零。供应链侧同步收紧：OSV 扫描改为有漏洞即失败、npm 发布带 `--provenance` 签名、secret scanning 与 Dependabot 打开。 |
@@ -243,7 +243,7 @@ dsh-mneme-serve          # 默认 ~/.dsh/memory + 127.0.0.1:8790
 | 配置说明（全键参考） | [dsh-mneme/docs/CONFIGURATION.md](dsh-mneme/docs/CONFIGURATION.md) |
 | 蒸馏原文留存与记忆级溯源（#399） | [dsh-mneme/docs/DISTILL.md](dsh-mneme/docs/DISTILL.md) |
 | 实体结构化设计 | [dsh-mneme/docs/ENTITIES.md](dsh-mneme/docs/ENTITIES.md) |
-| 工作流（M.O. · 手法）：本体住仓库、证据住记忆库 | [dsh-mneme/docs/WORKFLOWS.md](dsh-mneme/docs/WORKFLOWS.md) |
+| 工作流（M.O.）：本体住仓库、证据住记忆库 | [dsh-mneme/docs/WORKFLOWS.md](dsh-mneme/docs/WORKFLOWS.md) |
 | 语义架构 | [dsh-mneme/docs/SEMANTIC.md](dsh-mneme/docs/SEMANTIC.md) |
 | 本地模型部署指南 | [dsh-mneme/docs/LOCAL_MODEL.md](dsh-mneme/docs/LOCAL_MODEL.md) |
 | 与 Zep / Mem0 / Letta / Hindsight 的能力对比 | [docs/COMPARISON.md](docs/COMPARISON.md) |
@@ -253,7 +253,7 @@ dsh-mneme-serve          # 默认 ~/.dsh/memory + 127.0.0.1:8790
 ## 🗺️ 路线图
 
 ```
-🧬 记忆基因 → 🛡️ 审计加固 → 💤 睡眠维护 → 🕸️ 召回融合与图谱 → ✨ 面板增强 → 🌡️ 自进化记忆 → 🔐 作用域隔离 → 🌐 生态（MCP / daemon）→ 🧭 M.O. 手法（项目级工作流）
+🧬 记忆基因 → 🛡️ 审计加固 → 💤 睡眠维护 → 🕸️ 召回融合与图谱 → ✨ 面板增强 → 🌡️ 自进化记忆 → 🔐 作用域隔离 → 🌐 生态（MCP / daemon）→ 🧭 M.O.（项目级工作流）
 ```
 
 | 版本 | 主题 | 状态 |
@@ -264,7 +264,7 @@ dsh-mneme-serve          # 默认 ~/.dsh/memory + 127.0.0.1:8790
 | **v0.6** | 会话生命周期：删对话 ≠ 删记忆 | ✅ |
 | **v0.7** | 自进化记忆：热度衰减 + 睡眠双保护 + 桌面端工作台/功能开关 | ✅ |
 | **v0.8** | 作用域隔离（agent/workspace 双维隔离 + 检索加权 + opt-in 硬过滤）+ 冲突队列人工裁决 + 归属显式声明 + 生态化（stdio MCP server / 图召回轴 / 冷启动 / 注入截断与状态条 / 蒸馏可靠性 / 注入形态与 agent 主动整理接口 / 配置说明与 issue 模板） | ✅ 已发布（至 v0.8.16） |
-| **v0.9** | M.O.（Modus Operandi · 手法）beta：项目级工作流本体 + 候选分层与升格判据 + 面板清单/图同屏；设置面板按「新手之外」重划折叠线（#427）；安全审计与供应链加固（声明式路由鉴权、OSV 阻断、发布签名）；**v0.9.1 补上写侧**：执行窗口、运行账、归属候选、观察旁挂与脱节检出、步骤 `assert`/`optional`、沉淀链草稿挖掘、人格定义页（按 agent 多卡）；**v0.9.2 让看不见的失败显形**：功能开关第三态「待重启」、作用域级可逆闸门（#471）、巩固 `max_tokens` 超上限自动降级（#478） | ✅ 已发布（v0.9.2） |
+| **v0.9** | M.O.（Modus Operandi）beta：项目级工作流本体 + 候选分层与升格判据 + 面板清单/图同屏；设置面板按「新手之外」重划折叠线（#427）；安全审计与供应链加固（声明式路由鉴权、OSV 阻断、发布签名）；**v0.9.1 补上写侧**：执行窗口、运行账、归属候选、观察旁挂与脱节检出、步骤 `assert`/`optional`、沉淀链草稿挖掘、人格定义页（按 agent 多卡）；**v0.9.2 让看不见的失败显形**：功能开关第三态「待重启」、作用域级可逆闸门（#471）、巩固 `max_tokens` 超上限自动降级（#478） | ✅ 已发布（v0.9.2） |
 
 > 完整逐小版本说明见 [CHANGELOG](dsh-mneme/CHANGELOG.md)。
 

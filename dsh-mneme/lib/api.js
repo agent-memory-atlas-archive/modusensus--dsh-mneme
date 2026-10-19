@@ -18,6 +18,14 @@ import { loadRunsById, runsDir, RUNS_SUFFIX } from "./pipeline-runs.js";
 import { observationDir, loadObservationsById } from "./pipeline-observations.js";
 import { projectKey } from "./candidates.js";
 import { readCandidateDoc } from "./candidates.js";
+// M.O. 自动沉淀：/nudge 是 pipeline-nudge.js 的第一个运行时消费者（此前它只有测试在用，
+// 是个孤儿模块——「不能自动沉淀工作流」的根因）。
+import {
+  resolveProjectSessionDir,
+  nudgeForProject,
+  NUDGE_BOUNDARIES,
+  NUDGE_AUTO_BUDGET_MS
+} from "./pipeline-nudge.js";
 
 // headers：少数端点（/export 附件下载）需要追加 Content-Disposition 等响应头。
 function sendJson(res, status, payload, headers = {}) {
@@ -1849,7 +1857,7 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
     }
   });
 
-  // --- M.O.（Modus Operandi · 手法）工作流 ---
+  // --- M.O.（Modus Operandi）工作流 ---
   // 只读端点，读的是**项目里**的 `<项目>/.mneme/pipelines/*.json`（文件头在
   // src/pipeline.js），项目层优先、插件包里那份降级成全局层；投影成
   // mneme.pipeline/v1 交给面板与 agent——两边读同一份，画面只是它的投影。
@@ -1989,6 +1997,116 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
           detail: String((error && error.message) || error)
         });
       }
+    }
+  });
+
+  // --- M.O. 自动沉淀（nudge）---
+  // 读+写两种方法同路：GET 是**预览**（不落盘），POST 是**真跑**（落提议、可落草稿）。
+  // 为什么不全放 GET：GET 会被浏览器预取、被面板刷新反复调用，而这一跑要解压几十份
+  // zstd 会话日志（同步 I/O,本机实测 16.2s）。预览走 GET 时才关掉提议落盘
+  // （persistProposals:false）——否则每刷一次面板就往 memoryDir 里塞一批文件。
+  //
+  // policy 是 token-write 而不是 open：GET 免 token（与 /pipeline、/candidates 同级的
+  // 只读预览），POST 要 token——它会写盘，写盘面一律受门控。
+  register({
+    kind: "exact",
+    path: "/api/dsh-mneme/nudge",
+    policy: "token-write",
+    handler(req, res) {
+      const method = String(req.method || "GET").toUpperCase();
+      // 只认这四种。为什么必须在**读 body 之前**拦：下面 persistProposals 是按
+      // 「不是 GET/HEAD」算的，于是 PATCH/DELETE 会被当成写动作，走进 run() 落提议；
+      // 而它又不像 PUT/POST 那样读 body，等于一个不需要 body 的静默写盘口。
+      // 这条 PR 自己的卖点是「GET 只预览、写动作一律要 POST」，那就得把口子堵死
+      // （v0.9.3 评审抓出：带 token 的 PATCH/DELETE 会往 memoryDir 里写提议）。
+      const allowed = method === "GET" || method === "HEAD" || method === "POST" || method === "PUT";
+      if (!allowed) {
+        sendJson(res, 405, { error: "method-not-allowed", allow: "GET, HEAD, POST, PUT" }, { Allow: "GET, HEAD, POST, PUT" });
+        return;
+      }
+      const run = (body) => {
+        try {
+          const url = new URL(req.url, "http://localhost");
+          const project = url.searchParams.get("project");
+          // 与 /pipeline、/candidates 同一条规矩：不是绝对路径就拒掉，不能静默退成全局。
+          if (project !== null && !isAbsolute(project)) {
+            sendJson(res, 400, { error: "project-not-absolute", detail: project });
+            return;
+          }
+          // 预算从**这里**起算，不是一个端点两套预算：归属解析（同步扫桶，最多 500 个）
+          // 与后面的挖掘必须共用同一条截止线，否则「真卡就调 budgetMs」对前一段是空话。
+          // POST（显式真跑）给三倍预算，面板预览给短预算。
+          const previewMethod = method === "GET" || method === "HEAD";
+          const startedAt = Date.now();
+          const budgetMs = previewMethod ? NUDGE_AUTO_BUDGET_MS : NUDGE_AUTO_BUDGET_MS * 3;
+          const deadline = startedAt + budgetMs;
+          // 归属解析先做、单独回执：解析不到桶时要能说清是「这个项目还没跑过会话」
+          // 还是「会话目录读不到」——两者在候选列表上都表现为空。
+          const where = resolveProjectSessionDir({ projectRoot: project, deadline });
+          if (!where.sessionDir) {
+            // no-sessions-dir / unreadable / budget-exceeded / bucket-limit 都是**环境问题**
+            // （读不到、没扫完、没扫全），回 503 让调用方知道这不是答案；
+            // no-bucket / bad-project 是**关于这个项目的答案**，回 200。
+            const envProblem = where.reason === "no-sessions-dir"
+              || where.reason === "unreadable"
+              || where.reason === "budget-exceeded"
+              || where.reason === "bucket-limit";
+            sendJson(res, envProblem ? 503 : 200, {
+              error: envProblem
+                ? (where.reason === "budget-exceeded"
+                    ? "nudge-attribution-budget-exceeded"
+                    : where.reason === "bucket-limit"
+                      ? "nudge-attribution-bucket-limit"
+                      : "nudge-sessions-unreadable")
+                : undefined,
+              contract: "mneme.nudge/v1",
+              attribution: where,
+              skipped: true,
+              skippedReason: "no-session-attribution",
+              counts: { candidates: 0, buckets: 0, sessionsWithCandidates: 0, savedProposals: 0, draftsWritten: 0 },
+              available: [],
+              drafts: [],
+              boundaries: NUDGE_BOUNDARIES
+            });
+            return;
+          }
+          const memoryDir = (config && typeof config.memoryDir === "string" && config.memoryDir.trim())
+            ? config.memoryDir
+            : "~/.dsh/memory";
+          const doc = nudgeForProject({
+            projectRoot: project,
+            // 上面已经解析过并判过 400/503，这里传进来，别再扫一遍桶。
+            attribution: where,
+            // now 传起算时刻：nudgeForProject 内部按 now+budgetMs 重新算截止点，这样
+            // 两处算出来是同一条线（传 Date.now() 会让挖掘白拿一段已经花掉的预算）。
+            now: startedAt,
+            memoryDir,
+            // GET 只预览：不落提议、不落草稿。写动作只认 POST/PUT——PATCH/DELETE 已在
+            // 入口回 405，否则它们会落进这个「不是 GET/HEAD 就算写」的分支。
+            persistProposals: method !== "GET" && method !== "HEAD",
+            // 落草稿是「往仓库里塞文件」，必须显式要（body.materialize），默认不落。
+            materialize: body && body.materialize === true,
+            // 与归属解析共用同一条预算线：宁可少看几份并如实标 budgetExceeded，
+            // 也不能让一次面板刷新把宿主主线程按住十几秒。
+            budgetMs
+          });
+          sendJson(res, 200, doc);
+        } catch (error) {
+          sendJson(res, 500, {
+            error: "nudge-failed",
+            detail: String((error && error.message) || error)
+          });
+        }
+      };
+      if (method === "PUT" || method === "POST") {
+        readBody(req, res).then((text) => {
+          // readBody 已经回过 413：null 就是「别再往下走」。
+          if (text === null) return;
+          run(parseBody(text));
+        });
+        return;
+      }
+      run(null);
     }
   });
 

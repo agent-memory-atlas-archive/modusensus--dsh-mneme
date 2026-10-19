@@ -880,7 +880,7 @@ export const Config = z.object({
     enforce: z.boolean().default(false)
   }).default({}),
 
-  // --- v0.9.0 M.O.（Modus Operandi · 手法，beta）--------------------------
+  // --- v0.9.0 M.O.（Modus Operandi，beta）--------------------------
   // 命名：M.O. = Modus Operandi，拉丁语「一个人一贯的做事方式」，缩写 M.O.；
   // 也正是 org 词根 modus（modusensus）。界面主显示 M.O.，设置项 hint 第一句
   // 给全名——缩写不靠注释解释，靠用户第一眼能看见全名。
@@ -901,6 +901,20 @@ export const Config = z.object({
   // 默认关（beta 必须 opt-in）。它挂在热路径上（每个会话事件都过一次监听），
   // 所以轻量档要关掉：`LIGHT_MODE_OFF` 里有它。
   actionRunEnabled: z.boolean().default(false),
+
+  // M.O. 自动沉淀（v0.9.0 第三批）：会话跑完一轮后，把这个项目自己的会话日志挖一遍，
+  // 把「反复出现的同一段能力序列」落成提议（memoryDir 下），可选再落一份 draft 草稿。
+  //
+  // 与上面两个键三件事分开：actionPipelineEnabled 管「看图的座位」，actionRunEnabled
+  // 管「往账本里写」，这个管「从日志里长出候选」。三个都是独立能力，混成一个键会让
+  // 「只想看图」的人顺手获得写盘能力。
+  //
+  // 默认关（beta 必须 opt-in），并且进 LIGHT_MODE_OFF：它挂在 session/event 热路径上，
+  // 且解压会话日志是**同步**的（本机 118 份实测 16.2s），轻量档最不该背这条路径。
+  // 触发侧另有 10 分钟/项目的冷却与 budgetMs 上限（见 src/pipeline-nudge.js 的
+  // NUDGE_AUTO_MIN_INTERVAL_MS 与 src/index.js 的装配注释）——旗标只是总闸。
+  // （冷却值以常量为准：早前这里写「30 分钟」，与实际 10 分钟不符。）
+  actionNudgeEnabled: z.boolean().default(false),
 
   // --- 人格定义页（beta）---------------------------------------------------
   // 注入器渲染人格段的顶层总闸（双闸门的 config 半边；user_settings "persona"
@@ -962,7 +976,11 @@ const LIGHT_MODE_OFF = [
   // M.O. 执行记账：它挂在**热路径**上（每个会话事件都过一次监听）。轻量档的取向
   // 是「小模型 / 小上下文 / 少常驻路径」，这与一个每事件都过一遍的监听器相冲突。
   // 默认关，这里只是轻量预设再确认一次；用户显式勾选仍然赢（合并顺序同上面两条）。
-  "actionRunEnabled"
+  "actionRunEnabled",
+  // M.O. 自动沉淀：同样挂在 session/event 热路径上，而且解压会话日志是同步 I/O。
+  // 轻量档的取向（小模型 / 小上下文 / 少常驻路径）与它直接冲突，预设里关掉；
+  // 用户显式勾选仍然赢（合并顺序同上面几条）。
+  "actionNudgeEnabled"
 ];
 
 /**

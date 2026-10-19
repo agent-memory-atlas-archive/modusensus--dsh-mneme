@@ -209,7 +209,7 @@ const FEATURE_FLAG_BOOLEANS = [
   // 点号键平铺存、合并时展开回 distillRecords 对象（同 llmAudit.enabled）。
   // retentionDays 是 int，走下面的 INT_RANGES 表，不进开关白名单。
   "distillRecords.enabled",
-  // v0.9.0：M.O.（Modus Operandi · 手法，beta）客户端视图开关。客户端读 /features
+  // v0.9.0：M.O.（Modus Operandi，beta）客户端视图开关。客户端读 /features
   // 的 effective
   // 决定是否注册座位（会话头图标 / 浮层 / 右栏 / 对话行卡片），服务端只负责把
   // 这个键稳定暴露出来——键若不在 effective 里，客户端静默少键、一个座位都不注册。
@@ -219,6 +219,10 @@ const FEATURE_FLAG_BOOLEANS = [
   // 与上面那个键分开：那个管「看图的座位」，这个管「往账本里写」。默认关（beta、
   // opt-in），顶层扁平键，不需要 NESTED_FLAG_PATHS 条目。
   "actionRunEnabled",
+  // v0.9.0 第三批：M.O. 自动沉淀（会话跑完一轮 → 挖这个项目自己的会话日志 → 落提议）。
+  // 与前两个分开：这个管「从日志里长出候选」，那个管记账、另一个管看图。默认关
+  // （beta、opt-in）；顶层扁平键，不需要 NESTED_FLAG_PATHS 条目。进 LIGHT_MODE_OFF。
+  "actionNudgeEnabled",
   // 人格定义页（beta）：注入器渲染人格段的顶层总闸（双闸门的 config 半边；对象内
   // 的 persona.enabled 是 per-agent 半边，存 user_settings 的 "persona" 键，见
   // getPersona/setPersona）。默认关（beta、opt-in，老用户行为逐字节不变）；不进

@@ -1,5 +1,5 @@
 /**
- * M.O.（Modus Operandi · 手法）工作流的**运行账**。
+ * M.O.（Modus Operandi）工作流的**运行账**。
  *
  * 读侧（`src/pipeline.js`）已经能把「一条工作流跑了怎么样」算成四态，但账本一直没人写，
  * 于是 `runs` 恒为空数组、节点状态恒为 `candidate`。本模块补的就是这一环：把一次 run

@@ -1,4 +1,4 @@
-# dsh-mneme 工作流（M.O. · 手法）——本体住项目，证据住记忆库
+# dsh-mneme 工作流（M.O.）——本体住项目，证据住记忆库
 
 - **日期**：2026-10-15
 - **状态**：🚧 第一刀（项目级读侧 + 条目清单；执行侧未做）
@@ -97,10 +97,14 @@ GET /api/dsh-mneme/pipeline?project=<绝对路径>     # 该项目的清单（�
 GET /api/dsh-mneme/pipeline?project=…&id=<id>     # 指定一条
 
 GET /api/dsh-mneme/candidates?project=<绝对路径>   # 该项目的**候选**（见 §9）
+
+GET  /api/dsh-mneme/nudge?project=<绝对路径>       # 沉淀预览：只看不写（见 §10）
+POST /api/dsh-mneme/nudge?project=<绝对路径>       # 真跑一次：落提议（要 token）
 ```
 
-两条路由读的是**两处不同的东西**，别混：`/pipeline` 读定稿（住仓库），
-`/candidates` 读候选（住本地）。分开是刻意的，理由见 §9。
+三条路由读的是**三处不同的东西**，别混：`/pipeline` 读定稿（住仓库），
+`/candidates` 读候选（住本地），`/nudge` 是**产生**候选的那台机器（见 §10）。
+分开是刻意的，理由分别见 §9 与 §10。
 
 **`project` 必须是绝对路径**，否则回 `400 {"error":"project-not-absolute","detail":"…"}`。
 忽略了它就会静默退成「全局」，而全局看起来一切正常——那正是这一版要修掉的那类错。
@@ -297,3 +301,66 @@ JSON，报错本身就是给人看的：`detail` 里是校验器**一次列全**
 - **不做绕行的自动批准**：一律 R0/R1 记账先走、R2/R3 停下问人，没有「全都可以先走」
 - **不把候选塞进注入路径**：它是草稿，不是知识
 - **不做「图自动重写」**：图的变化一律经过提议 + 人批；回写是新版本，不是改旧版本
+
+## 10. 自动沉淀：工作流从哪长出来
+
+§1 说过「一条新工作流从哪来」在那之前一直是零代码。这一节就是那个来源。
+
+```
+turn/end  →  这个项目自己的会话桶  →  挖重复动作  →  memoryDir/proposals/<项目键>/
+```
+
+### 10.1 它写什么、不写什么
+
+| 产物 | 住哪 | 谁批准 |
+|---|---|---|
+| **提议**（proposal） | `<memoryDir>/proposals/<项目键>/nudge-*.json` | 不需要批准，但**没人看就等于没有** |
+| **草稿**（draft 工作流） | `<项目>/.mneme/pipelines/<id>.json` | 人显式要（`materialize: true`），自动跑**永不**落 |
+| **定稿**（active） | 同上，换 `status` | 人批，机器永远不给 |
+
+边界写在答复的 `boundaries` 里，跳过与跑完用的是**同一个常量**（`NUDGE_BOUNDARIES`）
+——两条出口说两句不同的话，读的人就会以为其中一条忘了做：
+
+```jsonc
+{ "autoActivate": false, "autoAnswerCounterfactual": false,
+  "writesOnlyDrafts": true, "riskIsFloor": true, "crossProjectSupport": false }
+```
+
+### 10.2 归属：为什么不能拿全机会话去挖
+
+会话日志在 DSH 侧按**工作区**分桶（`<DSH_HOME>/sessions/<桶>`），而桶名是路径的
+**有损**变形、规则不在本仓。所以「这个项目的工作流」只有在拿到**这个项目自己的桶**
+时才成立；归属靠会话头里的 `cwd` 反查（`resolveProjectSessionDir`）。
+
+拿不到归属时这一跑**整跑跳过**（`skipped: true`）而不是降级成全局普查：后者会把
+A 项目的动作算到 B 头上，而结果看起来完全正常（复核报告 §2.6 实测过）。
+
+`reason` 的四种取值里，**`unreadable` 必须与 `no-bucket` 分开**：前者是「读不到」
+（故障），后者是「确实没有」（关于这个项目的答案）。混起来等于把故障报成空结果。
+端点层因此有两种状态码：`no-sessions-dir` / `unreadable` → **503**，其余 → **200**。
+
+### 10.3 触发：为什么不是「读一次就沉淀一次」
+
+| 控制 | 值 | 为什么是这个值 |
+|---|---|---|
+| 触发点 | `turn/end` | 一轮结束才算一个观测窗口，中途记的是半截 |
+| 冷却 | `NUDGE_AUTO_MIN_INTERVAL_MS` = 10 分钟／项目 | **观测新鲜度**参数，不是性能参数：日志十分钟内长不出新重复模式 |
+| 单次预算 | `NUDGE_AUTO_BUDGET_MS` = 4 秒 | 超了带着已读到的部分收工并标 `budgetExceeded`，**不重试、不补跑** |
+| 执行时机 | `setTimeout(0)` | 解压会话日志是同步 I/O（本机 118 份实测 16.2 秒），压在 `turn/end` 那一帧上等于让回合收尾卡住 |
+| 排队 | 一次只跑一个项目 | 同上，别把一帧拉长 |
+
+**开与不开**：`actionNudgeEnabled`（默认关）。它与 `actionPipelineEnabled`（看图）、
+`actionRunEnabled`（记账）是**三件独立能力**，开任何一个都不会顺带打开另一个。
+它在 `LIGHT_MODE_OFF` 里——三个 M.O. 键里它最重（挂 `session/event` + 同步解压）。
+
+### 10.4 为什么提议落盘要单独一个开关
+
+`nudgeFromSessions` 原本只要算得出项目键就**无条件**往 memoryDir 里写提议。面板每刷
+一次就 GET 一次，那样每刷一次就往记忆库里塞一批文件。所以有了 `persistProposals`
+（默认 `true` 保持既有语义），预览路由显式传 `false`：
+
+- `GET` / `HEAD` → `persistProposals: false`，**一个文件都不写**；
+- `POST` / `PUT` → `persistProposals: true`，落提议。
+
+这也是 `/nudge` 的 `policy` 是 `token-write` 而不是 `open` 的原因：GET 与
+`/pipeline`、`/candidates` 同级（只读预览，免 token），POST 会写盘，写盘面一律受门控。
