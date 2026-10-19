@@ -15,6 +15,28 @@
 // （fail-open）。
 
 /**
+ * 免 inject 读取一个可选服务。cordis 4 的 ctx 是 Proxy，裸读未在 inject 声明的
+ * 属性会抛 "cannot get property ... without inject"（不是返回 undefined），所以
+ * 有 reflect 时优先走 ctx.reflect.get；旧宿主没有 reflect、ctx 是普通对象，裸读
+ * 此时安全——与 api.js:205 / index.js:583 的 webServer 同一形状。
+ *
+ * 服务缺失是合法状态（headless / 旧宿主 / 服务未激活），返回 undefined 让调用方
+ * 走既有降级路径，不告警：这不是故障。
+ * @param {object} ctx
+ * @param {string} name
+ * @returns {*}
+ */
+function readOptionalService(ctx, name) {
+  try {
+    if (typeof ctx?.reflect?.get === "function") return ctx.reflect.get(name);
+    return ctx?.[name];
+  } catch {
+    // 无 reflect 却又是 Proxy（或 accessor 自身抛错）：按「未提供」处理。
+    return undefined;
+  }
+}
+
+/**
  * @param {object} deps
  * @param {object} [deps.ctx] 宿主上下文（可能带 workspaceRegistry；旧版 dsh 没有）
  * @param {object} [deps.config] 已解析配置（读 scopeEnabled）
@@ -62,9 +84,16 @@ export function createScopeResolver({ ctx, config, logger } = {}) {
 
     // workspace：registry 反查优先（成员资格 = id 命中 + header canonical cwd
     // 校验过，path 已 realpath 归一），失败回退 header.cwd，再失败留 NULL。
+    //
+    // issue #487：这里曾经是裸读 ctx?.workspaceRegistry，而 workspaceRegistry 不在
+    // inject 声明里（index.js:45）。cordis 4 的 ctx 是 Proxy，裸读未注入属性会抛
+    // "cannot get property ... without inject" 而不返回 undefined——于是这层反查
+    // 从 v0.8.0 起一直抛错走降级，canonical 归一与成员资格校验静默失效，只剩
+    // header.cwd。改用免 inject 读取（同 api.js:205 / index.js:583 的 webServer
+    // 先例）；不加进 inject 的理由见 index.js:39-44（v0.7.23 的 apply 阶段崩溃）。
     let workspaceScope = null;
     try {
-      const list = ctx?.workspaceRegistry?.list?.();
+      const list = readOptionalService(ctx, "workspaceRegistry")?.list?.();
       const sessionId = session?.id;
       if (Array.isArray(list) && sessionId != null) {
         const hit = list.find(
