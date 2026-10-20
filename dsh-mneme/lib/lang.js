@@ -155,6 +155,17 @@ export const STR = {
     zh: (status, out) => `代码执行（${status}）：${out}`,
     en: (status, out) => `Code execution (${status}): ${out}`
   },
+  // Issue #493：转录围栏 + 角色重申。转录原先裸放在 user 位上，模型会把它当成
+  // 「轮到我说了」接着对话往下写/点评，输出里连 `[` 都没有，解析器在括号早退处
+  // 直接判 invalid summary JSON；同文同温重试 → 同一窗口确定性失败，窗口还越攒
+  // 越大。围栏与角色句必须落在 user 侧（system 保持原样）：模型对「当前这段文本
+  // 是什么」的判断由它所在的 user 消息决定，只写进 system 救不回来。
+  transcriptFenceOpen: { zh: "<<<会话转录开始>>>", en: "<<<TRANSCRIPT START>>>" },
+  transcriptFenceClose: { zh: "<<<会话转录结束>>>", en: "<<<TRANSCRIPT END>>>" },
+  distillRoleReminder: {
+    zh: "你是第三方提炼员，不是下面这段会话的参与者。不要回答、点评或续写转录里的内容；只按 system 的要求输出 JSON 数组。",
+    en: "You are a third-party distillation assistant, not a participant in the conversation below. Do not answer, comment on, or continue the transcript; output only the JSON array required by the system prompt."
+  },
 
   // --- dream.js：聚类快照标记 -------------------------------------------------
   clusterHeader: { zh: (n) => `# 聚类 ${n}`, en: (n) => `# Cluster ${n}` },

@@ -1813,3 +1813,228 @@ test("v0.9.0: scopeEnabled 关时蒸馏写入一个 scope 字段都不加（老�
     assert.equal(row.workspace_scope_source, undefined);
   }
 });
+
+// --- Issue #493：转录围栏 / 失败护栏 / 失败行可诊断性 ------------------------------
+// 现场：转录裸放 user 位 → 模型当成「该我回话了」接着往下写 → 输出无 `[` →
+// 解析器括号早退判失败 → 不推进游标 → 下一个 turn/end 同文同温重试 → 同一窗口
+// 确定性失败、窗口越攒越大（报告者 20 条失败 input 8194→11118 单调递增）。
+
+test("#493 提示构造：转录包进围栏，user 侧重申「第三方提炼员」，system 不动", async () => {
+  const { events, calls } = setup({ distillRateLimitIntervalMs: 0 });
+  await eventHandler(events)(
+    {
+      id: "s493-prompt",
+      requestHeader: () => ({ config: { provider: "deepseek", model: "deepseek-chat" } }),
+      events: [userMessage("把这段对话蒸馏一下", 1), { seq: 2, type: "turn/end" }]
+    },
+    { seq: 2, type: "turn/end" }
+  );
+
+  const [system, user] = calls[0].messages;
+  assert.equal(system.role, "system");
+  assert.ok(system.content[0].text.includes("原子记忆"), "system 提示词保持原样（既有回归断言依赖它）");
+  assert.equal(user.role, "user");
+  const body = user.content[0].text;
+  // 角色句与围栏都必须落在 user 侧：模型对「这段文本是什么」的判断由它所在的
+  // 那条消息决定，只写进 system 救不回来（实测同段转录只加 system 约束仍 0/2 出 JSON）。
+  assert.ok(body.includes("第三方提炼员"), "user 侧必须重申角色，否则模型接着对话往下写");
+  assert.ok(body.includes("不是下面这段会话的参与者"), "角色句要明说不参与，不能只说「请输出 JSON」");
+  const open = body.indexOf("<<<会话转录开始>>>");
+  const close = body.indexOf("<<<会话转录结束>>>");
+  assert.ok(open > 0 && close > open, "转录必须被围栏包住");
+  assert.ok(body.slice(open, close).includes("把这段对话蒸馏一下"), "原文仍在围栏内");
+  assert.ok(body.indexOf("第三方提炼员") < open, "角色句在围栏之前");
+});
+
+test("#493 提示构造：围栏是确定性的，重试收到的转录与首次逐字节相同", async () => {
+  let attempt = 0;
+  const { events, calls } = setup({ distillRateLimitIntervalMs: 0 }, {
+    stream() {
+      const output = attempt++ === 0 ? "不按格式的一整段中文点评" : "[]";
+      return (async function* () {
+        yield { type: "block-start", block: { type: "text" } };
+        yield { type: "text-delta", delta: output };
+        yield { type: "finish", kind: "ok" };
+      })();
+    }
+  });
+  const handler = eventHandler(events);
+  const session = {
+    id: "s493-deterministic",
+    requestHeader: () => ({ config: { provider: "deepseek", model: "deepseek-chat" } }),
+    events: [userMessage("同一窗口重试", 1), { seq: 2, type: "turn/end" }]
+  };
+  await handler(session, { seq: 2, type: "turn/end" });
+  await handler(session, { seq: 2, type: "turn/end" });
+  assert.equal(calls.length, 2);
+  const first = calls[0].messages.find((m) => m.role === "user").content[0].text;
+  const second = calls[1].messages.find((m) => m.role === "user").content[0].text;
+  // 围栏里不能有时间戳/随机数：否则「同文同温」这条前提就不成立，护栏阈值
+  // 会变成对着一堆各不相同的输入计数。
+  assert.equal(first, second, "重试必须收到逐字节相同的转录");
+});
+
+test("#493 计量口径：distillChars 只数转录正文，不被围栏与角色句撑大", async () => {
+  // 这条是护栏的邻居而非护栏本身：#493 给 user 消息加了约 100 字的固定包裹，
+  // 若 distillChars 仍按「消息总字符数」算，4 字的窗口会凭空越过任何阈值，
+  // summarizeMinWindowChars 等于被自己的提示词旁路掉。
+  const { events, service } = setup({ summarizeMinWindowChars: 60, distillRateLimitIntervalMs: 0 });
+  await eventHandler(events)(
+    {
+      id: "s493-metric",
+      requestHeader: () => ({ config: { provider: "deepseek", model: "deepseek-chat" } }),
+      events: [userMessage("短", 1), { seq: 2, type: "turn/end" }]
+    },
+    { seq: 2, type: "turn/end" }
+  );
+  const row = service.listLlmAudits()[0];
+  assert.equal(row.error_message, "window-too-small", "4 字正文不得被包裹撑过 60 字阈值");
+  assert.equal(row.metadata.distillChars, 4, "计的是转录正文（「用户：短」= 4 字）");
+});
+
+test("#493 失败行可诊断：metadata 带 raw_head / raw_has_bracket / streak", async () => {
+  const { events, service } = setup({ distillRateLimitIntervalMs: 0 }, {
+    stream() {
+      return (async function* () {
+        yield { type: "block-start", block: { type: "text" } };
+        yield { type: "text-delta", delta: "已按你的要求将值班轮单日上限改为 5，下面是具体改动…" };
+        yield { type: "finish", kind: "ok" };
+      })();
+    }
+  });
+  await eventHandler(events)(
+    {
+      id: "s493-diag",
+      requestHeader: () => ({ config: { provider: "deepseek", model: "deepseek-chat" } }),
+      events: [userMessage("帮我改一下值班轮上限", 1), { seq: 2, type: "turn/end" }]
+    },
+    { seq: 2, type: "turn/end" }
+  );
+
+  const row = service.listLlmAudits()[0];
+  assert.equal(row.status, "error");
+  assert.equal(row.error_message, "invalid summary JSON");
+  // 原先 metadata 恒为 null，90 条历史失败一条原始输出都没留 —— 事后无法回答
+  // 「模型到底吐了什么形状」。raw_has_bracket 是区分「没按格式写」与「格式对但
+  // 内容救不回来」的唯一低成本判据，也正是 #493 现场的关键特征。
+  assert.equal(row.metadata?.parse_failure, true);
+  assert.equal(row.metadata?.raw_has_bracket, false, "这段点评里没有方括号");
+  assert.ok(row.metadata?.raw_len > 0);
+  assert.ok(row.metadata?.raw_head.startsWith("已按你的要求"), "原始输出前缀要留档");
+  assert.equal(row.metadata?.streak, 1);
+  assert.ok(Number.isInteger(row.metadata?.distillChars), "失败行同样带窗口字符数");
+});
+
+test("#493 失败护栏默认关：连续失败也不放弃窗口（历史行为逐字节不变）", async () => {
+  const { events, calls } = setup({ distillRateLimitIntervalMs: 0 }, {
+    stream() {
+      return (async function* () {
+        yield { type: "block-start", block: { type: "text" } };
+        yield { type: "text-delta", delta: "永远不是 JSON" };
+        yield { type: "finish", kind: "ok" };
+      })();
+    }
+  });
+  const handler = eventHandler(events);
+  const session = {
+    id: "s493-guard-off",
+    requestHeader: () => ({ config: { provider: "deepseek", model: "deepseek-chat" } }),
+    events: [userMessage("窗口", 1), { seq: 2, type: "turn/end" }]
+  };
+  for (let i = 0; i < 5; i++) await handler(session, { seq: 2, type: "turn/end" });
+  // 默认 0 = 关：这是本仓新行为的既定纪律（AGENTS.md），也是既有 4 个
+  // 「解析失败不消费窗口」用例语义不变的前提。
+  assert.equal(calls.length, 5, "护栏关着时每个 turn/end 仍重试同一窗口");
+});
+
+test("#493 失败护栏：连续 N 次失败后强制消费游标跳过该窗口", async () => {
+  let attempt = 0;
+  const { events, calls, service, store, summarizer } = setup(
+    { summarizeParseFailureMaxRetries: 2, distillRateLimitIntervalMs: 0 },
+    {
+      stream() {
+        attempt++;
+        const output = attempt <= 2 ? "确定性失败：一段中文点评" : "[]";
+        return (async function* () {
+          yield { type: "block-start", block: { type: "text" } };
+          yield { type: "text-delta", delta: output };
+          yield { type: "finish", kind: "ok" };
+        })();
+      }
+    }
+  );
+  const handler = eventHandler(events);
+  const session = {
+    id: "s493-guard-on",
+    requestHeader: () => ({ config: { provider: "deepseek", model: "deepseek-chat" } }),
+    events: [userMessage("会被放弃的窗口", 1), { seq: 2, type: "turn/end" }]
+  };
+
+  await handler(session, { seq: 2, type: "turn/end" });
+  assert.equal(calls.length, 1);
+  assert.equal(service.getDistillCursor("s493-guard-on"), undefined, "第一次失败仍不推进游标");
+
+  await handler(session, { seq: 2, type: "turn/end" });
+  assert.equal(calls.length, 2, "阈值内仍重试");
+  // 达到阈值（2）：窗口被放弃，游标推进到本窗末尾，下一轮从全新窗口起算。
+  const cursor = service.getDistillCursor("s493-guard-on");
+  assert.equal(cursor?.last_seq, 2, "达到阈值后强制消费游标");
+  const errorRows = service.listLlmAudits().filter((r) => r.status === "error");
+  assert.equal(errorRows.length, 2);
+  // 按 streak 定位而不是按下标：审计表的返回顺序是存储层的事，不该被这条断言锁住。
+  const abandoned = errorRows.find((r) => r.metadata?.streak === 2);
+  assert.equal(abandoned?.metadata?.skipped, "parse-failure-streak", "放弃必须可观测");
+  assert.equal(abandoned?.metadata?.maxRetries, 2);
+  assert.equal(errorRows.find((r) => r.metadata?.streak === 1)?.metadata?.skipped, undefined,
+    "阈值前的那次失败仍按「可重试」记账，不得提前宣告放弃");
+
+  // 游标已消费 → 同一 turn/end 不再重试；新事件开新窗口并正常落库。
+  await handler(session, { seq: 2, type: "turn/end" });
+  assert.equal(calls.length, 2, "被放弃的窗口不再重试");
+  session.events.push(userMessage("新的窗口", 3), { seq: 4, type: "turn/end" });
+  await handler(session, { seq: 4, type: "turn/end" });
+  assert.equal(calls.length, 3, "新窗口正常蒸馏");
+  summarizer.dispose();
+  store.close();
+});
+
+test("#493 失败护栏：一次成功即清零计数，不会隔窗累计", async () => {
+  let attempt = 0;
+  const { events, calls, service, store, summarizer } = setup(
+    { summarizeParseFailureMaxRetries: 2, distillRateLimitIntervalMs: 0 },
+    {
+      stream() {
+        // 失败 → 成功 → 失败：第 3 次是「新一轮的第一次失败」，不该被判为第 2 次。
+        const outputs = ["不是 JSON", "[]", "又不是 JSON"];
+        const output = outputs[attempt++] ?? "[]";
+        return (async function* () {
+          yield { type: "block-start", block: { type: "text" } };
+          yield { type: "text-delta", delta: output };
+          yield { type: "finish", kind: "ok" };
+        })();
+      }
+    }
+  );
+  const handler = eventHandler(events);
+  const session = {
+    id: "s493-streak-reset",
+    requestHeader: () => ({ config: { provider: "deepseek", model: "deepseek-chat" } }),
+    events: [userMessage("第一窗", 1), { seq: 2, type: "turn/end" }]
+  };
+  await handler(session, { seq: 2, type: "turn/end" });   // 失败 #1
+  await handler(session, { seq: 2, type: "turn/end" });   // 成功 → 清零
+  session.events.push(userMessage("第二窗", 3), { seq: 4, type: "turn/end" });
+  await handler(session, { seq: 4, type: "turn/end" });   // 失败 #1（不是 #2）
+
+  // 两条失败行都必须是「新一轮的第一次」：只查最后一条会让「第一条其实被
+  // 记成 streak=2」这类回归漏网。
+  const errorRows = service.listLlmAudits().filter((r) => r.status === "error");
+  assert.equal(errorRows.length, 2);
+  for (const row of errorRows) {
+    assert.equal(row.metadata?.streak, 1, "成功必须清零，否则阈值会在跨窗处误触发");
+    assert.equal(row.metadata?.skipped, undefined, "计数未达阈值，不得放弃窗口");
+  }
+  assert.equal(calls.length, 3);
+  summarizer.dispose();
+  store.close();
+});

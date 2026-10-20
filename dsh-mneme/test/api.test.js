@@ -748,7 +748,9 @@ test("GET /api/dsh-mneme/features returns empty overrides and effective config d
   // 合并 #451（人格页）后的真实计数：98（本批前）+ actionRunEnabled + personaEnabled = 99
   // #471 再 + 2 = 101。
   // v0.9.3 新增 actionNudgeEnabled（M.O. 自动沉淀；顶层扁平键）= 102。
-  assert.equal(Object.keys(data.effective).length, 102);
+  // issue #493 新增 summarizeParseFailureMaxRetries（连续解析失败后放弃窗口的
+  // 护栏，int 键走 INT_RANGES 表）= 103。
+  assert.equal(Object.keys(data.effective).length, 103);
   assert.equal(data.effective.dreamSkipInvalid, true);
   assert.equal(data.effective.allowCrossTypeMerge, false);
   assert.equal(data.effective.dreamMergeGuard, true);

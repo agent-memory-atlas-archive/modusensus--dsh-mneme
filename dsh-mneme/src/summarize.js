@@ -404,12 +404,29 @@ function collectMessages(session, maxChars = 8000, language = "zh", afterSeq, th
     if (seq === undefined) return max;
     return max === undefined ? seq : Math.max(max, seq);
   }, undefined);
+  const transcriptBody = trimTranscript(lines.join("\n"), maxChars);
   return {
     messages: lines.length
-      ? [createUserMessage({ content: [{ type: "text", text: trimTranscript(lines.join("\n"), maxChars) }], source: { kind: "plugin:dsh-mneme", plugin: "dsh-mneme" } })]
+      ? [createUserMessage({
+        content: [{
+          type: "text",
+          // Issue #493：转录裸放 user 位时，模型把它当成「轮到我说了」接着对话
+          // 往下写，输出里连 `[` 都没有（解析器在括号早退处直接判失败）。围栏 +
+          // 角色重申把「这段文本是被提炼的素材」写进**它所在的那条消息**，而不是
+          // 只写在 system 里——实测同段转录只加 system 约束仍 0/2 出 JSON。
+          // 围栏是确定性的：重试收到的转录与首次逐字节相同（既有回归用例依赖）。
+          text: `${STR.distillRoleReminder[language]}\n\n${STR.transcriptFenceOpen[language]}\n${transcriptBody}\n${STR.transcriptFenceClose[language]}`
+        }],
+        source: { kind: "plugin:dsh-mneme", plugin: "dsh-mneme" }
+      })]
       : [],
     hasEvents: events.length > 0,
-    lastSeq
+    lastSeq,
+    // Issue #493：只数**转录正文**的字符数。minWindowChars 闸门与审计里的
+    // distillChars 量的都是「这一窗有多少可提炼内容」，不是「我们额外包了多少
+    // 提示词」——若把围栏与角色句算进去，一条「短」也会凭空越过任何阈值，
+    // 闸门随之失效（实测 summarizeMinWindowChars=10 会被 4 字正文 + 包裹放行）。
+    transcriptChars: lines.length ? transcriptBody.length : 0
   };
 }
 
@@ -534,6 +551,10 @@ export function createSummarizer(ctx, service, config, deps = {}) {
   const deferredRuns = new Map();
   // Issue #210：只在一次蒸馏完整成功后记录已消费的最后事件 seq。
   const lastDistilledSeq = new Map();
+  // Issue #493：per-session 连续解析失败计数（失败护栏用）。同一窗口在确定性
+  // 失败下会被每个 turn/end 重试一次、且窗口只会越攒越大——没有出口。成功即
+  // 清零；dispose 一并清理（与 runsUsed / lastRunAt 同生命周期）。
+  const parseFailureStreak = new Map();
   let disposed = false;
 
   /** 写一条 autoSummarize 的 LLM 审计行（审计失败绝不阻塞蒸馏本身）。 */
@@ -701,7 +722,12 @@ export function createSummarizer(ctx, service, config, deps = {}) {
       // summarize_compress 成功行的 metadata 里窗口字符数为 0 条），验收 4「默认配置
       // 下调用量可量化下降」因此无法对账。本改动只加计量，不动任何跳过决策——
       // summarizeMinWindowChars 仍为 0 时行为逐字节不变。
-      const distillChars = messages.reduce(
+      //
+      // Issue #493：口径改为只数转录正文（collected.transcriptChars），不再把
+      // user 消息整段长度当窗口大小——#493 给转录加了围栏与角色句，若继续按
+      // 「消息总字符数」算，一条 4 字的「短」也会被包裹撑过任何阈值，闸门等于
+      // 被自己的提示词旁路掉。
+      const distillChars = collected.transcriptChars ?? messages.reduce(
         (total, message) => total + (Array.isArray(message.content) ? message.content : [])
           .reduce((n, part) => n + (typeof part?.text === "string" ? part.text.length : 0), 0),
         0
@@ -869,12 +895,46 @@ export function createSummarizer(ctx, service, config, deps = {}) {
       const parsedResult = parseSummaryJsonResult(text || assembledText);
       // 解析失败不推进 seq 游标，下一次 turn/end 仍会重试同一窗口。
       if (!parsedResult.ok) {
+        // Issue #493：失败也要留证据。原先 metadata 只在成功路径赋值，失败行恒为
+        // null —— 事后无法回答「模型到底吐了什么形状」。这里只加计量、不做任何
+        // 跳过决策（raw_head 截断到 300 字符，避免把审计表撑大）。
+        const raw = text || assembledText || "";
+        const streak = (parseFailureStreak.get(session.id) ?? 0) + 1;
+        parseFailureStreak.set(session.id, streak);
+        // Issue #493 失败护栏：同一窗口连续失败到阈值后强制消费游标跳过它。
+        // 确定性失败（finish_reason=stop、同文同温）重试收益为 0，而窗口只会随
+        // 新事件继续变大——没有出口时它会一直失败下去。默认 0 = 关闭，行为与
+        // 历史版本逐字节一致（本仓新行为一律 opt-in，见 AGENTS.md）。
+        const maxParseRetries = config.summarizeParseFailureMaxRetries ?? 0;
+        // nextSeq 必须是有限数才算真的「跳过了窗口」：没有可验证的 seq 时
+        // commitCursor 是空操作（persistCursor 早退、内存游标也不写），此时若
+        // 仍按跳过记账并清零 streak，审计会宣称「已放弃」而窗口下一轮照旧重试
+        // —— 那是最坏的一种假象：用户以为止血了，实际还在烧。
+        const skipWindow = maxParseRetries > 0 && streak >= maxParseRetries && Number.isFinite(nextSeq);
+        if (skipWindow) {
+          // 先提交游标再复位计数：窗口已放弃，下一窗从全新状态起算。
+          commitCursor(session.id, nextSeq);
+          parseFailureStreak.delete(session.id);
+        }
         if (audit) {
           audit.status = "error";
           audit.errorMessage = "invalid summary JSON";
+          audit.metadata = {
+            distillChars,
+            parse_failure: true,
+            raw_len: raw.length,
+            raw_head: raw.slice(0, 300),
+            // 有没有出现过 `[` 是区分「模型没按格式写」与「格式对但内容救不回来」
+            // 的唯一低成本判据，也正是 #493 现场那 20 条失败的关键特征。
+            raw_has_bracket: raw.includes("["),
+            streak,
+            ...(maxParseRetries > 0 ? { maxRetries: maxParseRetries } : {}),
+            ...(skipWindow ? { skipped: "parse-failure-streak" } : {})
+          };
         }
         return;
       }
+      parseFailureStreak.delete(session.id);
       const parsed = parsedResult.entries;
       // Issue #127 条数上限：0 = 不限（现状）。被截断的条数与去重命中数一并进
       // 审计 metadata——此前产出条数完全由模型输出决定，用户无从自查。
@@ -1064,6 +1124,7 @@ export function createSummarizer(ctx, service, config, deps = {}) {
       inFlight.clear();
       lastRunAt.clear();
       lastDistilledSeq.clear();
+      parseFailureStreak.clear();
     }
   };
 }

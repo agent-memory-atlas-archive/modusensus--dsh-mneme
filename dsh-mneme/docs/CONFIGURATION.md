@@ -92,6 +92,7 @@
 | `summarizeMaxEntriesPerRun` | `0` | 单次蒸馏最多落库条数（≤50） | 0 = 不限 |
 | `summarizeMinWindowChars` | `0` | 窗口可蒸馏文本下限（字符），不足直接跳过 LLM（#239） | 被挡窗口照常消费游标并留 skip 审计 |
 | `summarizeMaxRunsPerSession` | `0` | 每会话蒸馏次数预算，只计真实发起的调用（≤1000） | 0 = 不限；进程内计数，重启清零 |
+| `summarizeParseFailureMaxRetries` | `0` | 连续解析失败几次后放弃当前窗口（0–10，0 = 关，#493） | 达到阈值强制消费游标跳过该窗口；失败行 metadata 恒带 `raw_head`/`raw_has_bracket`/`streak` |
 | `summarizePeakHours` | `""` | 高峰时段串（`"09:00-18:00"` / `"mon-fri 08:00-12:00,14:00-18:00"`，支持跨零点） | 命中高峰不调 LLM、顺延补跑；任一写法非法整串按未配置处理 |
 | `summarizePeakMaxDeferMinutes` | `120` | 高峰顺延上限（分钟，≤1440） | 0 = 不设上限；到点仍处高峰照跑（bypassPeak） |
 | `summarizeDedupeMode` | `off` | 落库前去重档位：`off` / `title`（拦完全同名）/ `vector`（同会话语义近邻） | `vector` 复用已有 embedding 列，无 LLM 调用 |
