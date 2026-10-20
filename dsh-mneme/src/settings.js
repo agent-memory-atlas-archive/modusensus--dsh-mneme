@@ -247,6 +247,9 @@ const FEATURE_FLAG_INT_RANGES = {
   // Issue #239：蒸馏零 LLM 预判（窗口最小字符数）与每会话 run 预算（0 = 零行为变化）。
   summarizeMinWindowChars: [0, 100000],
   summarizeMaxRunsPerSession: [0, 1000],
+  // Issue #493：连续解析失败几次后放弃当前窗口（0 = 关）。与 config.js 的
+  // z.natural().min(0).max(10) 成对。
+  summarizeParseFailureMaxRetries: [0, 10],
   // Issue #239 第 4 项：高峰顺延上限（分钟，0 = 不设上限）。
   summarizePeakMaxDeferMinutes: [0, 1440],
   // Issue #239 第 4 项镜像到巩固：同一口径（分钟，0 = 不设上限）。
