@@ -906,7 +906,11 @@ export function createSummarizer(ctx, service, config, deps = {}) {
         // 新事件继续变大——没有出口时它会一直失败下去。默认 0 = 关闭，行为与
         // 历史版本逐字节一致（本仓新行为一律 opt-in，见 AGENTS.md）。
         const maxParseRetries = config.summarizeParseFailureMaxRetries ?? 0;
-        const skipWindow = maxParseRetries > 0 && streak >= maxParseRetries;
+        // nextSeq 必须是有限数才算真的「跳过了窗口」：没有可验证的 seq 时
+        // commitCursor 是空操作（persistCursor 早退、内存游标也不写），此时若
+        // 仍按跳过记账并清零 streak，审计会宣称「已放弃」而窗口下一轮照旧重试
+        // —— 那是最坏的一种假象：用户以为止血了，实际还在烧。
+        const skipWindow = maxParseRetries > 0 && streak >= maxParseRetries && Number.isFinite(nextSeq);
         if (skipWindow) {
           // 先提交游标再复位计数：窗口已放弃，下一窗从全新状态起算。
           commitCursor(session.id, nextSeq);

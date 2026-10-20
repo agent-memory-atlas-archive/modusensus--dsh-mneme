@@ -2026,10 +2026,14 @@ test("#493 失败护栏：一次成功即清零计数，不会隔窗累计", asy
   session.events.push(userMessage("第二窗", 3), { seq: 4, type: "turn/end" });
   await handler(session, { seq: 4, type: "turn/end" });   // 失败 #1（不是 #2）
 
-  const last = service.listLlmAudits().at(-1);
-  assert.equal(last.status, "error");
-  assert.equal(last.metadata?.streak, 1, "成功必须清零，否则阈值会在跨窗处误触发");
-  assert.equal(last.metadata?.skipped, undefined, "计数未达阈值，不得放弃窗口");
+  // 两条失败行都必须是「新一轮的第一次」：只查最后一条会让「第一条其实被
+  // 记成 streak=2」这类回归漏网。
+  const errorRows = service.listLlmAudits().filter((r) => r.status === "error");
+  assert.equal(errorRows.length, 2);
+  for (const row of errorRows) {
+    assert.equal(row.metadata?.streak, 1, "成功必须清零，否则阈值会在跨窗处误触发");
+    assert.equal(row.metadata?.skipped, undefined, "计数未达阈值，不得放弃窗口");
+  }
   assert.equal(calls.length, 3);
   summarizer.dispose();
   store.close();
