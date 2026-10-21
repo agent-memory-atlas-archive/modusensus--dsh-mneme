@@ -946,7 +946,27 @@ export const Config = z.object({
   // 人格段是用户自写的一小段轻量常驻文本，不引入任何重型后台路径，轻量档用户
   // 显式勾选仍然赢（同 actionPipelineEnabled 的定性）。
   // 也走 feature_flags（FEATURE_FLAG_BOOLEANS 白名单），面板可启停=线上回滚开关。
-  personaEnabled: z.boolean().default(false)
+  personaEnabled: z.boolean().default(false),
+
+  // 人格寻址的兜底口径（只在上一个键打开时才有意义）。关（默认，= 历史行为）：
+  // 会话身份没有卡、或有卡但卡被关掉时，一律落 default 卡——于是 default 成了
+  // 「所有没建卡的 agent 都能拿到某个人格」，宿主里跑的外部 bot（自带身份与设定）
+  // 会在同一帧里收到两句「你是谁」。开：这两种情况都不注入人格，default 退回它的
+  // 本意——只兜「这一帧解析不到会话身份」的无名会话（无身份时行为不变）。
+  // 默认关是因为这是一次口径变更：老用户升级后注入文本不许静默变化。
+  // 不进 LIGHT_MODE_OFF：它只是取卡时的一个分支，不引入常驻文本、也不引入后台路径，
+  // 且它本身只在 personaEnabled 打开时才起作用（同 scopeState 的定性）。
+  personaStrictAddressing: z.boolean().default(false),
+
+  // Issue #497：从活跃记忆反向提取「助手眼中的用户」画像**草稿**（POST
+  // /api/dsh-mneme/profile/extract）。默认关有三层理由：① 它每次点一次就是一次 LLM
+  // 调用并读上百行记忆，成本与 dream/summarize 同级，不该在没人要求时挂在面上；
+  // ② 产物会被用户当成「关于我的第一版画像」读，编造的代价不对称——所以空库直接报错、
+  // 解析失败也报错，绝不回空草稿；③ 它**不写** user_settings，采用草稿是面板里另一次
+  // 显式保存，画像正文必须是用户手写的原文，不给模型改写权。
+  // 进 LIGHT_MODE_OFF：一次调用要读上百行记忆 + 一轮模型生成，与低资源档互斥（同
+  // preInjectGate.enabled 的定性）；是预设不是强制，用户显式勾选仍然赢。
+  profileExtractEnabled: z.boolean().default(false)
 });
 
 // Fields forced to false by the light-mode preset. Everything not listed here
@@ -1002,6 +1022,10 @@ const LIGHT_MODE_OFF = [
   // 是「小模型 / 小上下文 / 少常驻路径」，这与一个每事件都过一遍的监听器相冲突。
   // 默认关，这里只是轻量预设再确认一次；用户显式勾选仍然赢（合并顺序同上面两条）。
   "actionRunEnabled",
+  // #497：轻量档不开画像提取——一次调用要读上百行记忆再生成一段画像，与低资源档
+  // 互斥（同 preInjectGate.enabled 的定性）。默认关，这里只是预设再确认一次；
+  // 用户显式勾选仍然赢（合并顺序同 continuityRescueEnabled）。
+  "profileExtractEnabled",
   // M.O. 自动沉淀：同样挂在 session/event 热路径上，而且解压会话日志是同步 I/O。
   // 轻量档的取向（小模型 / 小上下文 / 少常驻路径）与它直接冲突，预设里关掉；
   // 用户显式勾选仍然赢（合并顺序同上面几条）。

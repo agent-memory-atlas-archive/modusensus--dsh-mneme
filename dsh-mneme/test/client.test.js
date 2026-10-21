@@ -2077,11 +2077,13 @@ test("panel copy and icons must not silently vanish (missing dict lines, unregis
 // 人格定义页（beta）面板面回归：形状沿用 A4 的「分组 + i18n 双语 occurrences ≥ 2
 // + 关键接线」断言风格（只做源码断言，不挂 React 渲染环境）。
 test("persona page ships settings card, master switch and i18n (beta v1)", () => {
-  // 开关进 FEATURE_GROUPS 的 enhance 组（行为开关非座位闸门）
-  assert.ok(
-    /group\.enhance", items: \[(?:[^\]]|\n)*"personaEnabled"\]/.test(clientSource),
-    "FEATURE_GROUPS group.enhance must carry personaEnabled"
-  );
+  // 开关进 FEATURE_GROUPS 的 enhance 组（行为开关非座位闸门）。按组解析成员再逐个点名，
+  // 而不是把某一行写成字面量正则——那样往组里加第二个键就会把这条护栏弄红（实测踩过）。
+  const enhance = clientSource.match(/group\.enhance", items: \[((?:[^\]]|\n)*)\]/);
+  assert.ok(enhance, "FEATURE_GROUPS group.enhance must be parseable");
+  for (const flag of ["personaEnabled", "personaStrictAddressing"]) {
+    assert.ok(enhance[1].includes(`"${flag}"`), `FEATURE_GROUPS group.enhance must carry ${flag}`);
+  }
   // i18n 键中英双语齐备（occurrences ≥ 2 模式；label + .hint 两路由字典锁统一覆盖）
   for (const key of [
     "memory.features.personaEnabled",
@@ -2096,7 +2098,17 @@ test("persona page ships settings card, master switch and i18n (beta v1)", () =>
     "memory.settings.personaEnabledToggle",
     "memory.settings.personaView",
     "memory.settings.personaViewHint",
-    "memory.settings.personaViewEmpty"
+    "memory.settings.personaViewEmpty",
+    // 预览改由后端渲染之后新增的读数文案（缺一种语言就是半边界面裸奔键名）
+    "memory.features.personaStrictAddressing",
+    "memory.features.personaStrictAddressing.hint",
+    "memory.settings.personaViewUnknown",
+    "memory.settings.personaViewSourceDefault",
+    "memory.settings.personaViewSourceCard",
+    "memory.settings.personaViewSourceNone",
+    "memory.settings.personaViewSourceFallback",
+    "memory.settings.personaViewGateOff",
+    "memory.settings.personaViewRefresh"
   ]) {
     const occurrences = clientSource.split(`"${key}"`).length - 1;
     assert.ok(occurrences >= 2, `i18n key ${key} must exist in both zh and en (got ${occurrences})`);
@@ -2110,6 +2122,17 @@ test("persona page ships settings card, master switch and i18n (beta v1)", () =>
     clientSource.includes("memory.features.personaEnabled.hint"),
     "the master-switch hint must document the two-gate semantics"
   );
+  // 「注入生效文本」必须由后端给：前端再拼一份就是第二张皮（原来正是这段前端拼接
+  // 没有人格行、没有表头与前缀，却自称生效文本）。
+  assert.ok(clientSource.includes("injectedPreview.text"), "the view must render the backend-rendered block");
+  assert.ok(!clientSource.includes('"- " + profile.trim()'), "frontend hand-splicing of the injected block must be gone");
+  assert.ok(clientSource.includes("setInjectedPreview(null)"), "a failed preview must fail closed to 未知, not to a stale or guessed block");
+  // 预览只能有一个所有者，且要丢掉过期响应：先切卡 A 再切卡 B 时，A 的 GET 可能后回来。
+  // 这张卡的标题是「注入生效文本」，显示另一张卡的文本比不显示更糟。
+  assert.ok(clientSource.includes("if (seq !== previewSeq.current) return;"), "preview must drop stale responses");
+  assert.equal(clientSource.split("setInjectedPreview(").length - 1, 2, "loadPreview must be the only preview writer (success + failure)");
+  // source=default 有两种来路：带了 ?agent=<身份> 却回落 ≠ 真的解析不到身份。
+  assert.ok(clientSource.includes("injectedPreview.agent"), "the fallback label must separate a resolved-but-fallen-back identity from an unresolvable one");
 });
 
 // v1.2 多卡回归：卡列表 CRUD 可见、字段标签渲染为可见元素（v1.1 反馈：
@@ -2186,4 +2209,51 @@ test("update-check status names match the backend classify contract verbatim", (
   const apiSource = readFileSync(join(root, "src/api.js"), "utf8");
   assert.ok(apiSource.includes('path: "/api/dsh-mneme/version-check"'),
     "the backend must register the version-check route");
+});
+
+// 画像提取草稿（#497）面板面：路由对齐、四种结局各有自己的话、以及「采用」必须把草稿
+// 文本直接交给保存。最后一条防的是一个具体陷阱——保存函数带默认参数时，把函数本身当
+// onClick 处理器会把 click 事件当成要存的文本存进去。
+test("profile extraction ships its button, distinct outcomes and correct save wiring", () => {
+  const apiSource = readFileSync(join(root, "src/api.js"), "utf8");
+  assert.ok(clientSource.includes('apiFetch("/api/dsh-mneme/profile/extract"'),
+    "the panel must call the extract route");
+  assert.ok(apiSource.includes('path: "/api/dsh-mneme/profile/extract"'),
+    "the backend must register the extract route");
+
+  // 四种结局（成功草稿 / 未启用 / 没有可用记忆 / 模型没配合）必须各有一句人话：
+  // 压成一句「没有草稿」就等于让用户自己猜是坏了还是本来就没东西。
+  for (const key of [
+    "memory.settings.profileExtract",
+    "memory.settings.profileExtracting",
+    "memory.settings.profileExtractHint",
+    "memory.settings.profileExtractDisabled",
+    "memory.settings.profileExtractEmpty",
+    "memory.settings.profileExtractNoRoute",
+    "memory.settings.profileExtractFailed",
+    "memory.settings.profileSaveFailed",
+    "memory.settings.profileDraftTitle",
+    "memory.settings.profileDraftRows",
+    "memory.settings.profileDraftTruncated",
+    "memory.settings.profileDraftApply",
+    "memory.settings.profileDraftDiscard",
+    "memory.features.profileExtractEnabled",
+    "memory.features.profileExtractEnabled.hint"
+  ]) {
+    const occurrences = clientSource.split(`"${key}"`).length - 1;
+    assert.ok(occurrences >= 2, `i18n key ${key} must exist in both zh and en (got ${occurrences})`);
+  }
+  assert.ok(/group\.enhance[\s\S]{0,700}"profileExtractEnabled"/.test(clientSource),
+    "FEATURE_GROUPS group.enhance must carry profileExtractEnabled");
+
+  // 采用草稿：显式传文本；保存按钮也不能把 click 事件当参数传进去。
+  assert.ok(clientSource.includes("if (await saveProfile(text))"), "applying a draft must commit state only after a verified save");
+  assert.ok(!clientSource.includes("onClick: saveProfile }"), "the save button must not receive the click event as its value argument");
+  // apiFetch 是 fetch 的薄壳：非 2xx 不抛。画像这条以前没判 res.ok（同页的 persona
+  // 一直判），于是服务端 403/413 时界面照样闪「画像已保存」。
+  const profileSaver = clientSource.slice(clientSource.indexOf("async function saveProfile("));
+  assert.ok(profileSaver.slice(0, 900).includes('if (!res.ok) throw new Error("HTTP "'),
+    "the profile saver must verify the response status before reporting success");
+  // 没配模型是一句可行动的话（先去选模型），不能和「模型没按格式回」共用一条文案。
+  assert.ok(clientSource.includes('"no-route" ? "noroute"'), "no-route must map to its own panel outcome, not the generic failure");
 });

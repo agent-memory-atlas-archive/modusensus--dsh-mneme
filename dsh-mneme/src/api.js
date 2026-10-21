@@ -9,6 +9,7 @@ import { langOf } from "./lang.js";
 import { computeHeat } from "./heat.js";
 import { EFFORT_REJECT_RE, describeStreamFailure, resolveRoute, withEffortFallback } from "./dream.js";
 import { getInjectionSnapshot } from "./inject.js";
+import { renderUserSettingsBlock } from "./user-settings.js";
 import { describeLocalRuntime, publicRuntimeStatus } from "./runtime/loader.js";
 import { hostModulesDir, provisionRuntime } from "./runtime/provision.js";
 import { classify, fetchLatestVersion, PACKAGE_VERSION } from "./version-check.js";
@@ -182,7 +183,7 @@ function parseBody(text) {
 // maintenance 是第 9 个位置参数，默认 null：既有调用点（测试里的 14 处）全是位置传参、
 // 不传它，必须继续工作——不传时 /maintenance/reclaim 回 503 maintenance-unavailable，
 // 而不是把「没接线」伪装成崩溃（#386 第 4 条）。
-export function createApi(ctx, service, settings, commands, embedder, semantic = null, apiToken = "", config = null, maintenance = null) {
+export function createApi(ctx, service, settings, commands, embedder, semantic = null, apiToken = "", config = null, maintenance = null, profileExtract = null) {
   const disposers = [];
 
   // #182 注入状态探测：面板状态页的「极简模式下注入按宿主设计关闭」提示需要
@@ -488,6 +489,49 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
     }
   });
 
+  // --- 画像提取（issue #497）：一次性从活跃记忆出「助手眼中的用户」**草稿** ------
+  // 语义上它是「读 + 一次模型调用」，不是写端点：草稿回给面板，采用与否是用户在那里
+  // 另一次显式 PUT /profile。所以这个路由永远不碰 user_settings——画像正文是用户
+  // 手写的原文，让模型合并等于给它改写权，而改写后的文本每帧都注入。
+  register({
+    kind: "exact",
+    path: "/api/dsh-mneme/profile/extract",
+    // policy 是 `token` 而不是 `token-write`：这条路由**没有读分支**（非 POST 一律 405），
+    // 声明成 token-write 会让 SECURITY.md 的开放读清单按「GET 开放」把它算进去——
+    // 那张表是代码的投影，不是愿望清单（test/security-doc.test.js 就是钉这件事的）。
+    policy: "token",
+    handler(req, res) {
+      // 方法白名单在碰任何副作用之前：#489 的教训是「只拦 POST/PUT，其余直落
+      // run(null)」——那等于给带 token 的 PATCH/DELETE 开了一条静默花一次 LLM 的口子。
+      // 顺序也要紧：405 若挪到 readBody 之后，一个不带 body 的方法会把请求永远挂在
+      // 读体上（把这道判断改成只拦 GET 时实测卡住整条用例），等于一个免费的挂起面。
+      if (req.method !== "POST") {
+        res.writeHead(405, { Allow: "POST" });
+        res.end("");
+        return undefined;
+      }
+      if (config?.profileExtractEnabled !== true) return sendJson(res, 409, { error: "disabled" });
+      if (typeof profileExtract !== "function") return sendJson(res, 503, { error: "unavailable" });
+      return readBody(req, res).then((text) => {
+        if (text === null) return undefined; // 超限已在 readBody 里回过 413
+        return profileExtract().then(
+          (out) => sendJson(res, 200, out),
+          (error) => {
+            // 「没东西可提」与「模型没配合」必须能被调用方区分：把它们都压成 200 +
+            // 空草稿，面板就会把故障显示成「这次没提炼出东西」（#493 同一条教训）。
+            const code = typeof error?.code === "string" ? error.code : "";
+            if (code === "no-input") return sendJson(res, 409, { error: code });
+            // 没配模型是「环境缺东西」，与「模型不配合」两码：前者重跑也一样，后者可重试。
+            if (code === "no-route") return sendJson(res, 503, { error: code });
+            if (code === "unparseable" || code === "stream-failed") return sendJson(res, 502, { error: code });
+            ctx.logger?.warn?.(`dsh-mneme: profile extract failed: ${String(error?.message ?? error)}`);
+            return sendJson(res, 500, { error: "internal" });
+          }
+        );
+      });
+    }
+  });
+
   // --- agent persona（人格定义页，beta） -------------------------------------
   // 形状照抄 /profile 路由（设计稿②）：写方法走 requireAuth + readBody + parseBody。
   // v1.2 多卡：GET 回全量 { default, byAgent }；PUT 双形——单对象形（旧面板）只更新
@@ -519,7 +563,20 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
             sendJson(res, 200, { persona: settings.getPersona() });
           });
         }
-        sendJson(res, 200, { persona: settings.getPersona() });
+        const url = new URL(req.url, "http://localhost");
+        // 预览（面板「Agent 眼中的画像」用）：由注入器同一个渲染函数产出，前端只显示
+        // 返回的文本——以前端自己拼列表冒充「生效文本」是这个面板最容易漂的地方。
+        // ?agent=<身份> 让面板能逐张卡预览：传了就按那个身份寻址，没传按「解析不到身份」
+        // 走（也就是 default 卡的受众）。
+        // 这里不加鉴权是有意的：画像、规则、人格三处在同一条开放读面上本来就能各读一次
+        // （GET /profile 与 GET /persona 都无 token 可读），本字段只是把同样的内容拼成
+        // 模型实际看到的形状，没有新增可达面；真要锁，配 apiToken（写面与它同源）。
+        const preview = renderUserSettingsBlock({
+          settings,
+          config,
+          agentId: url.searchParams.get("agent")
+        });
+        sendJson(res, 200, { persona: settings.getPersona(), preview });
       } catch {
         sendJson(res, 500, { error: "internal" });
       }
