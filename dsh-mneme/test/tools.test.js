@@ -91,7 +91,12 @@ test("memory_search/archive descriptions carry tool-use discipline", () => {
 test("compiled schemas pass the enforced DSH subset (defineTool projection)", () => {
   const { registered } = setup();
   assert.equal(registered.length, 11);
-  for (const tool of registered) {
+  // opt-in 暴露的工具在默认配置下不注册（#231 的 memory_organize），所以本用例还得
+  // 把暴露闸打开再走一遍——否则新工具的编译 schema 从来没被这条护栏看过，
+  // 「子集不支持的写法」要到运行时才炸。
+  const { registered: exposed } = setup(undefined, { organizeEnabled: true });
+  assert.equal(exposed.length, 12, "organizeEnabled 只多带一个工具，不许顺手改在场的别的东西");
+  for (const tool of [...registered, ...exposed]) {
     assertSupportedJsonSchema(tool.parameters);
     assertSupportedJsonSchema(tool.output.schema);
     const problems = [];

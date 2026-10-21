@@ -750,7 +750,9 @@ test("GET /api/dsh-mneme/features returns empty overrides and effective config d
   // v0.9.3 新增 actionNudgeEnabled（M.O. 自动沉淀；顶层扁平键）= 102。
   // issue #493 新增 summarizeParseFailureMaxRetries（连续解析失败后放弃窗口的
   // 护栏，int 键走 INT_RANGES 表）= 103。
-  assert.equal(Object.keys(data.effective).length, 103);
+  // issue #231 第二批新增 organizeEnabled（memory_organize 的暴露闸；顶层扁平键，
+  // 不需要 NESTED_FLAG_PATHS 条目）= 104。
+  assert.equal(Object.keys(data.effective).length, 104);
   assert.equal(data.effective.dreamSkipInvalid, true);
   assert.equal(data.effective.allowCrossTypeMerge, false);
   assert.equal(data.effective.dreamMergeGuard, true);
@@ -799,6 +801,9 @@ test("GET /api/dsh-mneme/features returns empty overrides and effective config d
   // actionRunEnabled（记账）都不是一件事——它挂 session/event 并解压会话日志，
   // 是三者里最重的一条，所以独立开关、默认关、且进 LIGHT_MODE_OFF。
   assert.equal(data.effective.actionNudgeEnabled, false);
+  // issue #231 第二批：整理接口的暴露闸默认关（关 = memory_organize 根本不注册）。
+  // 面板要能读到这一格，否则用户开了也不见效、还以为是 bug。
+  assert.equal(data.effective.organizeEnabled, false);
   // 新增字符串 / URL / 枚举键
   assert.equal(data.effective.localEmbedModel, "Xenova/bge-small-zh-v1.5");
   assert.equal(data.effective.ollamaBaseUrl, "http://localhost:11434");
