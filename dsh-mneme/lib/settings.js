@@ -185,6 +185,10 @@ const FEATURE_FLAG_BOOLEANS = [
   // 在慢/轻量模型上是多余往返，面板可关（默认关=行为不变）。
   "disableMemorySearch",
   "disableMemoryArchive",
+  // Issue #231 第二批：agent 主动整理（memory_organize 工具）的暴露闸。与上面两个
+  // 反向——那两个藏默认在场的工具，本键开默认不在场的能力（默认关=工具根本不存在，
+  // 行为逐字节不变）。面板可启停=线上回滚开关。
+  "organizeEnabled",
   // 嵌套对象开关：config.js 里是 memoryQualityFilter / llmAudit 对象的 enabled
   // 子字段。kv 按点号键平铺存（"memoryQualityFilter.enabled": false），index.js
   // 合并时展开回嵌套对象，api.js 的 effective 从对象子字段取值。

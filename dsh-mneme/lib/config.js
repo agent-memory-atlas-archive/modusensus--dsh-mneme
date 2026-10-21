@@ -849,6 +849,19 @@ export const Config = z.object({
   disableMemorySearch: z.boolean().default(false),
   disableMemoryArchive: z.boolean().default(false),
 
+  // Issue #231 第二批：agent 主动整理接口（src/organize.js）的**暴露**闸。引擎在
+  // PR #267 就造好了，当时刻意不进工具列表、不加开关（模块头注释：「与 #249 同批
+  // 暴露时只差『注册工具 + 注入指引』一步」），配置面留到这一批再定——就是这里。
+  // 与上面两个 disable* 是**反向**语义：那两个把默认在场的工具藏起来，本键把默认
+  // 不在场的能力开出来。因为 dryRun→apply 是一套两步协议（apply 必须引用真实报告
+  // 的 run_id），让 agent 未经用户同意就能整理记忆，不是「少一次往返」的成本问题，
+  // 而是「谁在改库」的授权问题。
+  // 进 LIGHT_MODE_OFF：两步协议在弱模型上最容易走歪（漏 run_id、或跳过报告直接
+  // apply——那一拒绝就是一次失败的工具调用），而一次 dryRun 的代价是一回嵌入调用
+  // 加按 type 有界扫库。这是预设给的默认值、不是强制：用户显式勾选仍然赢（合并顺序
+  // 「用户开关 > 轻量预设 > bundle」，同 continuityRescueEnabled / distillRecords.enabled）。
+  organizeEnabled: z.boolean().default(false),
+
   // --- scope: v0.8.0 A1 存储层（issue #17）--------------------------------
   // 总开关默认关：关闭时写入不标注 scope、去重维持 (type, title) 现状，行为
   // 逐字节不变。开启后**两条写入路径都自动盖章**（*_scope_source='auto'）：
@@ -966,6 +979,10 @@ const LIGHT_MODE_OFF = [
   "dreamNarrativeEnabled",
   // 轻量模式不开 document 指针行（#230，opt-in：注册/注入/检索增强全随闸）。
   "documentMemoryEnabled",
+  // #231 第二批：轻量档不开 agent 主动整理。理由不是成本而是协议——dryRun→apply
+  // 要求 agent 拿住上一轮的 run_id 再回来，弱模型漏这一环就是一次被拒的调用；
+  // 预设关、不剥夺显式开启的权利（合并顺序同 continuityRescueEnabled）。
+  "organizeEnabled",
   // 轻量模式不开热计算（heat 属于重型增强；关掉后 sleep 降级也退回纯时间分层）。
   "heatEnabled",
   // 轻量模式不开注入前判定（#380：LLM-per-turn 附加路径，每帧注入多一次池级

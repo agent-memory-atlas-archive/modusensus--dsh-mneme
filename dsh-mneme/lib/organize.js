@@ -2,8 +2,10 @@
 // agent 主动整理接口（issue #231，口径基线 = #164 的「第三腿触发」）：dryRun
 // 出比对报告 → agent 判断 → apply 落库；筛除项进归档不删；调用全程留审计回执。
 //
-// 只做功能本体（维护者口径，issue #231）：落在 service 层并带测试，**不进工具
-// 列表、不加独立 opt-in 开关**——#249 到位时只差「注册工具 + 注入指引」一步。
+// 只做功能本体（维护者口径，issue #231）：落在 service 层并带测试。**调用入口在
+// 第二批**（#231：`tools.js` 的 `memory_organize` + `organizeEnabled` 默认关）——
+// 本模块至今不读任何配置键，闸门与 scope 盖章都在调用方那一侧，所以本体语义与
+// 第一批逐字节相同。
 //
 // 独立成模块（AGENTS.md 尺寸约定，同 document.js / recall-stats.js 先例）：
 // service.js 只做依赖注入 + barrel 出口，调用方零改动。

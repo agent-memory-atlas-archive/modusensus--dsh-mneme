@@ -677,6 +677,231 @@ export function createTools(ctx, service, config, embedder) {
       }
     }),
 
+    // #231 第二批：agent 主动整理接口的调用入口。引擎在 src/organize.js（PR #267），
+    // 当时刻意「不进工具列表、不加独立 opt-in 开关——#249 到位时只差注册工具一步」，
+    // 本条就是那一步。工具描述是 agent 侧唯一的协议说明，所以两步规则（apply 必须带
+    // 真实 run_id、筛除=discard 不删任何东西、archive 可恢复）都写在这里：本体已经
+    // 强制了这些，描述的作用是让第一次调用就成功，而不是靠被拒后试错。
+    defineTool({
+      name: "memory_organize",
+      description:
+        "Close out a stretch of work: compare candidate memories against the store first, then land only what you decide to keep. " +
+        "Two steps through one tool. mode=dryRun (default) takes `candidates` and answers one verdict per candidate — exact / near / new — with the " +
+        "matched row when there is one; it writes NO memories, only an audit receipt. mode=apply takes that report's `run_id` plus one decision per " +
+        "candidate (save | discard) and may archive a row the report flagged as superseded (action=archive with that matched id). " +
+        "apply is rejected without a real run_id, and a report can be applied only once: candidates that were never compared cannot be written, and " +
+        "a row the report never matched cannot be archived. Discard keeps a candidate out and deletes nothing; archive is recoverable and never " +
+        "physically removes a row. This tool exists only when organizeEnabled is on (off by default, and off in lightweight mode) — if it is missing " +
+        "from your tool list the user has not enabled it. For a single write use memory_save instead.",
+      parameters: {
+        mode: { type: "string", description: '"dryRun" (default: compare and report, writes nothing) or "apply" (land the decisions of a reported dryRun)' },
+        candidates: {
+          type: "array",
+          // 宿主强制的 JSON Schema 子集要求 object 显式声明 additionalProperties，
+          // 所以候选字段在这里逐键写死：scope **来源**两列（*_scope_source）故意不给
+          // ——那是可信调用层盖的章，不是模型可自选的内容。
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              type: { type: "string", required: true, description: "Memory type (project / preference / constraint / ... ; 'document' is rejected here — it is minted by memory_register_document)" },
+              title: { type: "string", required: true, description: "Short stable title — part of the dedupe key (type + title + scope)" },
+              content: { type: "string", required: true, description: "The body that would be stored" },
+              importance: { type: "integer", description: "1-5 (default 3)" },
+              tags: { type: "array", items: { type: "string" }, description: "Optional tags" },
+              sensitivity: { type: "string", description: "Optional per-candidate sensitivity, overriding the payload-level default" },
+              agent_scope: { type: "string", description: "Optional per-candidate agent scope, overriding the payload-level default" },
+              workspace_scope: { type: "string", description: "Optional per-candidate workspace scope, overriding the payload-level default" }
+            }
+          },
+          description: "dryRun only: candidates to compare (hard cap 50 per call — this is for closing out a work stretch, not bulk import). Candidates missing type/title/content, or of type document, come back in `skipped`."
+        },
+        run_id: { type: "string", description: "apply only: the run_id returned by the dryRun report you are acting on" },
+        decisions: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              action: { type: "string", required: true, enum: ["save", "discard", "archive"], description: 'save writes the candidate at `index` through the normal dedupe path (an existing row with the same key is merged, not duplicated); discard keeps it out and deletes nothing; archive hides the row at `id` (recoverable, and only legal for a row this report matched)' },
+              index: { type: "integer", description: "save | discard: the candidate index from the dryRun report" },
+              id: { type: "string", description: "archive: id of the matched row to archive" }
+            }
+          },
+          description: "apply only: one entry per candidate you judged. Entries whose index the dryRun never accepted are reported in `skipped`."
+        },
+        sensitivity: { type: "string", description: "dryRun only: payload-level default sensitivity label for candidates that do not set their own (also the scope dimension the comparison runs within)" },
+        agent_scope: { type: "string", description: "dryRun only: payload-level default agent scope for candidates that do not set their own. 'global' or '*' widens visibility to every agent; any other value narrows it. Defaults to this session's auto-stamped agent label when scope labeling is on (same rule as memory_save)." },
+        workspace_scope: { type: "string", description: "dryRun only: payload-level default workspace scope for candidates that do not set their own. 'global' or '*' widens visibility to every workspace; any other value narrows it. Defaults to this session's auto-stamped workspace label when scope labeling is on." }
+      },
+      output: {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            // mode 是判别键：两种分支的返回键集不同，渲染与调用方都要靠它分流。
+            mode: { type: "string", required: true, enum: ["dryRun", "apply"] },
+            run_id: { type: "string", required: true },
+            status: { type: "string", required: true },
+            skipped: {
+              type: "array",
+              required: true,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  index: { type: "integer", required: true },
+                  action: { type: "string" },
+                  error: { type: "string", required: true },
+                  ids: { type: "array", items: { type: "string" } }
+                }
+              }
+            },
+            // --- dryRun 分支 ---
+            created_at: { type: "string" },
+            counts: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                total: { type: "integer", required: true },
+                exact: { type: "integer", required: true },
+                near: { type: "integer", required: true },
+                new: { type: "integer", required: true },
+                skipped: { type: "integer", required: true },
+                truncated: { type: "integer", required: true }
+              }
+            },
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  index: { type: "integer", required: true },
+                  type: { type: "string", required: true },
+                  title: { type: "string", required: true },
+                  verdict: { type: "string", required: true, enum: ["exact", "near", "new"] },
+                  // match.sim 只在向量档命中时出现（exact 档无相似度可报）；
+                  // 归档目标必须是报告里出现过的 id，所以这条链接就是 archive 的凭据。
+                  match: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      id: { type: "string", required: true },
+                      title: { type: "string", required: true },
+                      sim: { type: "number" }
+                    }
+                  }
+                }
+              }
+            },
+            // --- apply 分支 ---
+            dry_run_id: { type: "string" },
+            saved: { type: "integer" },
+            merged: { type: "integer" },
+            discarded: { type: "integer" },
+            archived: { type: "integer" },
+            memory_ids: { type: "array", items: { type: "string" } },
+            degraded: { type: "boolean" }
+          }
+        },
+        render: (_args, value) => {
+          if (value.mode === "apply") {
+            return TEXT_OUTPUT(
+              `organize applied (${value.run_id}, report ${value.dry_run_id}): ${value.saved} saved, ${value.merged} merged, ` +
+              `${value.archived} archived, ${value.discarded} discarded${value.skipped.length ? ` | ${value.skipped.length} skipped` : ""}.`
+            );
+          }
+          const c = value.counts;
+          return TEXT_OUTPUT(
+            `organize dryRun ${value.run_id}: ${c.total} compared — ${c.new} new, ${c.exact} exact, ${c.near} near` +
+            `${c.skipped ? `, ${c.skipped} rejected` : ""}${c.truncated ? `, ${c.truncated} over the cap not compared` : ""}. ` +
+            `Nothing was written; pass this run_id with your decisions to memory_organize mode=apply.`
+          );
+        }
+      },
+      async execute(args, exec) {
+        const mode = String(args?.mode ?? "dryRun").trim();
+        const scope = resolveSessionScope(exec);
+        const autoStamping = config?.scopeEnabled === true;
+        // 载荷级缺省与 memory_save 同源：显式参数盖 explicit 章，否则吃会话自动标注
+        // 盖 auto 章。少了这一步，整理接口就成了第二条「写进库却不带 scope」的通道
+        // ——candidates 会全部落在未标注（全局可见）那一档。
+        const agentLabel = args.agent_scope !== undefined
+          ? { value: normalizeExplicitScope(args.agent_scope), source: "explicit" }
+          : autoStamping && scope ? { value: scope.agent_scope, source: "auto" } : null;
+        const workspaceLabel = args.workspace_scope !== undefined
+          ? { value: normalizeExplicitScope(args.workspace_scope), source: "explicit" }
+          : autoStamping && scope ? { value: scope.workspace_scope, source: "auto" } : null;
+        const hiddenIds = [];
+        if (mode === "apply" && config?.strictScope === true && scope && Array.isArray(args.decisions)) {
+          // #170 复核项 4 的口径延伸（register_document 的 hiddenEvidenceIds 同形）：
+          // 他 scope 的 explicit 行按「不存在」处理，由**可信调用层**算好传入，绝不
+          // 取 payload 里的字段——那是调用方可自选的内容，不是授权。少了这一段，
+          // archive 就成了第二条绕过 scope 治理的改库通道。
+          for (const decision of args.decisions) {
+            if (String(decision?.action ?? "").trim() !== "archive") continue;
+            const id = String(decision?.id ?? "").trim();
+            if (!id) continue;
+            const row = service.getById(id);
+            if (row && !service.isVisibleInScope(row, scope)) hiddenIds.push(id);
+          }
+        }
+        const result = await service.organize(
+          {
+            mode,
+            ...(args.candidates !== undefined ? { candidates: args.candidates } : {}),
+            ...(args.run_id !== undefined ? { run_id: args.run_id } : {}),
+            ...(args.decisions !== undefined ? { decisions: args.decisions } : {}),
+            ...(args.sensitivity !== undefined ? { sensitivity: args.sensitivity } : {}),
+            ...(agentLabel ? { agent_scope: agentLabel.value, agent_scope_source: agentLabel.source } : {}),
+            ...(workspaceLabel ? { workspace_scope: workspaceLabel.value, workspace_scope_source: workspaceLabel.source } : {})
+          },
+          { hiddenIds }
+        );
+        if (mode === "apply") {
+          return {
+            mode: "apply",
+            run_id: result.run_id,
+            dry_run_id: result.dry_run_id,
+            status: result.status,
+            saved: result.saved,
+            merged: result.merged,
+            discarded: result.discarded,
+            archived: result.archived,
+            memory_ids: result.memory_ids,
+            skipped: result.skipped,
+            degraded: result.degraded
+          };
+        }
+        return {
+          mode: "dryRun",
+          run_id: result.run_id,
+          created_at: result.created_at,
+          status: result.status,
+          counts: result.counts,
+          // match 为 null（verdict=new）时整键不展开；exact 档没有相似度可报，sim
+          // 同样只在向量命中时出现——声明了却永不出现的键等于死声明。
+          items: result.items.map((item) => ({
+            index: item.index,
+            type: item.type,
+            title: item.title,
+            verdict: item.verdict,
+            ...(item.match
+              ? {
+                  match: {
+                    id: item.match.id,
+                    title: item.match.title,
+                    ...(item.match.sim != null ? { sim: item.match.sim } : {})
+                  }
+                }
+              : {})
+          })),
+          skipped: result.skipped
+        };
+      }
+    }),
+
     // 运行时口子（issue #131 / PR-C）。
     //
     // 为什么要有这个工具：mneme 的取向是「本体保持完善但轻量；重的功能存在、默认不开、不被依赖」。
@@ -805,10 +1030,14 @@ export function createTools(ctx, service, config, embedder) {
   const hiddenTools = new Set();
   if (config?.disableMemorySearch === true) hiddenTools.add("memory_search");
   if (config?.disableMemoryArchive === true) hiddenTools.add("memory_archive");
+  // #231 第二批是**反向**语义：memory_organize 默认不在场，organizeEnabled 打开才
+  // 注册。仍走同一个闸门而不是在数组里条件展开——模型看不到就不会调，这比在描述里
+  // 劝它别用可靠（上面那段 v0.8.5 的定性对两个方向都成立）。
+  if (config?.organizeEnabled !== true) hiddenTools.add("memory_organize");
 
   for (const tool of tools) {
     if (hiddenTools.has(tool.name)) {
-      ctx.logger?.info?.(`[dsh-mneme] tool "${tool.name}" hidden by config (disableMemorySearch/disableMemoryArchive)`);
+      ctx.logger?.info?.(`[dsh-mneme] tool "${tool.name}" hidden by config (disableMemorySearch/disableMemoryArchive/organizeEnabled)`);
       continue;
     }
     if (registeredTools.has(tool.name)) {
