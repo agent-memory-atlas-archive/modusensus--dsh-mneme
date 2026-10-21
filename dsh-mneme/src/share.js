@@ -63,22 +63,28 @@ export function createHomeRedactor(homeDir) {
  * 它的口径是 title+content 的**组合**判定 —— 两侧归一后都不剩字才命中（"blank" 全空、
  * "noise" 只剩标点/空白）。所以标题还有字、正文空白的那条照常进包，这是判据本意，
  * 不是漏网。
+ *
+ * 跳过的分支也返回脱敏后的 title：跳过清单不只在本机看 —— 打包侧把它原样写进
+ * pack.report.skip_list，CLI 再整份打到终端（车道 A3/A7 的口径）。未遮的 title 等于把
+ * 用户名装进这份「设计上不含它」的文件，而泄露面最大的恰恰是不进包的那几条。所以在
+ * 源头遮，每个消费方拿到的都是安全字符串；下游不需要、也不该再各补一刀。遮的仍是
+ * 同一个 redact，本模块只有这一条脱敏路径。
  */
 export function classifyRowForShare(row, { redact = (t) => t } = {}) {
-  if (row?.archived) return { include: false, reason: "archived", title: row?.title };
-  if (row?.forgotten) return { include: false, reason: "forgotten", title: row?.title };
-  if (SHARE_READONLY_TYPES.has(row?.type)) return { include: false, reason: "readonly_type", title: row?.title };
-  if (SHARE_EXCLUDED_TYPES.has(row?.type)) return { include: false, reason: "excluded_type", title: row?.title };
-  if (informationlessReason(row)) return { include: false, reason: "blank_or_noise", title: row?.title };
+  const title = redact(row?.title ?? "");
+  if (row?.archived) return { include: false, reason: "archived", title };
+  if (row?.forgotten) return { include: false, reason: "forgotten", title };
+  if (SHARE_READONLY_TYPES.has(row?.type)) return { include: false, reason: "readonly_type", title };
+  if (SHARE_EXCLUDED_TYPES.has(row?.type)) return { include: false, reason: "excluded_type", title };
+  if (informationlessReason(row)) return { include: false, reason: "blank_or_noise", title };
   // 扫描面用 `scanSensitive` 这个「任意文本」口径的导出，不用带开关的那个工厂面：
   // 工厂在 sensitiveScanEnabled 关时返回 null（sensitive-scan.js:199），而那个键管的是
   // **写入侧**可观测性。分享边界本身就是安全边界（spec §4）——用户没开写入闸门时
   // 恰恰最需要这里照常在扫，跟着开关走等于裸发整库。
   const scanned = scanSensitive([row?.title, row?.content, ...(Array.isArray(row?.tags) ? row.tags : [])]
     .filter((s) => typeof s === "string").join("\n"));
-  if (scanned) return { include: false, reason: "sensitive", title: row?.title };
+  if (scanned) return { include: false, reason: "sensitive", title };
   const content = redact(row?.content ?? "");
-  const title = redact(row?.title ?? "");
   return {
     include: true,
     row: {

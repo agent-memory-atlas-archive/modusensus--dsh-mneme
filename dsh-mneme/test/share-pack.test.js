@@ -3,7 +3,8 @@
 //      scope），多带就是泄露；所以这里锁「不含什么」比锁「含什么」更要紧。
 //   b) 幂等键的派生必须与接收侧重算一致（车道 C 靠它），改一个参数顺序就是破坏
 //      所有已发出去的包。
-//   c) 取行口径：哪些行不进包、以什么原因不进（跳过清单的读数就靠这些字面量）。
+//   c) 取行口径：哪些行不进包、以什么原因不进（跳过清单的读数就靠这些字面量），以及
+//      不进的那几条返回的 title 也已经是遮过 home 的 —— 清单会进包体、会上终端。
 //   d) 分享边界用的是未门控的文本扫描面 —— 换成 config 门控的那个工厂，用户没开
 //      写入闸门就等于裸发整库（静态锁，见最后一条用例）。
 import test from "node:test";
@@ -69,6 +70,28 @@ test("archived, forgotten and out-of-scope types are skipped with a reason", () 
   assert.equal(classifyRowForShare(row({ type: "document" }), {}).reason, "readonly_type");
   assert.equal(classifyRowForShare(row({ type: "summary" }), {}).reason, "excluded_type");
   assert.equal(classifyRowForShare(row(), {}).include, true);
+});
+
+test("a skipped row's title comes back redacted, from here", () => {
+  // 跳过清单不是「只在本地看」的：A3 把 verdict.title 原样写进 pack.report.skip_list，
+  // A7 又把这份清单打到终端。一条标题里带本机 home 前缀的记忆只要不进包，未脱敏的
+  // title 就把用户名装进了那份「设计上不含它」的文件。所以在源头遮，消费方才不必
+  // 各自补第二刀（也才没有「忘了补」这一类回归可犯）。
+  const redact = createHomeRedactor("/fake/home/alex");
+  const leanOn = (over) => classifyRowForShare(row({ title: "/fake/home/alex/退路方案", ...over }), { redact });
+  for (const [over, reason] of [
+    [{ archived: 1 }, "archived"],
+    [{ forgotten: 1 }, "forgotten"],
+    [{ type: "document" }, "readonly_type"],
+    [{ type: "summary" }, "excluded_type"],
+    // sensitive 这一级扫的是未脱敏原文（先扫再遮），遮完的标题仍要安全。
+    [{ content: "key sk-abcdefghijklmnopqrstuvwxyz012345" }, "sensitive"]
+  ]) {
+    const verdict = leanOn(over);
+    assert.equal(verdict.reason, reason);
+    assert.equal(verdict.title, "~/退路方案");
+    assert.ok(!verdict.title.includes("alex"), "leaked home prefix in skip title");
+  }
 });
 
 test("a credential in the body drops the whole row instead of redacting it", () => {
