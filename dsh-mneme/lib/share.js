@@ -30,20 +30,25 @@ export const SHARE_EXCLUDED_TYPES = new Set(["summary"]);
 const withoutNul = (value) => String(value ?? "").replace(/\u0000/g, "");
 
 /**
- * 幂等键：NUL 分隔，防 ("ab","c") 与 ("a","bc") 撞同一键。
+ * 幂等键：`pack_id \0 type \0 title \0 content_hash`，防 ("ab","c") 与 ("a","bc") 撞同一键。
  *
  * 分隔符只保证「字段之间」的切法唯一，所以入参自己的 U+0000 必须先剥掉：不剥的话
  * ("t","a\0b") 与 ("t\0a","b") 拼出同一串字节，对面重算时把这条当成「已经吃过」，
- * 于是该建的行静默不建（串号是幂等表上最难查的那类 bug，没有报错）。
+ * 于是该建的行静默不建（串号是幂等表上最难查的那类 bug，没有报错）。剥完 `"a\0b"` 与
+ * `"ab"` 同键——这与既有的 trim 是同一类归一（丢字节换切法唯一），不是新开的口子。
  * 归一写在这里而不是各调用方：铸造侧（本模块）与重算侧（车道 C）必须共用一份口径，
  * 两份实现各自归一迟早漂。除 U+0000 外不动别的字节，trim 口径照旧 —— 归一规则一变，
  * 已发出去的包里每个 external_id 都对不上。
+ *
+ * 第四格是内容锚，不是装饰：库里的去重键含 `content_hash`（store.js:1233），所以同 type
+ * 同 title、正文不同的两条是两条合法记忆。键里没它时两条铸出同一个 external_id，收侧
+ * 「先查后跳过」把第二条当成已吃过而静默不建，而包里的 `report.included` 已经说了 2 ——
+ * 说谎的是这份账。缺锚的行（store 没算过）与 `null` 都归一成 `""`：JSON 里没有 undefined，
+ * 重算侧只会看到 null，两者不许铸出两个键。
  */
-export function deriveExternalId(packId, type, title) {
-  return createHash("sha256")
-    .update(`${withoutNul(packId)}\u0000${withoutNul(type)}\u0000${withoutNul(title).trim()}`, "utf8")
-    .digest("hex")
-    .slice(0, 16);
+export function deriveExternalId(packId, type, title, contentHash) {
+  const parts = [withoutNul(packId), withoutNul(type), withoutNul(title).trim(), withoutNul(contentHash)];
+  return createHash("sha256").update(parts.join("\u0000"), "utf8").digest("hex").slice(0, 16);
 }
 
 const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -57,8 +62,10 @@ const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * base / 单反斜杠 / 双反斜杠三个固定形态匹配，混合与二次编码照样漏，而「按拼法打补丁」
  * 的失败方式是永远漏下没列到的那一种，漏出来的正是用户名。
  * 大小写不敏感：盘符与用户目录在真实路径里的大小写常常和 homedir() 不一致。
- * 已知代价：段间一个分隔符都没有的写法（`C:Users`）不再命中——那已经不是同一目录的
- * 拼法（Node 与 JSON 都不产它），要命中只能把前缀约束整个拆掉，而那侧错的方向是泄露。
+ * 已知代价：游程要求段间**至少一个**分隔符，所以段间没有分隔符的写法（`C:Users`）不
+ * 命中——上一版按三个固定形态匹配时同样不命中，游程在这一格既没放宽也没收窄。那已经不是
+ * 同一目录的拼法（Node 与 JSON 都不产它），要命中只能把前缀约束整个拆掉，而那侧错的方向
+ * 是泄露。
  */
 export function createHomeRedactor(homeDir) {
   // 尾分隔符先剥：留着它就成了末段空串，拼出的游程把「正文必须带尾分隔符」写进判据，
@@ -127,7 +134,29 @@ export function classifyRowForShare(row, { redact = (t) => t } = {}) {
 }
 
 /**
- * 打包。顺序是刻意的：过滤 → 逐条定性 → 铸 external_id → 序列化 → 量字节。
+ * filters 一个键的形状归一：→「任一命中」的集合，或 null（= 没填，不收窄）。
+ * type 与 tag 共用这一份判据（裁定：两者同形）。三条理由，方向各不同：
+ * - 裸字符串与数组都算收窄。出口把 `--type` / `--tag` 给成串还是数组不由这里决定
+ *   （单旗标给串、重复旗标与面板多选给数组都说得通），只认一种就是把另一种读成「没筛」
+ *   = **放行整库**，而她以为只发了一类。多值取「任一」，与 type 原本用的集合口径一致。
+ * - 空数组与只剩空白的条目算「没填」：清空勾选不等于要一个空包，读成「筛成 0 条」是替
+ *   她说谎。同一次调用不该因为出口给串还是给数组而读出两种结果。
+ * - 认不出的条目（非字符串）留在集合里 → 谁都不匹配 → 收窄到 0 条。这一侧错的方向是
+ *   **少发**，report 与 stdout 当场看得见；「认不出就当没填」才是把整库发出去。
+ */
+function shareFilterSet(value) {
+  if (value === undefined || value === null) return null;
+  const kept = [];
+  for (const item of Array.isArray(value) ? value : [value]) {
+    if (typeof item !== "string") { kept.push(item); continue; }
+    const trimmed = item.trim();
+    if (trimmed) kept.push(trimmed);
+  }
+  return kept.length ? new Set(kept) : null;
+}
+
+/**
+ * 打包。顺序是刻意的：过滤 → 逐条定性 → 用**进包的那对值**铸 external_id → 序列化 → 量字节。
  *
  * 水位量的是**最终序列化字节**，不是条数也不是字符数：这份包要原样当 body POST 回
  * 对面（车道 C），而中文字符数与 UTF-8 字节数差三倍，按字符数判等于把 413 留给对面；
@@ -139,7 +168,9 @@ export function classifyRowForShare(row, { redact = (t) => t } = {}) {
  * 交回，让出口能说出「大了多少、怎么分批」。
  *
  * filters 是分享者的显式收窄，**不进跳过计数也不进清单**：那份账要说的是「本可以发、
- * 因为口径没发」，把她自己筛掉的记进去，读数就把她指向错的那一类。
+ * 因为口径没发」，把她自己筛掉的记进去，读数就把她指向错的那一类。所以两个判据都排在
+ * classifyRowForShare **之前**——这一条顺序是测试锁住的（把过滤挪到定性之后就多说几条
+ * 她没跳过的行），别当成可读性优化来「合并条件」。
  *
  * skip_list 截到 SHARE_SKIP_LIST_MAX，skipped 的六个计数仍走全量——截的是清单不是账。
  * 清单里的 title 用 classifyRowForShare 返回值原样写入：它已在源头遮过 home，这里补
@@ -150,31 +181,28 @@ export function buildSharePack({
   packId = randomBytes(8).toString("hex"), generatedAt = new Date().toISOString()
 } = {}) {
   const redact = createHomeRedactor(homeDir);
-  // 空数组按「没筛」处理：分享者清空勾选不等于要一个空包，两侧出口（面板 / CLI）传下来的
-  // 就是这形态，把它读成「全选」比读成「全不选」更贴近她的意思。
-  // 裸字符串同样当一个类型：`--type` 到这儿是数组还是字符串由出口决定，而这里若只认
-  // 数组，读不懂的那一侧错的方向是**放行整库**——她以为只发了一类，实际全发出去了。
-  // 反过来不做的：多值 tag 的语义（任一 / 全部）spec 没定，这里不替它定，出口要传数组
-  // 就先在出口归一，别在这儿猜。
-  const typeList = Array.isArray(filters.type)
-    ? filters.type
-    : typeof filters.type === "string" && filters.type.trim() ? [filters.type.trim()] : [];
-  const wanted = typeList.length ? new Set(typeList) : null;
-  const tag = typeof filters.tag === "string" && filters.tag.trim() ? filters.tag.trim() : null;
+  const wantedTypes = shareFilterSet(filters.type);
+  const wantedTags = shareFilterSet(filters.tag);
   const skipped = { archived: 0, forgotten: 0, readonly_type: 0, excluded_type: 0, blank_or_noise: 0, sensitive: 0 };
   const skipList = [];
   const memories = [];
   for (const source of Array.isArray(rows) ? rows : []) {
-    if ((wanted && !wanted.has(source?.type)) || (tag && !(Array.isArray(source?.tags) ? source.tags : []).includes(tag))) {
-      continue;
-    }
+    // 两条判据都在定性之前（见上文：筛掉的不是跳过的，一次都不许进那份账）。
+    if (wantedTypes && !wantedTypes.has(source?.type)) continue;
+    if (wantedTags && !(Array.isArray(source?.tags) ? source.tags : []).some((t) => wantedTags.has(t))) continue;
     const verdict = classifyRowForShare(source, { redact });
     if (!verdict.include) {
       skipped[verdict.reason] = (skipped[verdict.reason] ?? 0) + 1;
       if (skipList.length < SHARE_SKIP_LIST_MAX) skipList.push({ title: verdict.title ?? "", reason: verdict.reason });
       continue;
     }
-    memories.push({ external_id: deriveExternalId(packId, verdict.row.type, verdict.row.title), ...verdict.row });
+    // 键的四个入参一律取自 verdict.row，不是 source：收侧是按包内字节重算的（spec §5），
+    // 铸造侧多吃一个遮之前的字节，对面就判成手改包而整包拒绝。内容锚同理——它是发送方
+    // 遮之前的归一化锚（决策 4），但**包里的 content_hash 就是这一个值**，重算吃得准。
+    memories.push({
+      external_id: deriveExternalId(packId, verdict.row.type, verdict.row.title, verdict.row.content_hash),
+      ...verdict.row
+    });
   }
   const pack = {
     kind: SHARE_KIND,

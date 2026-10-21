@@ -3,7 +3,8 @@
 //      scope），多带就是泄露；所以这里锁「不含什么」比锁「含什么」更要紧。row 侧与
 //      pack 侧各钉一条：白名单是逐层收窄的，只锁一层就有一层可以顺手放宽。
 //   b) 幂等键的派生必须与接收侧重算一致（车道 C 靠它），改一个参数顺序就是破坏
-//      所有已发出去的包。
+//      所有已发出去的包。键里有内容锚（第四格），且「用的是进包的那对值」由包自己
+//      证明——拿遮之前的标题去铸，收侧一律判成手改包。
 //   c) 取行口径：哪些行不进包、以什么原因不进（跳过清单的读数就靠这些字面量），以及
 //      不进的那几条返回的 title 也已经是遮过 home 的 —— 清单会进包体、会上终端。
 //   d) 分享边界用的是未门控的文本扫描面 —— 换成 config 门控的那个工厂，用户没开
@@ -11,7 +12,8 @@
 //   e) 打包口径逐条钉死：水位量的是**最终序列化字节**（不是条数也不是字符数——中文差
 //      三倍，按字符数判等于把 413 留给对面）；skip_list 截断后计数仍须是全量（截的是
 //      清单不是账）；filters 是分享者的显式收窄，既不进跳过计数也不进清单（进了就说谎：
-//      她没跳过，是她自己选的），且形状读不懂的 filters 只许当收窄、不许当放行（那侧
+//      她没跳过，是她自己选的），type 与 tag 同形（字符串或数组都算收窄、多值取任一，
+//      空白与空数组才算没填），且形状读不懂的 filters 只许当收窄、不许当放行（那侧
 //      错的方向是把整库发出去）；alias 缺省恒为空串，绝不拿本机身份猜一个填上——那是
 //      这份格式里唯一一处会替人自报家的字段。
 import test from "node:test";
@@ -25,16 +27,18 @@ test("pack kind is the versioned literal the receiver keys on", () => {
   assert.equal(SHARE_KIND, "mneme.share/v1");
 });
 
-test("external_id is 16 hex chars and stable per (pack, type, title)", () => {
-  const a = deriveExternalId("abcdef0123456789", "decision", "选 SQLite");
+test("external_id is 16 hex chars and stable per (pack, type, title, content anchor)", () => {
+  const a = deriveExternalId("abcdef0123456789", "decision", "选 SQLite", "9f2c0b1a");
   assert.match(a, /^[0-9a-f]{16}$/);
-  assert.equal(a, deriveExternalId("abcdef0123456789", "decision", "选 SQLite"));
+  assert.equal(a, deriveExternalId("abcdef0123456789", "decision", "选 SQLite", "9f2c0b1a"));
 });
 
 test("external_id separates fields with NUL so concatenation cannot collide", () => {
   // 无分隔拼接时 ("ab","c") 与 ("a","bc") 同键 —— 这类碰撞在幂等表上就是静默串号。
-  assert.notEqual(deriveExternalId("p", "ab", "c"), deriveExternalId("p", "a", "bc"));
-  assert.notEqual(deriveExternalId("p1", "t", "x"), deriveExternalId("p2", "t", "x"));
+  assert.notEqual(deriveExternalId("p", "ab", "c", "h"), deriveExternalId("p", "a", "bc", "h"));
+  assert.notEqual(deriveExternalId("p1", "t", "x", "h"), deriveExternalId("p2", "t", "x", "h"));
+  // 第四格也吃同一套切法：("x","h") 与 ("xh","") 不许同键。
+  assert.notEqual(deriveExternalId("p", "t", "x", "h"), deriveExternalId("p", "t", "xh", ""));
 });
 
 test("external_id strips NUL out of the fields themselves", () => {
@@ -42,10 +46,23 @@ test("external_id strips NUL out of the fields themselves", () => {
   // ("t","a\\0b") 与 ("t\\0a","b") 拼出同一串。接收侧（车道 C）按包内字节重算的就是
   // 这一串，所以两个键相等的后果是「这条已被吃过」——该建的行静默不建。
   // 归一放在 deriveExternalId 内部而不是调用方：铸造与重算必须共用一个口径。
-  assert.notEqual(deriveExternalId("p", "t", "a\u0000b"), deriveExternalId("p", "t\u0000a", "b"));
-  assert.notEqual(deriveExternalId("p\u0000a", "t", "x"), deriveExternalId("p", "a\u0000t", "x"));
+  assert.notEqual(deriveExternalId("p", "t", "a\u0000b", "h"), deriveExternalId("p", "t\u0000a", "b", "h"));
+  assert.notEqual(deriveExternalId("p\u0000a", "t", "x", "h"), deriveExternalId("p", "a\u0000t", "x", "h"));
+  assert.notEqual(deriveExternalId("p", "t", "x", "a\u0000b"), deriveExternalId("p", "t", "x\u0000a", "b"));
   // 剥的只有 U+0000：trim 的空白口径不许跟着变，否则已发出去的键会全体漂移。
-  assert.equal(deriveExternalId("p", "t", " x "), deriveExternalId("p", "t", "x"));
+  assert.equal(deriveExternalId("p", "t", " x ", "h"), deriveExternalId("p", "t", "x", "h"));
+});
+
+test("the content anchor is part of the key, and a missing one normalizes stably", () => {
+  // 同 type 同 title、正文不同的两条在库里是两条合法记忆（去重键含 content_hash，
+  // store.js:1233）。键不含内容锚时这两条铸出同一个 external_id，收侧的先查后跳过
+  // 会漏掉第二条，而 report.included 已经说了 2。
+  assert.notEqual(deriveExternalId("p", "t", "x", "hash-one"), deriveExternalId("p", "t", "x", "hash-two"));
+  assert.notEqual(deriveExternalId("p", "t", "x", "hash-one"), deriveExternalId("p", "t", "x", ""));
+  // 缺锚（store 没算过 content_hash 的行）也要一个稳定值：JSON 里没有 undefined，
+  // 收侧只会看到 null，两者不许铸出两个键。
+  assert.equal(deriveExternalId("p", "t", "x"), deriveExternalId("p", "t", "x", null));
+  assert.equal(deriveExternalId("p", "t", "x", undefined), deriveExternalId("p", "t", "x", ""));
 });
 
 const row = (over = {}) => ({
@@ -219,6 +236,50 @@ test("pack carries the whitelist and nothing else", () => {
   assert.match(m.external_id, /^[0-9a-f]{16}$/);
 });
 
+test("external_id recomputes from the fields that actually ship in the pack", () => {
+  // 收侧是按**包内字节**重算这把键的（spec §5），所以「键是从进包的那对值铸的」必须由
+  // 包自己证明：拿遮之前的标题、或任何与包内不一致的正文/锚去铸，收侧一律判成手改包而
+  // 整包拒绝。这一条不锁任何计数，只锁「铸造侧与包体侧是同一份值」。
+  const rows = [
+    row({ title: "/fake/home/alex/退路方案", content: "落点 /fake/home/alex/docs/a.md", content_hash: "cafebabe00000000" }),
+    row({ type: "history", title: "plain", content: "c", content_hash: null }),
+    row({ type: "pattern", title: "同一个标题", content: "一", content_hash: "aaaa0000" }),
+    row({ type: "pattern", title: "同一个标题", content: "二", content_hash: "bbbb0000" })
+  ];
+  const { pack } = packInput(rows);
+  assert.equal(pack.report.included, 4);
+  for (const m of pack.memories) {
+    assert.equal(
+      m.external_id,
+      deriveExternalId(pack.pack_id, m.type, m.title, m.content_hash),
+      `external_id is not recomputable for "${m.title}"`
+    );
+  }
+  // 遮过的标题才是包里那个标题：锁「没拿遮之前的串去铸键」。
+  assert.notEqual(
+    pack.memories[0].external_id,
+    deriveExternalId(pack.pack_id, "decision", "/fake/home/alex/退路方案", "cafebabe00000000")
+  );
+});
+
+test("two rows sharing type and title still ship two distinct ids", () => {
+  // 库里的去重键是 (type, content_hash, agent_scope, workspace_scope, sensitivity)
+  // （store.js:1233），所以同 type、同 title、正文不同的两条是两条合法记忆。键里没有
+  // 内容锚时它们铸出同一个 external_id：收侧「先查后跳过」把第二条当成已吃过而静默不建，
+  // 而 report.included 已经说了 2 —— 包里的账与包里的内容对不上，说谎的是我们。
+  const rows = [
+    row({ title: "同一个标题", content: "正文一", content_hash: "hash-one" }),
+    row({ title: "同一个标题", content: "正文二", content_hash: "hash-two" })
+  ];
+  const { pack } = packInput(rows);
+  assert.equal(pack.report.included, 2);
+  assert.equal(new Set(pack.memories.map((m) => m.external_id)).size, 2);
+  assert.deepEqual(
+    pack.memories.map((m) => deriveExternalId(pack.pack_id, m.type, m.title, m.content_hash)),
+    pack.memories.map((m) => m.external_id)
+  );
+});
+
 test("report counts every skip reason and caps the list it shows", () => {
   const rows = [
     row({ type: "decision", title: "keep" }),
@@ -264,6 +325,57 @@ test("filters narrow what goes in without touching the reason counters", () => {
   assert.equal(byTagMiss.pack.report.included, 0);
 });
 
+test("filters.tag given as an array narrows, exactly like type does", () => {
+  // 重复的 `--tag` 是 CLI 最自然的形状（`--tag a --tag b` → ["a","b"]）。只认裸字符串时
+  // 这一串读成「没填」= 整库通过 tag 检查 —— 与 type 那一格是同一个洞，错的方向同样是
+  // 多发。裁定：tag 与 type 同形，字符串或数组都算收窄，多值取「任一」（与 type 的集合
+  // 口径一致），空白与空数组才算没填。
+  const rows = [
+    row({ title: "a", tags: ["keep"] }),
+    row({ title: "b", tags: ["other"] }),
+    row({ title: "c", tags: ["keep", "later"] }),
+    row({ title: "d" })
+  ];
+  const one = packInput(rows, { filters: { tag: ["keep"] } });
+  assert.equal(one.pack.report.included, 2);
+  assert.deepEqual(one.pack.memories.map((m) => m.title), ["a", "c"]);
+  const both = packInput(rows, { filters: { tag: ["keep", "other"] } });
+  assert.equal(both.pack.report.included, 3);
+  const miss = packInput(rows, { filters: { tag: ["zzz"] } });
+  assert.equal(miss.pack.report.included, 0);
+  assert.deepEqual(miss.pack.report.skip_list, []);
+  // 裸字符串仍是收窄（上一格的原口径，不许因为加了数组就把串读回「没填」）。
+  assert.equal(packInput(rows, { filters: { tag: "keep" } }).pack.report.included, 2);
+});
+
+test("a row the filter removes never reaches the classification step", () => {
+  // 后三条在口径上本来就必被跳过（archived / forgotten / document 只读 / summary 排除），
+  // 同时又 type 筛掉。谁把过滤挪到 classifyRowForShare 之后，这里就会冒出 archived:1
+  // 之类的读数，并把她亲手筛掉的行打进跳过清单 —— 那份账要说的是「本可以发、因为口径
+  // 没发」，混进「她自己没选」就是说谎。
+  const rows = [
+    row({ type: "decision", title: "keep" }),
+    row({ type: "preference", title: "/fake/home/alex/已归档", archived: 1 }),
+    row({ type: "history", title: "已遗忘", forgotten: 1 }),
+    row({ type: "document", title: "指针行" }),
+    row({ type: "summary", title: "总览" })
+  ];
+  const ALL_ZERO = {
+    archived: 0, forgotten: 0, readonly_type: 0, excluded_type: 0, blank_or_noise: 0, sensitive: 0
+  };
+  const { pack } = packInput(rows, { filters: { type: ["decision"] } });
+  assert.equal(pack.report.included, 1);
+  assert.deepEqual(pack.report.skipped, ALL_ZERO);
+  assert.deepEqual(pack.report.skip_list, []);
+  // tag 那一侧同理：被筛掉的行也不许进账。
+  const tagged = packInput(
+    [row({ title: "keep", tags: ["keep"] }), row({ title: "gone", tags: ["other"], archived: 1 })],
+    { filters: { tag: ["keep"] } }
+  );
+  assert.deepEqual(tagged.pack.report.skipped, ALL_ZERO);
+  assert.deepEqual(tagged.pack.report.skip_list, []);
+});
+
 test("a filter shape this function can't read never widens to the whole library", () => {
   // 出口把 `--type` 传成数组还是裸字符串不由这里决定（CLI 一个旗标给字符串、面板多选给
   // 数组都说得通）。能决定的是：读得懂的收窄意图不许因为形状不对就当「没筛」——那侧
@@ -275,6 +387,14 @@ test("a filter shape this function can't read never widens to the whole library"
   // 反过来，「填了但只剩空白」是**没填**，与空数组同口径：读成筛成空包才是说谎。
   assert.equal(packInput(rows, { filters: { type: "  ", tag: "" } }).pack.report.included, 2);
   assert.equal(packInput(rows, { filters: { type: [], tag: "   " } }).pack.report.included, 2);
+  // 同一条规则要覆盖数组里的空白：一次 CLI 调用不该因为出口给串还是给数组而读出两种结果。
+  assert.equal(packInput(rows, { filters: { type: ["", "  "], tag: [""] } }).pack.report.included, 2);
+  // 两侧同形之后条目还须各自归一：`--type " decision "` 是同一个类型，不是「谁都不匹配」。
+  assert.equal(packInput(rows, { filters: { type: [" decision ", ""] } }).pack.report.included, 1);
+  // 字符串以外的标量（面板串错字段、body 写错类型）留在集合里 → 收窄到 0 条。这一侧错的
+  // 方向是少发，report 与 stdout 都看得见；「认不出就当没填」才是把整库发出去。
+  assert.equal(packInput(rows, { filters: { type: 123 } }).pack.report.included, 0);
+  assert.equal(packInput(rows, { filters: { tag: { 0: "keep" } } }).pack.report.included, 0);
 });
 
 test("alias defaults to the neutral label, never to a guessed identity", () => {
