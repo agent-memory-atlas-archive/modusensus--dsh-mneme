@@ -17,10 +17,16 @@ const SHARE_ERROR_HINT = "包体超过分享水位：用 --type 或 --tag 分批
  * 发成数组/null 是两个不同的错码（前者是调用方发坏了，后者是发错了顶层形状），
  * 与 reclaim 侧同款，出口要能分支。
  *
- * 只认这四个键，多余的键丢掉：面板与 CLI 各写各的选项时，静默接受一个拼错的键等于
+ * 只认这三个键，多余的键丢掉：面板与 CLI 各写各的选项时，静默接受一个拼错的键等于
  * 让她以为筛过了。
  *
- * @returns {{ok: true, options: {alias?: string, type?: unknown, tag?: unknown, dryRun?: true}}
+ * 这里**没有** dryRun：share 是纯读、不改库，spec §4 明确它不套 reclaim 的
+ * dry-run/confirm 纪律，干跑由 CLI 侧的 `--dry-run` 决定（它压根不发这个键）。上一版
+ * 把它「登记但不参与答复构造」留着，等于凭空多出一个没人消费的公开字段：今天发
+ * `dryRun: true` 的人拿到的是真包，而哪天要给它真语义、或把它删掉，两侧都是破坏性改动。
+ * 删掉后它和别的多余键走同一条规则——丢掉，不再是一个特例。
+ *
+ * @returns {{ok: true, options: {alias?: string, type?: unknown, tag?: unknown}}
  *           | {ok: false, error: string}}
  */
 export function parseShareBody(text) {
@@ -40,9 +46,6 @@ export function parseShareBody(text) {
   // 面上把那条洞反着挖开——她以为只发了一类，实际整库进包，而 report 看不出异样。
   if (body.type !== undefined && body.type !== null) options.type = body.type;
   if (body.tag !== undefined && body.tag !== null) options.tag = body.tag;
-  // share 是纯读、不改库，spec §4 明确它不套 reclaim 的 dry-run/confirm 纪律；这个键
-  // 目前只登记不参与答复构造（干跑由 CLI 侧的 --dry-run 决定：不发 body 里的它也一样）。
-  if (body.dryRun === true) options.dryRun = true;
   return { ok: true, options };
 }
 

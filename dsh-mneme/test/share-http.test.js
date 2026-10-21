@@ -32,6 +32,10 @@ test("unknown option keys are dropped, not silently accepted", () => {
   const parsed = parseShareBody(JSON.stringify({ alias: "桉", type: ["decision"], color: "red" }));
   assert.equal(parsed.ok, true);
   assert.ok(!("color" in parsed.options));
+  // dryRun 单列一条：它曾经是「登记但不参与答复构造」的键（照 reclaim 形状抄来的），
+  // 后来删掉——share 纯读、不改库，干跑归 CLI 侧的 --dry-run，服务端没人消费它。留这
+  // 一条是挡住「为了兼容把它加回来」的那次提交：发它的客户端拿到的是真包，不是干跑报告。
+  assert.ok(!("dryRun" in parseShareBody(JSON.stringify({ dryRun: true })).options));
 });
 
 test("reply returns the pack body with kind and disposition-ready filename", () => {
