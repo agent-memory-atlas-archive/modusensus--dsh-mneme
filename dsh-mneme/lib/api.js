@@ -1,6 +1,7 @@
 import { URL } from "node:url";
 import { isAbsolute } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { timingSafeEqual, randomBytes } from "node:crypto";
 import { FEATURE_FLAG_SPEC } from "./settings.js";
 import { TYPES } from "./store.js";
@@ -13,6 +14,7 @@ import { describeLocalRuntime, publicRuntimeStatus } from "./runtime/loader.js";
 import { hostModulesDir, provisionRuntime } from "./runtime/provision.js";
 import { classify, fetchLatestVersion, PACKAGE_VERSION } from "./version-check.js";
 import { parseReclaimQuery, parseReclaimJson, readReclaimFields, reclaimReply, RECLAIM_UNAVAILABLE } from "./reclaim-http.js";
+import { parseShareBody, shareReply, shareFilename } from "./share-http.js";
 import { readPipelineDoc, loadPipelines, projectPipelineDir } from "./pipeline.js";
 import { loadRunsById, runsDir, RUNS_SUFFIX } from "./pipeline-runs.js";
 import { observationDir, loadObservationsById } from "./pipeline-observations.js";
@@ -1455,6 +1457,52 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
         const included = Object.values(byType).flat();
         const docHeader = renderFileHeader("memory-export", included, "all");
         sendAttachment(res, 200, "text/markdown; charset=utf-8", `dsh-mneme-export-${stamp}.md`, docHeader + sections.join("\n"));
+      } catch {
+        sendJson(res, 500, { error: "internal" });
+      }
+    }
+  });
+
+  // --- 分享包（spec §4）------------------------------------------------------
+  // 读侧全库口径，鉴权与 /export 同门（token）：它导出的是**脱敏后**的行集，但
+  // 「谁在往外打整库」这件事本身就需要跟写路由一样登记在册。
+  // GET 不开口子：这条路由的存在感来自「有人主动按分享键」，不是给面板轮询用的。
+  // 判据一条都不在这里：哪些行进包、超没超限、抛错回什么码，全在 share-http.js 那份
+  // 共用实现里（#411 的口径——两张皮只许剩鉴权与路径不同）。本侧独有的只有两件事：
+  // Content-Disposition（sendJson 的 headers 第四参，数据面没有这个签名）和把
+  // shareReply 的 warn 接到宿主 logger 上——它兜住抛错回 500，不接日志就是静默失败。
+  register({
+    kind: "exact",
+    path: "/api/dsh-mneme/share",
+    policy: "token",
+    handler(req, res) {
+      try {
+        if (req.method !== "POST") {
+          sendJson(res, 405, { error: "method-not-allowed" });
+          return;
+        }
+        return readBody(req, res).then((text) => {
+          if (text === null) return; // readBody 已经答过 413，再写一次就是双写响应
+          const parsed = parseShareBody(text);
+          if (!parsed.ok) {
+            sendJson(res, 400, { error: parsed.error });
+            return;
+          }
+          const out = shareReply({
+            service,
+            packageVersion: PACKAGE_VERSION,
+            homeDir: homedir(),
+            options: parsed.options,
+            warn: (msg) => ctx.logger?.warn?.(msg)
+          });
+          if (out.status === 200) {
+            sendJson(res, 200, out.body, {
+              "Content-Disposition": `attachment; filename="${shareFilename(out.body.pack_id)}"`
+            });
+            return;
+          }
+          sendJson(res, out.status, out.body);
+        });
       } catch {
         sendJson(res, 500, { error: "internal" });
       }
