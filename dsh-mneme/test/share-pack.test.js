@@ -59,6 +59,23 @@ test("a windows homedir is redacted however the body spells it", () => {
   assert.equal(redact("C:/Users/alexandra/x"), "~andra/x");
 });
 
+test("the JSON-escaped spelling of a windows home is redacted too", () => {
+  // 正文里用 JSON 或引号包一段 Windows 路径时，落库的字节是双反斜杠（`C:\\Users\\alex`）。
+  // 它既不是 base 也不是那两个单分隔符形态，两边都不匹配 —— 于是用户名原样进包，而
+  // 这份包的设计前提正是不含它。漏的这一类跟「只补一个方向」是同一类错：判据按一种
+  // 拼法写，现实里同一目录有三种拼法。
+  const redact = createHomeRedactor("C:\\Users\\alex");
+  assert.equal(redact('{"path": "C:\\\\Users\\\\alex\\\\notes.md"}'), '{"path": "~/\\notes.md"}');
+  assert.equal(redact("read C:\\\\Users\\\\alex"), "read ~");
+  // 已知取舍（同上条）：折掉的仍是「前缀 + 紧跟的一个分隔符」，多出来那个反斜杠按原样
+  // 留着——不改写用户写下的其余字节。这一条锁的是「不泄露」，不是「输出好看」。
+  assert.ok(!redact("C:\\\\Users\\\\alex\\\\secrets").includes("alex"), "escaped home prefix leaked");
+  // 泄露的是进包的那条路径，所以在进包口径上也钉一次：同一个 redact，不补第二刀。
+  const shipped = classifyRowForShare(row({ content: '{"p": "C:\\\\Users\\\\alex\\\\a.md"}' }), { redact });
+  assert.equal(shipped.include, true);
+  assert.ok(!JSON.stringify(shipped.row).includes("alex"), "escaped home prefix shipped in the pack");
+});
+
 test("an empty or weird homedir never turns content into mangled text", () => {
   const redact = createHomeRedactor("");
   assert.equal(redact("keep this"), "keep this");

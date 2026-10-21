@@ -38,16 +38,21 @@ export function deriveExternalId(packId, type, title) {
 const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
- * 把正文里的本机 home 前缀换成 `~`。两个形态都要替：Windows 上同一目录既能写成
- * 反斜杠也能写成正斜杠（Node 两边都收），只替一种等于漏一半——漏掉的那一半就是
- * 用户名。大小写不敏感：盘符与用户目录在真实路径里的大小写常常和 homedir() 不一致。
+ * 把正文里的本机 home 前缀换成 `~`。三种拼法都要替：Windows 上同一目录既能写成
+ * 反斜杠也能写成正斜杠（Node 两边都收，模型两种都输出），而正文里用 JSON 或引号
+ * 包一段路径时落库的是双反斜杠。少替一种就漏一整类，而漏出来的正是用户名。
+ * 大小写不敏感：盘符与用户目录在真实路径里的大小写常常和 homedir() 不一致。
  */
 export function createHomeRedactor(homeDir) {
   const base = typeof homeDir === "string" ? homeDir.trim() : "";
   if (base.length < 2) return (text) => String(text ?? "");
   // 正反两个方向都展开（不是只从 base 派生反斜杠那一半）：homedir() 给的是
   // `C:\Users\alex`，而正文里同一目录常被写成 `C:/Users/alex`，只补一个方向就漏那个方向。
-  const forms = [...new Set([base, base.replace(/[\\/]/g, "\\"), base.replace(/[\\/]/g, "/")])];
+  // 第三形态是「被引用过的 Windows 路径」（JSON 里存成 `C:\\Users\\alex`）：它跟前两形态
+  // 逐字节都不同，两边都不匹配，而代码片段与转义后的正文恰恰是最常出现路径的地方。
+  const forms = [
+    ...new Set([base, base.replace(/[\\/]/g, "\\"), base.replace(/[\\/]/g, "/"), base.replace(/[\\/]/g, "\\\\")])
+  ];
   const re = new RegExp(`(?:${forms.map(reEsc).join("|")})[\\\\/]?`, "gi");
   // 折掉的只有「前缀 + 紧跟着的那一个分隔符」，输出统一成读者与对面 agent 都认的 `~/`；
   // 后面的路径按原样留着——改写用户写下的字节是另一类事故。前缀落在句尾时不补分隔符。
@@ -96,8 +101,13 @@ export function classifyRowForShare(row, { redact = (t) => t } = {}) {
       epistemic_status: row.epistemic_status ?? "subjective",
       created_at: row.created_at ?? null,
       updated_at: row.updated_at ?? null,
-      // 对面入库时 store 会按自己的口径重算 content_hash（store.js:1160），这份只是
-      // 包内的自证：让接收侧能核对「正文没在路上被改」。
+      // 这一条是**发送方库里的内容锚**，原样带过去只作引用，不是完整性凭证，别拿它
+      // 校验「正文没在路上被改」（车道 C 注意）。两处对不上：① 它由 store 从**未脱敏**
+      // 的 title/content 派生（store.js:1160 → contentHashOf，content-hash.js:49-53），
+      // 而包里的 content/title 是遮过的——所以只要 home 遮过一次，两者就必然不一致，
+      // 恰恰是遮过的那几条对不上；② 它算的是归一化后的文本（NFKC → 小写 → 去标点 →
+      // 空白折叠），对面按收到的字节重算 sha256 本来就得不到同一个值。真要做传输完整性
+      // 校验，得对遮后的字节另派一把新字段，不是复用这一把。
       content_hash: row.content_hash ?? null
     }
   };
