@@ -66,3 +66,41 @@ test("隐私节必须写出「巩固与摘要走宿主模型」这个出站事�
     "English Privacy section should disclose that consolidation uses the host model",
   );
 });
+
+// 「模型工具」表是代码的投影，不是愿望清单（AGENTS.md 给 SECURITY.md 定的那条规矩，
+// 这张表一直没有）。它已经跑偏两次：#471 加 set_scope_state、#231 加 memory_organize，
+// 两次都没人回头改表或改那个数字——因为没人核过。所以这里全部**从代码反推**：
+// 工具集从 tools.js 的 name: "…" 取，opt-in 从 hiddenTools 的 `!== true` 判据取
+// （`=== true` 那种是「默认在、用户可关」，不能算进 opt-in，否则默认注册数会算少）。
+test("包 README 的「模型工具」表与 tools.js 注册表一致", () => {
+  const toolsSrc = readFileSync(path.join(pkgRoot, "src/tools.js"), "utf8");
+  const declared = [...toolsSrc.matchAll(/^ {6}name: "((?:memory_|set_scope)[a-z_]*)",/gm)].map((m) => m[1]);
+  assert.ok(declared.length >= 10, `tools.js 的工具名解析失败（只看到 ${declared.length} 个）——先修这条守卫，别改表`);
+  const optIn = [...toolsSrc.matchAll(/if \(config\?\.(\w+) !== true\) hiddenTools\.add\("([a-z_]+)"\)/g)]
+    .map((m) => ({ key: m[1], tool: m[2] }));
+  const defaultCount = declared.length - optIn.length;
+
+  const heading = pkgReadme.match(/^### 模型工具（([^）]*)）$/m);
+  assert.ok(heading, "包 README 应有「### 模型工具（N 个）」这一节标题（标题格式变了就同步改这条守卫）");
+  const bodyStart = pkgReadme.indexOf(heading[0]);
+  const bodyRest = pkgReadme.slice(bodyStart + heading[0].length);
+  const nextSection = bodyRest.search(/\r?\n#{2,3} /);
+  const body = nextSection === -1 ? bodyRest : bodyRest.slice(0, nextSection);
+  const rows = [...body.matchAll(/^\| `([a-z_]+)` \|/gm)].map((m) => m[1]);
+
+  assert.deepEqual(
+    [...new Set(declared)].sort(),
+    [...new Set(rows)].sort(),
+    "表与注册表必须一一对应：少了是漏文档，多了是文档写了不存在的东西"
+  );
+  assert.equal(rows.length, new Set(rows).size, "表里不许有重复行（重复行会让数量核对失效）");
+  for (const n of [defaultCount, declared.length]) {
+    assert.ok(heading[1].includes(String(n)), `标题里的数字要含 ${n}（opt-in 工具默认不注册，两个数都要对得上）`);
+  }
+  // opt-in 工具那一行必须点名它的开关：读者看到表里有它，得知道默认是不出现的。
+  for (const { key, tool } of optIn) {
+    const row = body.match(new RegExp(`^\\| \`${tool}\` \\|(.*)$`, "m"));
+    assert.ok(row, `${tool} 必须在表里`);
+    assert.ok(row[1].includes(key), `${tool} 那行要写明它需要 ${key} 才注册`);
+  }
+});

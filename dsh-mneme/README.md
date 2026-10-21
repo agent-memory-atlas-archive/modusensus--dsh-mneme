@@ -49,7 +49,8 @@ dsh web
   - 逐 type 记录 `committed / failed / pending` 回执，健康端点区分 `ok / degraded / unknown`
   - 状态写失败不静默：同步失败落日志并留债务，重启自动收敛
 
-### 模型工具（10 个）
+### 模型工具（默认注册 11 个；开 `organizeEnabled` 后 12 个）
+
 
 | 工具 | 功能 |
 |------|------|
@@ -61,7 +62,9 @@ dsh web
 | `memory_delete` | 删除记忆（按记忆 ID 精确删除） |
 | `memory_forget` | 抑制注入（降权不删除，可恢复） |
 | `memory_archive` | 归档/恢复记忆（v0.2.5；归档后隐藏于列表/搜索/注入/整理，`archived=false` 可恢复） |
+| `set_scope_state` | 按下/松开某个作用域的**可逆闸门**（#471：政策轴。暂停期间该作用域的记忆照旧存着，只是不注入、不参与巩固，松开即原样回来；不改任何一条记忆的标注，与上面逐条操作的 `memory_forget` / `memory_archive` 是两根不同的轴）。两级开关 `scopeState.enabled` / `.enforce` 默认都关，没开时按下不产生拦截效果 |
 | `memory_register_document` | 登记 agent 产长文档的指针行（#230：摘要 + `doc_path` + evidence 落 `document` 类型；正文留在磁盘、由 agent 自管，注册口唯一，旁路写入被拒） |
+| `memory_organize` | 主动整理（#231，**要 `organizeEnabled` 打开才注册**）：`mode=dryRun` 先出比对报告（每条候选 `exact` / `near` / `new` + 命中行，**不写一行库**、只留审计回执），agent 判断后 `mode=apply` 引用那份报告的 `run_id` 落地。两种「不要它」要分清——**`discard`** = 这条候选不写，什么都不动（只进回执）；**`archive`** = 把报告标为被取代的那条**既有行**归档（可恢复，绝不物理删除）。没有比对过的候选写不进库，一份报告也只许落地一次 |
 | `memory_runtime` | 本地推理运行时的状态 / 供给 / 校验（v0.7.32，自管运行时三档取件） |
 
 ### 工作流（M.O.，v0.9 beta）
