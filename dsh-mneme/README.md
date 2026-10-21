@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/@modusensus/dsh-mneme?color=blue&label=npm)](https://www.npmjs.com/package/@modusensus/dsh-mneme)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Awesome](https://awesome-dsh-plugin.com/badge.svg)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
-[![tests](https://img.shields.io/badge/tests-2257%20passed-success)](https://github.com/slow-stack/mneme)
+[![tests](https://img.shields.io/badge/tests-2302%20passed-success)](https://github.com/slow-stack/mneme)
 [![CI](https://img.shields.io/github/actions/workflow/status/slow-stack/mneme/ci.yml)](https://github.com/slow-stack/mneme/actions)
 [![node](https://img.shields.io/badge/node-22%2B-blue)](https://nodejs.org)
 [![npm downloads](https://img.shields.io/npm/d18m/@modusensus/dsh-mneme.svg?color=blue&label=downloads)](https://www.npmjs.com/package/@modusensus/dsh-mneme)
@@ -275,6 +275,7 @@ v0.3.0 起新增**记忆基因**层：从记忆里抽取**命名实体**、**带
 | **v0.9.1**（2026-10-18） | M.O. 从「看得见」跑到「跑得出账」：执行窗口由 `/mo-run start` / `/mo-run stop` 显式划开、运行账落 `<项目>/.mneme/pipelines/<id>.runs.jsonl`（账本坏了与从没跑过严格分开）、归属只出候选、观察旁挂与脱节检出、步骤 `assert` / `optional`、R1/R2 提议；沉淀链从真实会话日志挖 draft 工作流（判据恒 `null`，答案只能由人补）；人格定义页 v1 → v1.2（按 agent 寻址多卡，默认关）；面板、向量与检查更新的一圈修复（#448 / #450 / #460）；Release 正文改分层渲染 |
 | **v0.9.2**（2026-10-19） | 让「看不见的失败」显形：功能开关的第三态「待重启」把「面板显示已改 ≠ 运行时已改」摆到界面上（#481）；作用域级可逆闸门让一路记忆能被单独按下与松开、不必改配置重启（#471，默认关）；巩固用的 `dreamMaxTokens` 默认值撞服务商上限、八天 180 次全失败，面板现在能改、超上限还会自动降级重试（#478）；CLI 把 `--` 开头的值当新旗标的真实缺陷（一次 1/4096 概率的 CI 红揪出来的）、人格卡删除 × 永远不可见、自动蒸馏写入的行 100% 拿不到向量（#477） |
 | **v0.9.3**（2026-10-20） | M.O. 从「挖得出来」到「会被叫去挖」：沉淀链算法自 v0.9.1 起就完整实现（多帧 zstd → 重复序列 → 缺席对照 → draft 草稿），运行时却没有任何调用点——机器挖得出来、却永远不会被叫去挖。这一版把归属与触发接上：按会话头 `cwd` 反查项目桶（桶名是路径的有损变形，查不到整跑跳过而不是降级成全局普查）、挂 `turn/end`、冷却 10 分钟、单次预算 4 秒、延到宏任务、一次一个项目、抛错只 `warn`，**只产提议不产草稿**（`actionNudgeEnabled`，beta，默认关）；面板加「现在沉淀一次」，与自动跑同一条入口，区别只有它不改仓库；另修作用域反查自 v0.8.0 起每次都抛错走降级（#487）、`/nudge` 三处「没看全」被报成「确实没有」（#489 评审）、多帧 zstd 反证断言绑了 Node 整块解语义（#490），并把整个 M.O. 的「手法」改回「工作流」 |
+| **v0.9.4**（2026-10-21） | （待填） |
 | **v0.8.x** | 作用域隔离（agent / workspace 双维 + opt-in 硬过滤）、冲突队列人工裁决、生态化（stdio MCP server / 图召回轴 / 冷启动 / 注入截断） |
 
 ## 📦 安装
@@ -677,7 +678,7 @@ src/
 ├── api.js            # HTTP 路由（Web 面板数据通道，含 /conflicts 冲突队列）
 └── index.js          # 插件接线
 lib/                  # src 的同步分发产物（npm run sync，prepack 钩子在发布时自动跑；一致性由 scripts/check-sync.js 在 CI 与 release.yml 校验——它只查不同步；唯一手写例外 lib/client.js——Web 面板 bundle，sync 不覆盖）
-test/                 # 2257 个 node:test 测试（审计与三轴线压测不变量；src↔lib 一致性由 scripts/check-sync.js 发布闸门校验）
+test/                 # 2302 个 node:test 测试（审计与三轴线压测不变量；src↔lib 一致性由 scripts/check-sync.js 发布闸门校验）
 scripts/              # e2e-dsh.js 端到端演示 · stress-dsh.js 三轴线压测 · sync-lib.js 同步 · check-sync.js 发布闸门 · benchmark-recall.js / benchmark-embed.js / benchmark-rerank.js 基准 · sync-test-badge.mjs 测试徽章 · build-runtime-manifest.mjs 运行时清单
 ```
 
@@ -686,7 +687,7 @@ scripts/              # e2e-dsh.js 端到端演示 · stress-dsh.js 三轴线压
 ```bash
 cd dsh-mneme
 npm install        # 安装 peer 依赖（以 devDependencies 形式，用于本地测试）
-npm test           # 运行 2257 个测试
+npm test           # 运行 2302 个测试
 npm run stress     # 三轴线压测：长会话检索 / 冲突仲裁 / 多 Agent 并发（离线 mock LLM）
 npm run sync       # 把 src/ 同步到 lib/（发布时由 prepack 钩子自动执行）
 ```
