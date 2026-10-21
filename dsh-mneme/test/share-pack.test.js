@@ -1,17 +1,24 @@
-// 分享包纯核心的形状锁。这个文件盯四类回归：
+// 分享包纯核心的形状锁。这个文件盯五类回归：
 //   a) 进包的字段集合只许是白名单那几样 —— 少带是本意（不带 id / 向量 / 热度 / 本机
-//      scope），多带就是泄露；所以这里锁「不含什么」比锁「含什么」更要紧。
+//      scope），多带就是泄露；所以这里锁「不含什么」比锁「含什么」更要紧。row 侧与
+//      pack 侧各钉一条：白名单是逐层收窄的，只锁一层就有一层可以顺手放宽。
 //   b) 幂等键的派生必须与接收侧重算一致（车道 C 靠它），改一个参数顺序就是破坏
 //      所有已发出去的包。
 //   c) 取行口径：哪些行不进包、以什么原因不进（跳过清单的读数就靠这些字面量），以及
 //      不进的那几条返回的 title 也已经是遮过 home 的 —— 清单会进包体、会上终端。
 //   d) 分享边界用的是未门控的文本扫描面 —— 换成 config 门控的那个工厂，用户没开
 //      写入闸门就等于裸发整库（静态锁，见最后一条用例）。
+//   e) 打包口径逐条钉死：水位量的是**最终序列化字节**（不是条数也不是字符数——中文差
+//      三倍，按字符数判等于把 413 留给对面）；skip_list 截断后计数仍须是全量（截的是
+//      清单不是账）；filters 是分享者的显式收窄，既不进跳过计数也不进清单（进了就说谎：
+//      她没跳过，是她自己选的），且形状读不懂的 filters 只许当收窄、不许当放行（那侧
+//      错的方向是把整库发出去）；alias 缺省恒为空串，绝不拿本机身份猜一个填上——那是
+//      这份格式里唯一一处会替人自报家的字段。
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  SHARE_KIND, deriveExternalId, createHomeRedactor, classifyRowForShare
+  SHARE_KIND, deriveExternalId, createHomeRedactor, classifyRowForShare, buildSharePack
 } from "../src/share.js";
 
 test("pack kind is the versioned literal the receiver keys on", () => {
@@ -28,6 +35,17 @@ test("external_id separates fields with NUL so concatenation cannot collide", ()
   // 无分隔拼接时 ("ab","c") 与 ("a","bc") 同键 —— 这类碰撞在幂等表上就是静默串号。
   assert.notEqual(deriveExternalId("p", "ab", "c"), deriveExternalId("p", "a", "bc"));
   assert.notEqual(deriveExternalId("p1", "t", "x"), deriveExternalId("p2", "t", "x"));
+});
+
+test("external_id strips NUL out of the fields themselves", () => {
+  // 分隔符只保证「字段之间」的切法唯一；字段自己含 U+0000 时切点又回到字节手里，
+  // ("t","a\\0b") 与 ("t\\0a","b") 拼出同一串。接收侧（车道 C）按包内字节重算的就是
+  // 这一串，所以两个键相等的后果是「这条已被吃过」——该建的行静默不建。
+  // 归一放在 deriveExternalId 内部而不是调用方：铸造与重算必须共用一个口径。
+  assert.notEqual(deriveExternalId("p", "t", "a\u0000b"), deriveExternalId("p", "t\u0000a", "b"));
+  assert.notEqual(deriveExternalId("p\u0000a", "t", "x"), deriveExternalId("p", "a\u0000t", "x"));
+  // 剥的只有 U+0000：trim 的空白口径不许跟着变，否则已发出去的键会全体漂移。
+  assert.equal(deriveExternalId("p", "t", " x "), deriveExternalId("p", "t", "x"));
 });
 
 const row = (over = {}) => ({
@@ -76,9 +94,36 @@ test("the JSON-escaped spelling of a windows home is redacted too", () => {
   assert.ok(!JSON.stringify(shipped.row).includes("alex"), "escaped home prefix shipped in the pack");
 });
 
+test("the redactor matches separator runs, so no escaping depth survives", () => {
+  // 按固定拼法打补丁是隐私函数的错法：同一目录在正文里有的是字节写法（单反斜杠、JSON
+  // 转义、混合、二次编码），漏一种就漏用户名，而「补到哪一种」永远追着现实跑。判据
+  // 换成段间游程（至少一个分隔符、个数不限）之后，转义层数不再是判据，一整类一起关掉。
+  const redact = createHomeRedactor("C:\\Users\\alex");
+  const bs = (n) => "\\".repeat(n);
+  for (const n of [1, 2, 3, 4, 8]) {
+    assert.ok(
+      !redact(`read C:${bs(n)}Users${bs(n)}alex${bs(n)}notes.md`).includes("alex"),
+      `home leaked at ${n} separators per join`
+    );
+  }
+  // 混合（前一处两个、后一处一个）与二次编码是手写 JSON 时最容易落库的两种，也是上一版
+  // 「三个固定形态」恰好都够不着的那两种。
+  assert.ok(!redact(`read C:${bs(2)}Users${bs(1)}alex${bs(2)}a.md`).includes("alex"), "home leaked through mixed escaping");
+  assert.ok(!redact(`{"p": "C:${bs(4)}Users${bs(2)}alex${bs(3)}x"}`).includes("alex"), "home leaked through doubly-encoded escaping");
+  // 前缀带尾分隔符时（`homedir()` 一般不给，但配置里写出来的人不少）：尾那个不许变成
+  // 「必须存在」的条件，否则正文里没写尾斜杠的那条照常漏。
+  assert.ok(!createHomeRedactor("C:\\Users\\alex\\")("home C:\\Users\\alex\\p").includes("alex"), "trailing-separator home leaked");
+  // 已知取舍：游程要求段间**至少一个**分隔符，所以 `C:Users` 这种无分隔写法不命中。
+  // 那不是同一目录的另一种拼法（Node 与 JSON 都不产它），要命中只能拆掉前缀的全部约束，
+  // 而这一侧错的方向是泄露。锁在这里，免得日后当 bug 顺手加回来。
+  assert.equal(redact("C:Usersalex is not a path"), "C:Usersalex is not a path");
+});
+
 test("an empty or weird homedir never turns content into mangled text", () => {
   const redact = createHomeRedactor("");
   assert.equal(redact("keep this"), "keep this");
+  // 全是分隔符的 home（`//`）若照原样进游程，拼出来的正则会把正文里的斜杠都吃成 `~/`。
+  assert.equal(createHomeRedactor("//")("a // b"), "a // b");
 });
 
 test("archived, forgotten and out-of-scope types are skipped with a reason", () => {
@@ -155,6 +200,86 @@ test("the row that enters the pack carries only the whitelisted fields", () => {
     "tags", "title", "type", "updated_at"
   ]);
   assert.equal(out.row.content_hash, "deadbeef");
+});
+
+const packInput = (rows, over = {}) => buildSharePack({
+  rows, alias: "桉桉", homeDir: "/fake/home/alex", packageVersion: "0.9.4",
+  packId: "abcdef0123456789", generatedAt: "2026-10-22T00:00:00.000Z", ...over
+});
+
+test("pack carries the whitelist and nothing else", () => {
+  const { pack } = packInput([row({ embedding: "huge", content_history: "[{}]", doc_path: "/x", agent_scope: "/fake/home/alex/p" })]);
+  assert.equal(pack.kind, "mneme.share/v1");
+  assert.equal(pack.memories.length, 1);
+  const m = pack.memories[0];
+  for (const banned of ["id", "embedding", "content_history", "doc_path", "agent_scope", "workspace_scope", "sensitivity", "_full_content", "evidence"]) {
+    assert.ok(!(banned in m), `pack must not carry ${banned}`);
+  }
+  assert.equal(m.type, "decision");
+  assert.match(m.external_id, /^[0-9a-f]{16}$/);
+});
+
+test("report counts every skip reason and caps the list it shows", () => {
+  const rows = [
+    row({ type: "decision", title: "keep" }),
+    row({ type: "preference", archived: 1 }),
+    row({ type: "history", forgotten: 1 }),
+    row({ type: "document" }),
+    row({ type: "summary" }),
+    // 空白这一条要标题也没字：informationlessReason 是 title+content 的**组合**口径
+    // （上面 A2 那条用例锁过「标题有字、正文空白照常进包」），只空正文的话这一格永远是 0。
+    row({ type: "pattern", title: "", content: "   " })
+  ];
+  const { pack } = packInput(rows);
+  assert.equal(pack.report.included, 1);
+  assert.deepEqual(pack.report.skipped, {
+    archived: 1, forgotten: 1, readonly_type: 1, excluded_type: 1, blank_or_noise: 1, sensitive: 0
+  });
+  assert.ok(pack.report.skip_list.every((s) => typeof s.title === "string" && typeof s.reason === "string"));
+});
+
+test("skip list truncates but the counters stay exact", () => {
+  const rows = Array.from({ length: 80 }, (_, i) => row({ type: "history", archived: 1, title: `a${i}` }));
+  const { pack } = packInput(rows);
+  assert.equal(pack.report.skipped.archived, 80);
+  assert.equal(pack.report.skip_list.length, 50);
+});
+
+test("a pack over the water mark is refused with the measured size", () => {
+  const rows = [row({ content: "字".repeat(2_000_000) })];
+  const out = packInput(rows);
+  assert.equal(out.ok, false);
+  assert.equal(out.error, "too-large");
+  assert.ok(out.bytes > out.limitBytes);
+});
+
+test("filters narrow what goes in without touching the reason counters", () => {
+  const rows = [row({ type: "decision", title: "a" }), row({ type: "preference", title: "b" })];
+  const byType = packInput(rows, { filters: { type: ["decision"] } });
+  assert.equal(byType.pack.report.included, 1);
+  assert.equal(byType.pack.memories[0].title, "a");
+  const byTag = packInput([row({ type: "decision", title: "a", tags: ["keep"] })], { filters: { tag: "keep" } });
+  assert.equal(byTag.pack.memories[0].tags.includes("keep"), true);
+  const byTagMiss = packInput([row({ type: "decision", title: "a", tags: ["other"] })], { filters: { tag: "keep" } });
+  assert.equal(byTagMiss.pack.report.included, 0);
+});
+
+test("a filter shape this function can't read never widens to the whole library", () => {
+  // 出口把 `--type` 传成数组还是裸字符串不由这里决定（CLI 一个旗标给字符串、面板多选给
+  // 数组都说得通）。能决定的是：读得懂的收窄意图不许因为形状不对就当「没筛」——那侧
+  // 错的方向是**多发**，分享者以为只发了一类，实际把整库发了出去。
+  const rows = [row({ type: "decision", title: "a" }), row({ type: "preference", title: "b" })];
+  const byString = packInput(rows, { filters: { type: "decision" } });
+  assert.equal(byString.pack.report.included, 1);
+  assert.equal(byString.pack.memories[0].type, "decision");
+  // 反过来，「填了但只剩空白」是**没填**，与空数组同口径：读成筛成空包才是说谎。
+  assert.equal(packInput(rows, { filters: { type: "  ", tag: "" } }).pack.report.included, 2);
+  assert.equal(packInput(rows, { filters: { type: [], tag: "   " } }).pack.report.included, 2);
+});
+
+test("alias defaults to the neutral label, never to a guessed identity", () => {
+  const out = buildSharePack({ rows: [row()], homeDir: "/fake/home/alex", packageVersion: "0.9.4", packId: "p", generatedAt: "2026-10-22T00:00:00.000Z" });
+  assert.equal(out.pack.alias, "");
 });
 
 test("the share filter uses the ungated scanner, never the gated factory", () => {

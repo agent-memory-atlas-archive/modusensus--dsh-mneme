@@ -6,7 +6,7 @@
 // 密钥/PII）：判据只许有一份，所以这里 import 而不是重抄，代价是模块图会连带把
 // store 模块**加载**进来（write-admission → service → store）—— 加载不等于使用，
 // 本模块不调它任何一个方法，也不碰 config。
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { informationlessReason } from "./write-admission.js";
 import { scanSensitive } from "./sensitive-scan.js";
 
@@ -27,10 +27,21 @@ export const MAX_PACK_BYTES = 3 * 1024 * 1024;
 export const SHARE_READONLY_TYPES = new Set(["document"]);
 export const SHARE_EXCLUDED_TYPES = new Set(["summary"]);
 
-/** 幂等键：NUL 分隔，防 ("ab","c") 与 ("a","bc") 撞同一键。 */
+const withoutNul = (value) => String(value ?? "").replace(/\u0000/g, "");
+
+/**
+ * 幂等键：NUL 分隔，防 ("ab","c") 与 ("a","bc") 撞同一键。
+ *
+ * 分隔符只保证「字段之间」的切法唯一，所以入参自己的 U+0000 必须先剥掉：不剥的话
+ * ("t","a\0b") 与 ("t\0a","b") 拼出同一串字节，对面重算时把这条当成「已经吃过」，
+ * 于是该建的行静默不建（串号是幂等表上最难查的那类 bug，没有报错）。
+ * 归一写在这里而不是各调用方：铸造侧（本模块）与重算侧（车道 C）必须共用一份口径，
+ * 两份实现各自归一迟早漂。除 U+0000 外不动别的字节，trim 口径照旧 —— 归一规则一变，
+ * 已发出去的包里每个 external_id 都对不上。
+ */
 export function deriveExternalId(packId, type, title) {
   return createHash("sha256")
-    .update(`${packId}\u0000${type}\u0000${String(title ?? "").trim()}`, "utf8")
+    .update(`${withoutNul(packId)}\u0000${withoutNul(type)}\u0000${withoutNul(title).trim()}`, "utf8")
     .digest("hex")
     .slice(0, 16);
 }
@@ -38,22 +49,24 @@ export function deriveExternalId(packId, type, title) {
 const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
- * 把正文里的本机 home 前缀换成 `~`。三种拼法都要替：Windows 上同一目录既能写成
- * 反斜杠也能写成正斜杠（Node 两边都收，模型两种都输出），而正文里用 JSON 或引号
- * 包一段路径时落库的是双反斜杠。少替一种就漏一整类，而漏出来的正是用户名。
+ * 把正文里的本机 home 前缀换成 `~`。
+ *
+ * 判据是**分隔符游程**，不是几种固定拼法：把 base 按 `[/\\]+` 切成段，再用 `[/\\]+`
+ * 拼回一条正则（段间至少一个分隔符、个数不限）。于是同一目录的所有写法——单反斜杠、
+ * 正斜杠、JSON 里转义过的双反斜杠、混合、二次编码——都走同一条判据。上一版按
+ * base / 单反斜杠 / 双反斜杠三个固定形态匹配，混合与二次编码照样漏，而「按拼法打补丁」
+ * 的失败方式是永远漏下没列到的那一种，漏出来的正是用户名。
  * 大小写不敏感：盘符与用户目录在真实路径里的大小写常常和 homedir() 不一致。
+ * 已知代价：段间一个分隔符都没有的写法（`C:Users`）不再命中——那已经不是同一目录的
+ * 拼法（Node 与 JSON 都不产它），要命中只能把前缀约束整个拆掉，而那侧错的方向是泄露。
  */
 export function createHomeRedactor(homeDir) {
-  const base = typeof homeDir === "string" ? homeDir.trim() : "";
+  // 尾分隔符先剥：留着它就成了末段空串，拼出的游程把「正文必须带尾分隔符」写进判据，
+  // 没带的那个反而漏。全由分隔符组成的 home（`//`）剥完即空，走 identity 出口——
+  // 否则正则会把正文里的斜杠吃成 `~/`，把内容改花。
+  const base = (typeof homeDir === "string" ? homeDir.trim() : "").replace(/[/\\]+$/, "");
   if (base.length < 2) return (text) => String(text ?? "");
-  // 正反两个方向都展开（不是只从 base 派生反斜杠那一半）：homedir() 给的是
-  // `C:\Users\alex`，而正文里同一目录常被写成 `C:/Users/alex`，只补一个方向就漏那个方向。
-  // 第三形态是「被引用过的 Windows 路径」（JSON 里存成 `C:\\Users\\alex`）：它跟前两形态
-  // 逐字节都不同，两边都不匹配，而代码片段与转义后的正文恰恰是最常出现路径的地方。
-  const forms = [
-    ...new Set([base, base.replace(/[\\/]/g, "\\"), base.replace(/[\\/]/g, "/"), base.replace(/[\\/]/g, "\\\\")])
-  ];
-  const re = new RegExp(`(?:${forms.map(reEsc).join("|")})[\\\\/]?`, "gi");
+  const re = new RegExp(`${base.split(/[/\\]+/).map(reEsc).join("[/\\\\]+")}[\\\\/]?`, "gi");
   // 折掉的只有「前缀 + 紧跟着的那一个分隔符」，输出统一成读者与对面 agent 都认的 `~/`；
   // 后面的路径按原样留着——改写用户写下的字节是另一类事故。前缀落在句尾时不补分隔符。
   return (text) => String(text ?? "").replace(re, (m) => (m.endsWith("\\") || m.endsWith("/") ? "~/" : "~"));
@@ -111,4 +124,70 @@ export function classifyRowForShare(row, { redact = (t) => t } = {}) {
       content_hash: row.content_hash ?? null
     }
   };
+}
+
+/**
+ * 打包。顺序是刻意的：过滤 → 逐条定性 → 铸 external_id → 序列化 → 量字节。
+ *
+ * 水位量的是**最终序列化字节**，不是条数也不是字符数：这份包要原样当 body POST 回
+ * 对面（车道 C），而中文字符数与 UTF-8 字节数差三倍，按字符数判等于把 413 留给对面；
+ * 按条数判则对「条少但每条很长」的库说谎，那种包照样过大。字节只能在 JSON 写完之后再量，
+ * 所以这里没有「先算大小再决定装几条」的分支。
+ *
+ * 超限**不裁条目**：裁到哪一条是替分享者做「哪条可以不发」的判断，而这份判断该由她自己
+ * 用 filters 分批来做（spec §4 决策 5）。所以只拒绝，并把量到的 bytes 与 limitBytes 一起
+ * 交回，让出口能说出「大了多少、怎么分批」。
+ *
+ * filters 是分享者的显式收窄，**不进跳过计数也不进清单**：那份账要说的是「本可以发、
+ * 因为口径没发」，把她自己筛掉的记进去，读数就把她指向错的那一类。
+ *
+ * skip_list 截到 SHARE_SKIP_LIST_MAX，skipped 的六个计数仍走全量——截的是清单不是账。
+ * 清单里的 title 用 classifyRowForShare 返回值原样写入：它已在源头遮过 home，这里补
+ * 第二刀是「两个口径」的开始，不是更安全。
+ */
+export function buildSharePack({
+  rows, alias = "", homeDir, packageVersion, filters = {},
+  packId = randomBytes(8).toString("hex"), generatedAt = new Date().toISOString()
+} = {}) {
+  const redact = createHomeRedactor(homeDir);
+  // 空数组按「没筛」处理：分享者清空勾选不等于要一个空包，两侧出口（面板 / CLI）传下来的
+  // 就是这形态，把它读成「全选」比读成「全不选」更贴近她的意思。
+  // 裸字符串同样当一个类型：`--type` 到这儿是数组还是字符串由出口决定，而这里若只认
+  // 数组，读不懂的那一侧错的方向是**放行整库**——她以为只发了一类，实际全发出去了。
+  // 反过来不做的：多值 tag 的语义（任一 / 全部）spec 没定，这里不替它定，出口要传数组
+  // 就先在出口归一，别在这儿猜。
+  const typeList = Array.isArray(filters.type)
+    ? filters.type
+    : typeof filters.type === "string" && filters.type.trim() ? [filters.type.trim()] : [];
+  const wanted = typeList.length ? new Set(typeList) : null;
+  const tag = typeof filters.tag === "string" && filters.tag.trim() ? filters.tag.trim() : null;
+  const skipped = { archived: 0, forgotten: 0, readonly_type: 0, excluded_type: 0, blank_or_noise: 0, sensitive: 0 };
+  const skipList = [];
+  const memories = [];
+  for (const source of Array.isArray(rows) ? rows : []) {
+    if ((wanted && !wanted.has(source?.type)) || (tag && !(Array.isArray(source?.tags) ? source.tags : []).includes(tag))) {
+      continue;
+    }
+    const verdict = classifyRowForShare(source, { redact });
+    if (!verdict.include) {
+      skipped[verdict.reason] = (skipped[verdict.reason] ?? 0) + 1;
+      if (skipList.length < SHARE_SKIP_LIST_MAX) skipList.push({ title: verdict.title ?? "", reason: verdict.reason });
+      continue;
+    }
+    memories.push({ external_id: deriveExternalId(packId, verdict.row.type, verdict.row.title), ...verdict.row });
+  }
+  const pack = {
+    kind: SHARE_KIND,
+    pack_id: packId,
+    alias: typeof alias === "string" ? alias.trim() : "",
+    generated_at: generatedAt,
+    source_version: String(packageVersion ?? ""),
+    report: { included: memories.length, skipped, skip_list: skipList },
+    memories
+  };
+  const bytes = Buffer.byteLength(JSON.stringify(pack), "utf8");
+  if (bytes > MAX_PACK_BYTES) {
+    return { ok: false, error: "too-large", pack, bytes, limitBytes: MAX_PACK_BYTES };
+  }
+  return { ok: true, pack, bytes };
 }
