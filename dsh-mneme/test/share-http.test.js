@@ -112,3 +112,18 @@ test("the share literals live in the share modules only", () => {
     assert.ok(src("share-http.js").includes(lit) || src("share.js").includes(lit), `${lit} must live in the share modules`);
   }
 });
+
+// 两张皮都接上之后才补得了这条（A4 时数据面还没有 /share，锁无可锁）。
+// 上一条只管「字面量别在别处冒出来」，这条管反方向：两面必须真的**调**共用构造器。
+// #411 那次是面板侧修好了、数据面停在复制的旧形态——复制出去的代码不会留下任何
+// 痕迹让静态检查发现，只有「这一侧不许出现口径、又必须出现 shareReply(」这对双向
+// 断言能抓住。
+test("both surfaces call the shared builder instead of forking the口径", () => {
+  for (const file of ["api.js", "api-standalone.js"]) {
+    const text = src(file);
+    assert.ok(text.includes("shareReply("), `${file} must call the shared reply builder`);
+    for (const lit of ["mneme.share/v1", '"too-large"']) {
+      assert.ok(!text.includes(lit), `${file} must not re-implement ${lit}`);
+    }
+  }
+});

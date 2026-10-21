@@ -1,4 +1,4 @@
-// 分享包的面板路由锁。盯四件事：
+// 分享包的**两张皮**路由锁。盯四件事：
 //   a) policy 归对（token —— 它是全库级读取，与 /export 同门，见 2026-10 审计 P0）；
 //   b) token 配上时**不带 token 必须 401**，不是静默放行；
 //   c) readBody 返回 null（超 4 MiB，它自己已答 413）时 handler 必须直接 return，
@@ -8,6 +8,11 @@
 // 装配台照 test/api-routes-gaps.test.js 的 reclaimSetup，**必须落文件库**：`:memory:`
 // 与文件库在 store.all() 的读侧口径上没差别，但分享包吃的正是「全库含归档/已遗忘」，
 // 用内存库时归档位的字节口径与体积水位都摸不到真实数字（同 reclaim 报告的理由）。
+//
+// 后半截是 Bearer 数据面（src/api-standalone.js）的真 HTTP 装配，起服务与读 token 的
+// 形状照 test/standalone-api.test.js。放同一份文件里是有意的：#411 说两张皮只许差在
+// 鉴权与路径，那么「同一份答复」就是两侧共同的不变量——分开两个文件时，改一侧的人
+// 看不见另一侧锁着什么。
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
@@ -18,6 +23,7 @@ import { createStore } from "../src/store.js";
 import { createService } from "../src/service.js";
 import { createSettings } from "../src/settings.js";
 import { createApi } from "../src/api.js";
+import { createStandaloneApi } from "../src/api-standalone.js";
 
 const SHARE_PATH = "/api/dsh-mneme/share";
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
@@ -189,4 +195,72 @@ test("a throwing pack build answers 500 and leaves a log line", async () => {
     assert.match(warnings.join(" "), /share pack failed/);
     assert.match(warnings.join(" "), /database is locked/, "原始错误文本要留在日志里");
   } finally { s.close(); }
+});
+
+// --- Bearer 数据面（src/api-standalone.js）-----------------------------------
+
+function standaloneSetup() {
+  const dir = mkdtempSync(join(tmpdir(), "dsh-mneme-share-std-"));
+  const store = createStore(join(dir, "memory.db"));
+  const service = createService({ store, mirror: null, config: {} });
+  const settings = createSettings(store.db);
+  // 起法照 test/standalone-api.test.js：这个模块没有 start()/stop()，监听在构造里
+  // 发起、由 ready 兑现，端口是 OS 给的（port: 0），token 挂在 api 上。
+  const api = createStandaloneApi({ service, store, config: {}, settings, logger: null, port: 0 });
+  return api.ready.then(() => {
+    const base = `http://127.0.0.1:${api.port}`;
+    return {
+      api, store, service, base, auth: { authorization: `Bearer ${api.token}` },
+      close() {
+        // 拆掉 keep-alive 连接，否则 node --test 的循环排不干净（同那份文件）。
+        api.server.closeIdleConnections?.();
+        api.server.close();
+        try { store.close(); } catch { /* already closed */ }
+        rmSync(dir, { recursive: true, force: true });
+      }
+    };
+  });
+}
+
+test("standalone /share answers the pack for a Bearer caller and 401 otherwise", async () => {
+  const h = await standaloneSetup();
+  try {
+    h.store.save({ type: "decision", title: "选 SQLite", content: "正文 here", tags: [] });
+    const anon = await fetch(`${h.base}/share`, { method: "POST", body: "{}" });
+    assert.equal(anon.status, 401, "这一面除 GET /health 外一律要 token，没有 policy 名可绕");
+    assert.deepEqual(await anon.json(), { error: "unauthorized" });
+
+    const ok = await fetch(`${h.base}/share`, {
+      method: "POST", headers: h.auth, body: JSON.stringify({ alias: "桉" })
+    });
+    assert.equal(ok.status, 200);
+    const pack = await ok.json();
+    assert.equal(pack.kind, "mneme.share/v1", "两张皮交出去的是同一个包形状");
+    assert.equal(pack.alias, "桉");
+    assert.equal(pack.report.included, 1);
+    // 本面**没有** Content-Disposition：它的 sendJson 连 headers 参数都没有，CLI 拿
+    // JSON 自己落盘。锁「不许冒出来」，防止哪天有人为了对齐面板而改那个签名。
+    assert.equal(ok.headers.get("content-disposition"), null);
+
+    // 读不懂的 body 在这侧同样是 400 一个码，而不是掉回末尾的 404。
+    for (const raw of ["{oops", "[1,2]", "null"]) {
+      const bad = await fetch(`${h.base}/share`, { method: "POST", headers: h.auth, body: raw });
+      assert.equal(bad.status, 400, `${raw} 必须被拒`);
+      assert.ok(!("memories" in await bad.json()), "拒答里绝不带包体");
+    }
+  } finally { await h.close(); }
+});
+
+test("standalone GET /share answers 405, matching the panel", async () => {
+  // 这一条**故意**与 /maintenance/reclaim 不同（那边 GET 掉到末尾 404）。#411 的口径
+  // 是「两张皮只许差在鉴权与路径」，状态码差一次就是第三处差别，所以这里跟着面板回
+  // 405 —— 一致性优先于照抄这份文件里的邻居。
+  const h = await standaloneSetup();
+  try {
+    h.store.save({ type: "decision", title: "选 SQLite", content: "正文 here", tags: [] });
+    const out = await fetch(`${h.base}/share`, { headers: h.auth });
+    assert.equal(out.status, 405);
+    const body = await out.json();
+    assert.ok(!("memories" in body), "GET 不许把包交出去");
+  } finally { await h.close(); }
 });
