@@ -94,9 +94,16 @@ test("包 README 的「模型工具」表与 tools.js 注册表一致", () => {
     "表与注册表必须一一对应：少了是漏文档，多了是文档写了不存在的东西"
   );
   assert.equal(rows.length, new Set(rows).size, "表里不许有重复行（重复行会让数量核对失效）");
-  for (const n of [defaultCount, declared.length]) {
-    assert.ok(heading[1].includes(String(n)), `标题里的数字要含 ${n}（opt-in 工具默认不注册，两个数都要对得上）`);
-  }
+  // 按**顺序**比数字，不是各自 includes：把「默认注册 11 个；开后 12 个」写成
+  // 「默认 12、开后 11」时，两个独立的 includes 都会绿——而那正是这条守卫要防的
+  // 第二种错法（第一种是数字与表不符，已被上面的集合比对盖住）。
+  const nums = (heading[1].match(/\d+/g) ?? []).map(Number);
+  const expected = optIn.length ? [defaultCount, declared.length] : [defaultCount];
+  assert.deepEqual(
+    nums,
+    expected,
+    `标题里的数字要按序是「默认注册数、全数」= ${expected.join(" 与 ")}（实跑 ${nums.join(" 与 ") || "没有数字"}）`
+  );
   // opt-in 工具那一行必须点名它的开关：读者看到表里有它，得知道默认是不出现的。
   for (const { key, tool } of optIn) {
     const row = body.match(new RegExp(`^\\| \`${tool}\` \\|(.*)$`, "m"));
