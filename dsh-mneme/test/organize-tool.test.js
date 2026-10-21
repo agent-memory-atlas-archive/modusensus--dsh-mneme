@@ -136,15 +136,70 @@ test("unknown mode is rejected", async () => {
   await assert.rejects(() => byName.memory_organize.execute({ mode: "force" }), /unknown mode/);
 });
 
-// #170 复核项 4 的口径延伸到整理接口：他 scope 的 explicit 行按「不存在」处理。
-// 工具若不把 hiddenIds 传下去，apply 就能归档报告里看不见别人库的行——整理接口
-// 成了第二条绕过 scope 治理的改库通道（opts 是可信上下文，绝不取 payload 字段）。
-// #170 复核项 4 的口径延伸到整理接口。用例形状是刻意挑的：比对键只看三列**值**
-// （sensitivity/agent/workspace），可见性还多认一个 explicit 来源，所以要造出
-// 「报告确实命中它、但调用方看不见它」那一格——匿名会话（解析不到 agentPreset）
-// 对 explicit 行 fail-closed。少了工具侧那段 hiddenIds，archive 就能归档这一行：
-// 整理接口成了第二条绕过 scope 治理的改库通道（opts 是可信上下文，绝不取 payload 字段）。
-test("archive of a row the report matched but the caller cannot see is skipped", async () => {
+// #170 复核项 4 的口径延伸到整理接口的**两侧**：报告侧不得泄漏存在性，落地侧不得
+// 绕过 scope 治理改库。用例形状是刻意挑的：比对键只看三列**值**（sensitivity/agent/
+// workspace），可见性还多认一个 `explicit` 来源，所以要造出「按值该命中、但会话看不见」
+// 那一格——匿名会话（解析不到 agentPreset）对 explicit 行 fail-closed。
+// 报告侧少了过滤就是探测口：`agent_scope` 是模型自己给的参数，A 会话可以拿 B 的标题问
+// 「那一档有没有这行」，拿回 id/title 就等于确认存在——memory_get 在同一条件下回「不存在」。
+test("dryRun reports an invisible match as new, with no id or title", async () => {
+  const config = { organizeEnabled: true, scopeEnabled: true, strictScope: true };
+  const { store, byName } = setup(config);
+  store.save({
+    type: "project",
+    title: "发布只在包目录内",
+    content: "team-a 名下的旧行。",
+    agent_scope: "team-a",
+    agent_scope_source: "explicit",
+    workspace_scope: "D:\\p",
+    workspace_scope_source: "auto"
+  });
+  const exec = { agent: { session: { id: "s-anon", header: { cwd: "D:\\p" } } } };
+  const report = await byName.memory_organize.execute(
+    {
+      mode: "dryRun",
+      candidates: [{ type: "project", title: "发布只在包目录内", content: "换一种说法的同一件事。" }],
+      agent_scope: "team-a",
+      workspace_scope: "D:\\p"
+    },
+    exec
+  );
+  assert.equal(report.items[0].verdict, "new", "看不见的行按不存在处理 → 报告只能说「新条目」");
+  assert.equal(report.items[0].match, undefined, "不得带回落点 id/title/sim");
+  assert.equal(report.counts.new, 1);
+});
+
+// 反面对照：strictScope 是**可选**硬过滤，关掉它时那行本来就可读（A2 只降权）。少了这条，
+// 过滤就变成「闸门关着也少召回」的第二重惩罚——修安全问题不许顺手改默认行为。
+test("the same row is still reported as exact when strictScope is off", async () => {
+  const config = { organizeEnabled: true, scopeEnabled: true };
+  const { store, byName } = setup(config);
+  const row = store.save({
+    type: "project",
+    title: "发布只在包目录内",
+    content: "team-a 名下的旧行。",
+    agent_scope: "team-a",
+    agent_scope_source: "explicit",
+    workspace_scope: "D:\\p",
+    workspace_scope_source: "auto"
+  });
+  const exec = { agent: { session: { id: "s-anon", header: { cwd: "D:\\p" } } } };
+  const report = await byName.memory_organize.execute(
+    {
+      mode: "dryRun",
+      candidates: [{ type: "project", title: "发布只在包目录内", content: "换一种说法的同一件事。" }],
+      agent_scope: "team-a",
+      workspace_scope: "D:\\p"
+    },
+    exec
+  );
+  assert.equal(report.items[0].verdict, "exact");
+  assert.equal(report.items[0].match.id, row.id, "闸门关着时照常给出落点，否则比对报告失去意义");
+});
+
+// 落地侧：报告已按「不存在」说了，archive 也不许真的动那一行（`opts.hiddenIds` 由可信
+// 调用层算好传入，绝不取 payload 字段——那是调用方可自选的内容，不是授权）。
+test("archive of a row the caller cannot see is skipped as out of scope", async () => {
   const config = { organizeEnabled: true, scopeEnabled: true, strictScope: true };
   const { store, byName } = setup(config);
   const teamRow = store.save({
@@ -157,7 +212,6 @@ test("archive of a row the report matched but the caller cannot see is skipped",
     workspace_scope_source: "auto"
   });
   const exec = { agent: { session: { id: "s-anon", header: { cwd: "D:\\p" } } } };
-
   const report = await byName.memory_organize.execute(
     {
       mode: "dryRun",
@@ -167,9 +221,6 @@ test("archive of a row the report matched but the caller cannot see is skipped",
     },
     exec
   );
-  assert.equal(report.items[0].verdict, "exact", "同比对键 → 报告必须命中它，否则这条用例什么也没守");
-  assert.equal(report.items[0].match.id, teamRow.id);
-
   const applied = await byName.memory_organize.execute(
     { mode: "apply", run_id: report.run_id, decisions: [{ action: "archive", id: teamRow.id }] },
     exec

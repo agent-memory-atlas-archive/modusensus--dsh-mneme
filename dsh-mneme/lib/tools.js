@@ -874,29 +874,39 @@ export function createTools(ctx, service, config, embedder) {
             degraded: result.degraded
           };
         }
+        // dryRun 的落点必须过一遍调用方的可见性。`agent_scope` / `workspace_scope`
+        // 是模型自己给的参数，而 `organize.dryRun` 的比对只看三列**值**（不看
+        // `*_scope_source`、不调 `isVisibleInScope`）——不过这一关，dryRun 就成了
+        // 「那一档有没有这个标题」的探测口：#170 复核项 4 给 memory_get / memory_delete
+        // 的口径是「不存在」，这里也按不存在说，落点一个键都不带。
+        // counts 跟着重算：留着引擎那份计数，`exact: 1` 配一个不带 match 的条目本身就是
+        // 存在性oracle，等于把泄露从 id 挪到计数器。审计行仍存原始落点（那是给操作者看的
+        // 证据面），apply 侧另有 hiddenIds 挡归档。
+        const visibleItems = result.items.map((item) => {
+          const match = item.match && visibleUnderStrictScope(service.getById(item.match.id), exec) ? item.match : null;
+          return {
+            index: item.index,
+            type: item.type,
+            title: item.title,
+            verdict: match ? item.verdict : "new",
+            ...(match ? { match: { id: match.id, title: match.title, ...(match.sim != null ? { sim: match.sim } : {}) } } : {})
+          };
+        });
+        const verdictCount = (verdict) => visibleItems.filter((i) => i.verdict === verdict).length;
         return {
           mode: "dryRun",
           run_id: result.run_id,
           created_at: result.created_at,
           status: result.status,
-          counts: result.counts,
-          // match 为 null（verdict=new）时整键不展开；exact 档没有相似度可报，sim
-          // 同样只在向量命中时出现——声明了却永不出现的键等于死声明。
-          items: result.items.map((item) => ({
-            index: item.index,
-            type: item.type,
-            title: item.title,
-            verdict: item.verdict,
-            ...(item.match
-              ? {
-                  match: {
-                    id: item.match.id,
-                    title: item.match.title,
-                    ...(item.match.sim != null ? { sim: item.match.sim } : {})
-                  }
-                }
-              : {})
-          })),
+          counts: {
+            total: visibleItems.length,
+            exact: verdictCount("exact"),
+            near: verdictCount("near"),
+            new: verdictCount("new"),
+            skipped: result.counts.skipped,
+            truncated: result.counts.truncated
+          },
+          items: visibleItems,
           skipped: result.skipped
         };
       }
