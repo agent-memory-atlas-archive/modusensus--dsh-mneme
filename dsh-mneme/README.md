@@ -645,7 +645,7 @@ Claude Code 挂载示例（项目根 `.mcp.json`；token 在面板「设置 → 
 │  服务层：saveWithDedupe / injectCandidates        │
 │         / mergeHumanEdits / onWrite 钩子          │
 ├─────────────────────────────────────────────────┤
-│  模型接口：10 个工具 + 自动注入 + 会话摘要         │
+│  模型接口：11 个工具 + 自动注入 + 会话摘要         │
 ├─────────────────────────────────────────────────┤
 │  autoDream：阈值调度 → LLM 决策清单               │
 │            → 校验（fail-safe）→ 应用 → 摘要       │
@@ -663,7 +663,10 @@ src/
 ├── service.js        # 领域逻辑（去重合并、注入筛选、写入钩子、scope 加权/硬过滤、冲突队列）
 ├── scope.js          # 作用域解析（agentPreset + workspace registry 反查，issue #17）
 ├── config.js         # schemastery 配置 schema
-├── tools.js          # 10 个模型工具（defineTool）
+├── tools.js          # 11 个模型工具（defineTool；memory_organize 要 organizeEnabled 打开才注册，开了是 12 个）
+├── user-settings.js  # 「用户设置」注入块（人格 → 画像 → 规则）的唯一渲染处，注入与面板预览共用
+├── profile-extract.js # 从活跃记忆提取「助手眼中的用户」画像草稿（只出草稿，不写 user_settings）
+├── organize.js       # agent 主动整理：dryRun 比对报告 → agent 判断 → apply 落库（筛除=归档不删，留 dream_runs 回执）
 ├── inject.js         # systemPrompt.context 动态注入（含花括号转义）
 ├── summarize.js      # 会话结束 LLM 摘要
 ├── dream.js          # autoDream 调度 + runDream（LLM 决策 + 摘要）
