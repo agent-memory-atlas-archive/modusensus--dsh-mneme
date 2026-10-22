@@ -261,3 +261,71 @@ export function buildSharePack({
   }
   return { ok: true, pack, bytes };
 }
+
+// 车道 A 铸 pack_id 用的是 randomBytes(8) 的 hex，16 位；接收侧按这个形状判。
+// 本行不是抄文档：spec §3 初稿写过 12 位，按它校验会把每一个真包拒掉。
+export const PACK_ID_RE = /^[0-9a-f]{16}$/;
+
+// 能入库的类型 = TYPE_FILE 的键集减去两个不随包走的排除项。这里重述一份而不是
+// import mirror 的表，与 SHARE_READONLY_TYPES 同一理由：包的兼容面比镜像宽，
+// 镜像哪天放开某个类型不该自动扩大接收侧的入库范围。形状由测试静态锁比对防漂。
+export const SHARE_ALLOWED_TYPES = new Set([
+  "preference", "project", "decision", "history", "pitfall", "constraint", "rejected_solution", "pattern"
+]);
+
+// 上限管的是**成品标签**而不是别名片段：这个串要落进 tags 列并在面板上原样显示，
+// 别名是对面自报的任意字符串，不封顶等于让她决定我们这里的字段长度。前缀 `from-`
+// 也算在内，所以别名实际吃到的是 32-5=27 个字符。
+const IMPORTED_TAG_MAX = 32;
+
+/** 外来行的来源标签。别名是分享者自报的自由字符串，在这里被压成一条安全标签；
+ *  空别名走中性值，绝不拿对面的机器身份（用户名、路径）兜底。 */
+export function importedTagFor(alias) {
+  // 换行与制表符按**删除**处理：标签必须单行（面板与镜像的元数据都按行切），而别名里
+  // 混进 \r\n 是排版或传输的产物，不是名字里的分隔。代价是别名 "a\nb" 与 "ab" 读出
+  // 同一个标签——来源标签只是给人看的读数，外来行的身份是 share_pack_id + external_id，
+  // 撞名不并行走也不丢行，所以这里不换那点碰撞率。
+  // trim 排在折叠**之前**：全空白的别名折叠后会剩一个 "-"，于是拿到 `from--` 而不是
+  // 中性值——「空别名走 from-shared」这条契约就漏在半空白那种写法上。
+  const flat = String(alias ?? "").replace(/[\r\n\t]+/g, "").trim().replace(/\s+/g, "-");
+  if (!flat) return "from-shared";
+  return `from-${flat}`.slice(0, IMPORTED_TAG_MAX);
+}
+
+/**
+ * 整包校验。返回第一个不合格项就停：半途入库是最难复盘的失败，而「哪一条不合格」
+ * 对发送方已经足够（index + 一个码）。
+ *
+ * 判序也是契约的一部分（出口按码映射 400，不看码之外的次序）：包级三格先判，因为
+ * 它们决定逐条判据有没有意义；条目内「类型 → 标题 → 正文」排在重算之前，因为一条
+ * 空白正文无论键对不对都不该入库——把它记成 external-id-mismatch 会把人指向「包被改
+ * 过」，而真正的问题是那条本身没内容。
+ */
+export function validateSharePack(pack) {
+  if (!pack || typeof pack !== "object" || Array.isArray(pack)) return { ok: false, error: "invalid-kind" };
+  if (pack.kind !== SHARE_KIND) return { ok: false, error: "invalid-kind" };
+  if (typeof pack.pack_id !== "string" || !PACK_ID_RE.test(pack.pack_id)) return { ok: false, error: "invalid-pack-id" };
+  if (!Array.isArray(pack.memories)) return { ok: false, error: "invalid-memories" };
+  if (!pack.memories.length) return { ok: false, error: "empty-pack" };
+  const seen = new Set();
+  for (let index = 0; index < pack.memories.length; index++) {
+    const m = pack.memories[index];
+    if (!m || typeof m !== "object") return { ok: false, error: "invalid-entry", index };
+    if (!SHARE_ALLOWED_TYPES.has(m.type)) return { ok: false, error: "invalid-type", index, detail: String(m.type ?? "") };
+    if (typeof m.title !== "string" || !m.title.trim()) return { ok: false, error: "invalid-entry", index, detail: "title" };
+    if (typeof m.content !== "string" || !m.content.trim()) return { ok: false, error: "invalid-entry", index, detail: "content" };
+    if (m.tags !== undefined && !Array.isArray(m.tags)) return { ok: false, error: "invalid-entry", index, detail: "tags" };
+    if (m.importance !== undefined && !Number.isInteger(m.importance)) return { ok: false, error: "invalid-entry", index, detail: "importance" };
+    // 16 位这个长度与 PACK_ID_RE 相同是巧合，不是同一份契约：pack_id 是 randomBytes(8)
+    // 的 hex，这一把是 sha256 的前 16 位（deriveExternalId）。写成两个正则是为了让
+    // 「哪天只把包 id 加长」不会顺手改掉这里的判据。
+    if (typeof m.external_id !== "string" || !/^[0-9a-f]{16}$/.test(m.external_id)) return { ok: false, error: "invalid-entry", index, detail: "external_id" };
+    // 四个入参与铸造侧逐字对齐，缺锚归一成 null 而不是跳过这一格：少了第四格时，同标题
+    // 不同正文的两条会重算出同一个键，第二条被判成「包被人改过」——而它恰恰没被改。
+    const expect = deriveExternalId(pack.pack_id, m.type, m.title, typeof m.content_hash === "string" ? m.content_hash : null);
+    if (expect !== m.external_id) return { ok: false, error: "external-id-mismatch", index };
+    if (seen.has(m.external_id)) return { ok: false, error: "duplicate-external-id", index };
+    seen.add(m.external_id);
+  }
+  return { ok: true, pack, count: pack.memories.length };
+}
