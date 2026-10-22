@@ -536,6 +536,11 @@ function toRow(row) {
     // 顺手 `?? updated_at` 把代理口径捡回来。
     archived_at: row.archived_at ?? undefined,
     source: row.source ?? undefined,
+    // 车道 C：外来行身份两格。NULL 读作 undefined（与 archived_at 同款「不可知就不编
+    // 值」）。注意「这行是不是外来行」的判据仍是 source（memory-source.js 的
+    // isImportedRow）——这两格只回答「来自哪个包 / 幂等键是什么」，不回答身份。
+    share_pack_id: row.share_pack_id ?? undefined,
+    share_external_id: row.share_external_id ?? undefined,
     content_history: parseJsonArray(row.content_history),
     evidence: parseJsonArray(row.evidence),
     doc_path: row.doc_path ?? undefined,
@@ -886,6 +891,23 @@ export function createStore(path) {
   // 存量行的值是 NULL，且**不推断**：按 updated_at 猜出的模型名会变成日后审计信
   // 以为真的证据。NULL 一律读作「出身未知」，等价的补法是重算，不是猜。
   addColumn("memories", "embedding_model", "ALTER TABLE memories ADD COLUMN embedding_model TEXT");
+  // 车道 C：外来行的身份两件套。share_pack_id 是「整包退出」的寻址键，share_external_id
+  // 是导入的幂等键。它们只对自己铸造的行有意义，所以缺省是 NULL 而不是 ''：空串会参与
+  // 唯一性（第二条本地行就撞响），而存量行零重写、读侧 undefined = 「不是外来行」。
+  addColumn("memories", "share_pack_id", "ALTER TABLE memories ADD COLUMN share_pack_id TEXT");
+  addColumn("memories", "share_external_id", "ALTER TABLE memories ADD COLUMN share_external_id TEXT");
+  // 索引建在加列之后而非写进 SCHEMA（本文件 content_hash 那段：存量库打开时 CREATE TABLE
+  // 是 no-op，列还不存在就建索引会直接 no such column）。
+  // 部分索引（WHERE ... IS NOT NULL）是刻意的，但它承重的地方要说准：SQLite 的 UNIQUE
+  // 本就把 NULL 视为互不相等，本地行（这一格恒 NULL）挂在普通 UNIQUE 上也不撞——变异检验
+  // 证实摘掉 WHERE 五个用例照绿。它承的是另外两件事：①约束的适用范围写进索引本身，
+  // 「只有导入路径铸造的 id 参与唯一性」这条语义没有别的表达渠道，读代码的人不必再去猜
+  // NULL 在这里算什么；②本地行不进这棵 b 树——普通 UNIQUE 要给每一条本地记忆插一个永不
+  // 生效的空键，而库里绝大多数是本地行，每次写都白付一次索引维护。
+  // 「NULL 必须自由共享」那条用例锁的是行为而非实现：它防的是将来有人把空串当缺省值写
+  // 进来（'' 参与唯一性，第二条 '' 直接撞响），不是防 WHERE 子句消失。
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_share_external ON memories(share_external_id) WHERE share_external_id IS NOT NULL");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_memories_share_pack ON memories(share_pack_id)");
   // issue #24 块2（权重演化）：entity_relations 加 weight + source。存量关系
   // 行缺列 → 默认 manual 1.0（最保守：既有语义不因迁移而变弱）。
   addColumn("entity_relations", "weight", "ALTER TABLE entity_relations ADD COLUMN weight REAL NOT NULL DEFAULT 1.0");
@@ -1123,6 +1145,30 @@ export function createStore(path) {
     return toRow(row);
   }
 
+  /**
+   * 车道 C 导入的幂等读：按包内那条记忆的铸造 id 找本库的行。
+   * 走 idx_memories_share_external（部分索引，非 NULL 那一侧），等值 seek。
+   * 本地行这一格恒 NULL，因此本函数永远不会误命中本地记忆。
+   */
+  function getByShareExternalId(externalId) {
+    if (typeof externalId !== "string" || !externalId) return undefined;
+    return toRow(db.prepare("SELECT * FROM memories WHERE share_external_id = ?").get(externalId));
+  }
+
+  /**
+   * 一个包在本库落下的全部行（撤回前的清点 / 面板「外来区」列表）。
+   *
+   * 不过滤 archived / forgotten：整包退出要连归档面与遗忘面一起收走，否则撤回后库里
+   * 还剩几条「来自那个已经收起的包」的行，身份与包对不上。
+   * 读显式列清单而非 SELECT *（#430 的口径）：一个包可以有几百行，每行 9.4 MB 级别
+   * 的 embedding 拖进来没有任何消费方会读。
+   */
+  function listBySharePackId(packId) {
+    if (typeof packId !== "string" || !packId) return [];
+    return db.prepare(`SELECT ${memoryColumnList} FROM memories WHERE share_pack_id = ? ORDER BY updated_at DESC, id DESC`)
+      .all(packId).map(toRow);
+  }
+
   // #230 写入权分离（存储层唯一铸造口，CodeRabbit 复核最终形态）：document
   // 行只能经 saveDocument 铸造，通用 save 整类拒绝。doc_path 是任意调用方
   // 都能捏造的字符串——「必带 doc_path」挡不住绕过注册校验（flag 闸 / 文件
@@ -1168,8 +1214,8 @@ export function createStore(path) {
       : inferEpistemicStatus(memory);
     runAtomically(() => {
       db.prepare(
-        `INSERT INTO memories (id, type, title, content, tags, importance, forgotten, archived, archived_at, source, content_history, quality_score, embedding, epistemic_status, agent_scope, workspace_scope, agent_scope_source, workspace_scope_source, scope_decided_at, sensitivity, occurred_at, evidence, doc_path, content_hash, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (id, type, title, content, tags, importance, forgotten, archived, archived_at, source, content_history, quality_score, embedding, epistemic_status, agent_scope, workspace_scope, agent_scope_source, workspace_scope_source, scope_decided_at, sensitivity, occurred_at, evidence, doc_path, content_hash, share_pack_id, share_external_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         type,
@@ -1197,6 +1243,11 @@ export function createStore(path) {
         evidence,
         docPath,
         contentHash,
+        // 车道 C：外来行身份。空串一律落 NULL——空串会占住 UNIQUE 索引的一格，第二条
+        // 空串外来行就撞响；这两格只由导入路径铸造，其余写入恒 NULL。
+        // created_at / updated_at / content_hash 仍由本函数铸造，不接受调用方传值。
+        typeof memory.share_pack_id === "string" && memory.share_pack_id.trim() ? memory.share_pack_id.trim() : null,
+        typeof memory.share_external_id === "string" && memory.share_external_id.trim() ? memory.share_external_id.trim() : null,
         now,
         now
       );
@@ -1342,6 +1393,34 @@ export function createStore(path) {
       // Mirror sync must reflect the deletion; bump desired generation so a
       // crash between the delete and syncMirror leaves a recoverable debt.
       incrementGeneration();
+    });
+  }
+
+  /**
+   * 整包退出（车道 C）。删空一个不存在的包是幂等的 0，不是错误——对方点第二次「收起
+   * 这个包」与「收起一个从来没导入过的包」都该是这个答案；早退也不 bump generation：
+   * 什么都没删就别记一笔镜像债（remove() 每次必 bump，那是它的既有行为，不在这里扩大）。
+   *
+   * side table 清理口径 = remove() 的口径（#399）：显式同事务清 memory_provenance。
+   * 这条不是冗余——memory_provenance 挂着 ON DELETE CASCADE，而 node:sqlite 默认就把
+   * foreign_keys 开成 1，所以今天删行确实另有级联兜底；但 remove() 走的是显式清理，
+   * 批删跟着它走，不赌连接配置（哪天连接以 enableForeignKeyConstraints:false 打开，
+   * 悬空链接只有这一条 DELETE 挡得住）。
+   *
+   * remove() 不碰的（entity_attrs / entity_relations 的 memory_id 反查、conflict_pending、
+   * scope_changes、embedding 解析缓存）这里也不碰——批删不是新的清理语义。service 层的
+   * 既有收敛路径继续负责图与镜像；向量索引在存储层够不着，由 C4 在 service 侧处理。
+   */
+  function deleteBySharePackId(packId) {
+    if (typeof packId !== "string" || !packId) return 0;
+    return runAtomically(() => {
+      const ids = db.prepare("SELECT id FROM memories WHERE share_pack_id = ?").all(packId).map((r) => r.id);
+      if (!ids.length) return 0;
+      const marks = ids.map(() => "?").join(", ");
+      db.prepare(`DELETE FROM memory_provenance WHERE memory_id IN (${marks})`).run(...ids);
+      const result = db.prepare(`DELETE FROM memories WHERE id IN (${marks})`).run(...ids);
+      incrementGeneration();
+      return result.changes;
     });
   }
 
@@ -3338,6 +3417,9 @@ export function createStore(path) {
     db,
     count,
     getById,
+    // 车道 C：外来行身份的两个读口（幂等键 / 整包清点）。
+    getByShareExternalId,
+    listBySharePackId,
     save,
     // document 唯一铸造口（#230 写入权分离）：registerDocument 专用，通用
     // save/update/CAS 均拒绝 document 创建或类型转换。
@@ -3347,6 +3429,12 @@ export function createStore(path) {
     // #254：写入准入的内容哈希候选集（只读）。
     findContentHashMatches,
     remove,
+    // 车道 C：整包退出（幂等批删，side table 口径同 remove()）。
+    deleteBySharePackId,
+    // 车道 C 的导入把整包写在同一笔事务里（撞 UNIQUE 的那一条要能把整批带走）。
+    // runAtomically 本就是本文件每个写方法的事务原语，这里只是把它对外露一层：
+    // 外层已开着事务时它直接执行回调（db.isTransaction 早退），嵌套不会二次 BEGIN。
+    runAtomically,
     setForget,
     setArchived,
     touchLastAccess,
