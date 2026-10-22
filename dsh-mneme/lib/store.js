@@ -275,10 +275,12 @@ CREATE INDEX IF NOT EXISTS idx_distill_records_distilled_at ON distill_records(d
 -- 不该因删掉其中一条派生记忆而消失。
 -- memory_id 是 TEXT 而非 issue 草稿里的 INTEGER：memories.id 是 TEXT 主键，
 -- 类型必须与父表一致（否则 join 恒空）。
--- ON DELETE CASCADE 在本库**不生效**——store.js 从不打开 PRAGMA foreign_keys，
--- 全库唯一那条 REFERENCES 也一直是惰性的。与其为一个新表翻转全局 pragma
--- （会同时改变既有 recall_events 的写入行为），不如在 remove() 里显式清链接：
--- 语义相同、影响面只在本表。见 remove() 的注释。
+-- ON DELETE CASCADE 在本库是**生效的**：createStore 走 new DatabaseSync(path) 不带选项，
+-- 而 node:sqlite 的 enableForeignKeyConstraints 默认为真（实测：新库上 PRAGMA foreign_keys
+-- 返回 1，删父行确实级联清掉本表）。本库两条 FK 都因此一直是活的——这一条，以及
+-- recall_evals(recall_run_id) → recall_runs(id)。级联在兜底，remove() 仍然显式清链接，
+-- 理由不是「FK 没开」，而是这份清理不该挂在一条没人钉过的驱动默认上：连接哪天被以
+-- enableForeignKeyConstraints:false 打开，悬空链接只有那条 DELETE 挡得住。见 remove() 的注释。
 CREATE TABLE IF NOT EXISTS memory_provenance (
   memory_id  TEXT    NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
   session_id TEXT    NOT NULL,
@@ -1383,10 +1385,11 @@ export function createStore(path) {
 
   function remove(id) {
     runAtomically(() => {
-      // #399：memory_provenance 的 ON DELETE CASCADE 在本库是惰性的（createStore
-      // 从不打开 PRAGMA foreign_keys），所以链接在这里显式清。不用翻转全局 pragma
-      // 换这一条级联：那会同时激活 recall_events 那条既有的 REFERENCES，改变一个
-      // 与 #399 无关的写入路径。记录本身（distill_records）不删——删掉一条派生记忆
+      // #399：memory_provenance 挂着 ON DELETE CASCADE，而 node:sqlite 默认就把
+      // foreign_keys 开成 1（实测 PRAGMA foreign_keys = 1），所以级联今天确实在兜底。
+      // 这条显式 DELETE 不是冗余、也不是「FK 没开才需要」：它是不把清理挂在一份没人
+      // 钉过的驱动默认上——连接哪天以 enableForeignKeyConstraints:false 打开，悬空链接
+      // 只有这一条挡得住。记录本身（distill_records）不删——删掉一条派生记忆
       // 不该让整个窗口的原文凭证消失。
       db.prepare("DELETE FROM memory_provenance WHERE memory_id = ?").run(id);
       db.prepare("DELETE FROM memories WHERE id = ?").run(id);
@@ -1402,10 +1405,10 @@ export function createStore(path) {
    * 什么都没删就别记一笔镜像债（remove() 每次必 bump，那是它的既有行为，不在这里扩大）。
    *
    * side table 清理口径 = remove() 的口径（#399）：显式同事务清 memory_provenance。
-   * 这条不是冗余——memory_provenance 挂着 ON DELETE CASCADE，而 node:sqlite 默认就把
-   * foreign_keys 开成 1，所以今天删行确实另有级联兜底；但 remove() 走的是显式清理，
-   * 批删跟着它走，不赌连接配置（哪天连接以 enableForeignKeyConstraints:false 打开，
-   * 悬空链接只有这一条 DELETE 挡得住）。
+   * 这条是双保险，不是「FK 没开所以必须手写」：memory_provenance 挂着 ON DELETE CASCADE，
+   * 而 node:sqlite 默认就把 foreign_keys 开成 1（实测 PRAGMA foreign_keys = 1），今天删行
+   * 确实另有级联兜底；显式清理的存在是为了不依赖这份没人钉过的驱动默认，同时跟 remove()
+   * 保持一致的口径（连接哪天以 enableForeignKeyConstraints:false 打开，悬空链接只有它挡得住）。
    *
    * remove() 不碰的（entity_attrs / entity_relations 的 memory_id 反查、conflict_pending、
    * scope_changes、embedding 解析缓存）这里也不碰——批删不是新的清理语义。service 层的
@@ -3431,9 +3434,12 @@ export function createStore(path) {
     remove,
     // 车道 C：整包退出（幂等批删，side table 口径同 remove()）。
     deleteBySharePackId,
-    // 车道 C 的导入把整包写在同一笔事务里（撞 UNIQUE 的那一条要能把整批带走）。
-    // runAtomically 本就是本文件每个写方法的事务原语，这里只是把它对外露一层：
-    // 外层已开着事务时它直接执行回调（db.isTransaction 早退），嵌套不会二次 BEGIN。
+    // 只管 SQLite 回滚的存储层原语（本文件每个写方法都在用它，这里只是对外露一层：
+    // 外层已开着事务时它直接执行回调，db.isTransaction 早退，嵌套不会二次 BEGIN）。
+    // **它不是导入口**：车道 C 的导入走 service.transaction()——那层除回滚外还会随
+    // ROLLBACK 截断 pendingEmbed / pendingEntity，用这个裸原语导入会让队列和库分叉。
+    // 露出的用途是存储级批写与用例：C1 的 UNIQUE 撞库用例（test/share-store.test.js）
+    // 就靠它把「撞一条、整批不落」这条 ROLLBACK 路径直接命中。
     runAtomically,
     setForget,
     setArchived,
