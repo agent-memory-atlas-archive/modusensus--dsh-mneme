@@ -1399,6 +1399,12 @@ export function createStore(path) {
     });
   }
 
+  // 一条 DELETE ... WHERE id IN (...) 最多绑多少个 `?`。SQLite 的上限是 32766
+  // （SQLITE_MAX_VARIABLE_NUMBER），取 500 后离上限还有六十多倍余量：这条语句一行一个参数，
+  // 而包的大小按字节不按条数封顶（见 deleteBySharePackId 的分块理由），500 让单条语句的
+  // 解析成本可以忽略、又永远够不到那格上限，块数只随包条数线性增长。
+  const DELETE_ID_CHUNK = 500;
+
   /**
    * 整包退出（车道 C）。删空一个不存在的包是幂等的 0，不是错误——对方点第二次「收起
    * 这个包」与「收起一个从来没导入过的包」都该是这个答案；早退也不 bump generation：
@@ -1411,19 +1417,45 @@ export function createStore(path) {
    * 保持一致的口径（连接哪天以 enableForeignKeyConstraints:false 打开，悬空链接只有它挡得住）。
    *
    * remove() 不碰的（entity_attrs / entity_relations 的 memory_id 反查、conflict_pending、
-   * scope_changes、embedding 解析缓存）这里也不碰——批删不是新的清理语义。service 层的
-   * 既有收敛路径继续负责图与镜像；向量索引在存储层够不着，由 C4 在 service 侧处理。
+   * scope_changes、embedding 解析缓存）这里也不碰——批删不是新的清理语义。
+   *
+   * 向量索引这一格 C4 实测过，把 C1 留下的那句「由 C4 在 service 侧处理」改对：service
+   * 侧没有活儿要接。`vector-index.js` 是 memories.embedding 那一列的薄层，余弦检索
+   * (`searchVector`) 每次调用都从 SQL 现取「带向量的行」的 id 集合，行被物理删掉即从集合
+   * 里消失——向量跟着行一起走，一列残值都留不下；事后落到的 embed 也只是
+   * `UPDATE ... WHERE id = ?` 命中 0 行，不会把僵尸行写回来。唯一的残留是 #202 那个
+   * 进程内的解析缓存（id → 已解析向量），它与 remove() 同处置且读不出僵尸：每个调用方
+   * （searchVector / getEmbeddings / document.js / organize.js）的 id 集合都来自活行的
+   * SQL 读，未命中缓存时按 id 点查库，行没了就返回 undefined——最坏是一条等 FIFO 驱逐的
+   * 内存，不是一条搜得到的鬼行。要在这里清它等于给批删加一份 remove() 没有的新语义，
+   * 与本方法的口径声明相反，所以不动（C4 的报告记了这一格，remove() 是否要一起补是
+   * 单独一刀的事）。
+   *
+   * IN 列表分块（chunk = DELETE_ID_CHUNK）：SQLite 一条语句最多绑 32766 个参数
+   * （SQLITE_MAX_VARIABLE_NUMBER，实测第 32767 个报 "too many SQL variables"），而这条
+   * 语句原本一行一个 `?`。车道 A 的包水位按字节不按条数（MAX_PACK_BYTES = 3 MiB），所以
+   * 「正文很短、条数很多」的包理论上能逼近那一格——一条语句撞上限是整笔回滚，效果等于
+   * 「这个包永远撤不掉」，而那正是退出这条路径最不该坏的方式。
+   * 分块不是语义变化，四点逐条对齐分块前的形状：ids 是本事务开头一次读到的固定快照
+   * （slice 出来的连续段，块之间互不相交、并起来就是全集）；按主键删本就幂等；整包裹在同
+   * 一个 runAtomically 里，原子性与快照语义一字未动；generation 只在最后加一次，所以
+   * 「删了行却没记镜像债」这个 crash 窗口和分块前同样不存在。changes 逐块求和——那是
+   * 调用方答复里报出去的数，少加一块就少报一块。
    */
   function deleteBySharePackId(packId) {
     if (typeof packId !== "string" || !packId) return 0;
     return runAtomically(() => {
       const ids = db.prepare("SELECT id FROM memories WHERE share_pack_id = ?").all(packId).map((r) => r.id);
       if (!ids.length) return 0;
-      const marks = ids.map(() => "?").join(", ");
-      db.prepare(`DELETE FROM memory_provenance WHERE memory_id IN (${marks})`).run(...ids);
-      const result = db.prepare(`DELETE FROM memories WHERE id IN (${marks})`).run(...ids);
+      let deleted = 0;
+      for (let start = 0; start < ids.length; start += DELETE_ID_CHUNK) {
+        const chunk = ids.slice(start, start + DELETE_ID_CHUNK);
+        const marks = chunk.map(() => "?").join(", ");
+        db.prepare(`DELETE FROM memory_provenance WHERE memory_id IN (${marks})`).run(...chunk);
+        deleted += db.prepare(`DELETE FROM memories WHERE id IN (${marks})`).run(...chunk).changes;
+      }
       incrementGeneration();
-      return result.changes;
+      return deleted;
     });
   }
 

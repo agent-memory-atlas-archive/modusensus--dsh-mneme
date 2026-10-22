@@ -12,6 +12,12 @@
 // 回滚一起消失且一行都不嵌。它们各自防的替换品：store.runAtomically（txDepth 恒 0，队列
 // 当场排空）、hand-rolled BEGIN/COMMIT（原子性一样，但 drain 与 notifyWrite 的位置不对）、
 // 「撞一条就跳过这一条」的宽容写法（前几行留在库里）。
+//
+// C4 之后本文件管的是收侧的**进与出**两面。退出那五条锁防的是另一族错：删多（伤到收件人
+// 自己的行）、删少（留下半个包，身份还挂在那个已经收起的包上）、没删干净幂等键（归档版实现
+// 的死结：撤了却导不回来）、没删成东西却冒充「库刚变过」（重渲染整面镜像 + 顶回空闲计时器）、
+// 以及嵌入次数与「真的写进库的行数」脱钩。最后一条是整包 IN 列表的分块：SQLite 一条语句的
+// 参数上限是 32766，而包的水位按字节不按条数，所以「小正文大条数」的包能逼近它。
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -357,5 +363,215 @@ test("a collision on the index rolls back the rows that already landed and disca
     assert.equal(h.embedded.length, 0, "the queued embeds are truncated on rollback — no vector for a rolled-back row");
     assert.equal(h.service.embeddedCount(), 0);
     assert.equal(h.store.getByShareExternalId(p.memories[0].external_id), undefined);
+  } finally { h.close(); }
+});
+
+// ============================ C4：整包退出 ============================
+// 退出是这条车道唯一会从用户库里**删掉东西**的动作，所以下面六条锁各自防一类「看着也对」
+// 的替换品：
+//   · 删成归档 —— 行还在，UNIQUE 位还占着，包撤不掉也导不回（spec §5 定物删的那条理由）；
+//   · 只删可见面 / 只删第一块 —— deleted 报得满、库里却留着半包，那半包的来源标签指向一个
+//     已经撤走的分享者，而面板只认答复里的数；
+//   · 顺手清库 —— 收件人自己的行被一起带走或被改一行，本文件按 C3 的口径逐字节钉住那一行；
+//   · 干跑走真删那半 / 没删成也进事务 —— 答复同形状，但它重渲染了整面镜像、顶回了做梦的
+//     空闲计时器，还记下一笔没有对象的镜像债；
+//   · 嵌入次数与真的写进库的行数脱钩（重复排空、给没写成的行做向量、退出后重嵌全库）；
+//   · 整包 IN 列表不分块 —— SQLite 一条语句 32766 个参数的上限，撞上了就是整笔回滚。
+test("undo removes exactly one pack's rows and frees the idempotency keys", () => {
+  const h = setup();
+  try {
+    h.service.importSharePack(pack([entry("decision", "选 SQLite", "正文 A"), entry("pitfall", "别用表连接", "正文 B")]), {});
+    const kept = h.store.save({ type: "decision", title: "我自己的", content: "正文", tags: [] });
+    const keptBefore = h.store.getById(kept.id);
+    const preview = h.service.deleteSharePack(PACK_ID, { dryRun: true });
+    assert.equal(preview.deleted, 2);
+    assert.equal(preview.pack_id, PACK_ID);
+    assert.equal(h.rows().length, 3, "dry-run removes nothing");
+    assert.equal(h.writes(), 1, "the preview must not claim the library just changed (the 1 is the import's own notify)");
+    const out = h.service.deleteSharePack(PACK_ID, {});
+    assert.equal(out.deleted, 2);
+    assert.deepEqual(out.sample, preview.sample, "the destructive answer carries the same inventory the preview showed");
+    assert.equal(h.rows().length, 1, "only the withdrawn pack is gone, the host's row is still there");
+    assert.ok(h.store.getById(kept.id), "the host's own rows must survive");
+    const keptAfter = h.store.getById(kept.id);
+    assert.equal(keptAfter.updated_at, keptBefore.updated_at, "a withdrawal must not touch the recipient's own row");
+    assert.equal(keptAfter.content, keptBefore.content);
+    assert.equal(h.writes(), 2, "one notifyWrite for the committed withdrawal, from transaction()'s finally");
+    assert.equal(h.service.deleteSharePack(PACK_ID, {}).deleted, 0, "undo is idempotent");
+    assert.equal(h.writes(), 2, "a withdrawal that deletes nothing must not notify a second time");
+    const again = h.service.importSharePack(pack([entry("decision", "选 SQLite", "正文 A"), entry("pitfall", "别用表连接", "正文 B")]), {});
+    assert.equal(again.created, 2, "the UNIQUE slots were freed, so the pack can land again");
+  } finally { h.close(); }
+});
+
+// 「留下半个包」是这一族里最难看见的错：deleted 报 2、sample 报 2、库里还剩 1 条带
+// share_pack_id 的行——面板上那个包显示已收起，向量检索与关键词检索却还能搜到它，而它
+// 的来源标签指向一个已经撤走的分享者。所以这里数的是**库级**行数（SELECT count(*) FROM
+// memories），不是答复里的数、也不是 h.rows() 那个可见面：归档与遗忘那两张脸必须一起
+// 收走。spec §5 明确不要的归档版实现在这里当场转红（变异检验：把实现换成逐行
+// setArchived，本文件六条退出用例里有五条一起红，见 C4 报告的 M2）。
+test("undo takes the whole pack with it, including the archived and forgotten faces", () => {
+  const h = setup();
+  try {
+    h.service.importSharePack(pack([entry("decision", "选 SQLite", "正文 A"), entry("pitfall", "别用表连接", "正文 B"),
+      entry("constraint", "别动镜像", "正文 C")]), {});
+    const rowsIn = h.rows();
+    h.store.setArchived(rowsIn.find((m) => m.title === "选 SQLite").id, true);
+    h.store.setForget(rowsIn.find((m) => m.title === "别用表连接").id, true);
+    const total = () => h.store.db.prepare("SELECT count(*) AS c FROM memories").get().c;
+    assert.equal(total(), 3, "three foreign rows landed before the withdrawal");
+    const out = h.service.deleteSharePack(PACK_ID, {});
+    assert.equal(out.deleted, 3, "the count is the store's, not the visible face's: archived/forgotten rows are part of the pack");
+    assert.equal(total(), 0, "nothing of that pack may survive in any face");
+    assert.deepEqual(h.store.listBySharePackId(PACK_ID), []);
+    // 每一格的幂等键都释放了：剩一条就够把下一个同名条目卡成 skipped_existing，而它挂在
+    // 一个已经报成「收起了」的包上——所以 re-import 必须整包新建，一条都不许跳过。
+    const again = h.service.importSharePack(pack([entry("decision", "选 SQLite", "正文 A"),
+      entry("pitfall", "别用表连接", "正文 B"), entry("constraint", "别动镜像", "正文 C")]), {});
+    assert.equal(again.created, 3, "every share_external_id slot the pack held is free again");
+    assert.equal(again.skipped_existing, 0, "a withdrawn row must not read as 「already imported」");
+    assert.deepEqual(again.title_conflicts, [], "the withdrawn pack left no row behind to clash with");
+    assert.equal(h.rows().length, 3);
+  } finally { h.close(); }
+});
+
+test("undo of an unknown pack answers zero, not an error", () => {
+  const h = setup();
+  try {
+    h.service.importSharePack(pack([entry("decision", "选 SQLite", "正文 A")]), {});
+    const genBefore = h.store.getMirrorState().generation;
+    const out = h.service.deleteSharePack("0000000000000000", {});
+    assert.equal(out.deleted, 0);
+    assert.deepEqual(out.sample, []);
+    assert.equal(out.pack_id, "0000000000000000");
+    assert.equal(h.rows().length, 1, "an id that matches nothing must not delete the pack that is actually in the library");
+    assert.equal(h.store.getMirrorState().generation, genBefore,
+      "deleting nothing registers no mirror debt — recoverMirror would rewrite the whole mirror for zero rows");
+    // 两张皮把对面的输入原样递进来：空串、空格、非字符串都不该抛，也不该摸 store。
+    assert.deepEqual(h.service.deleteSharePack("", {}), { pack_id: "", deleted: 0, sample: [] });
+    assert.deepEqual(h.service.deleteSharePack("   ", {}), { pack_id: "", deleted: 0, sample: [] });
+    assert.deepEqual(h.service.deleteSharePack(undefined, {}), { pack_id: "", deleted: 0, sample: [] });
+    assert.deepEqual(h.service.deleteSharePack(42, {}), { pack_id: "", deleted: 0, sample: [] });
+    assert.equal(h.writes(), 1, "the four no-op answers above never reach transaction(), so they never notify");
+  } finally { h.close(); }
+});
+
+// 上限管的是**答复的字节数**不是删除的完整性：这一格要走两张皮（面板 JSON 与 Bearer 数据面
+// JSON），一个几千条的包如果把全部标题塞进答复，响应体就比请求还大，而人只需要认前面几条。
+// 所以删多少与报多少是两格：deleted 恒为全集，sample 恒为 20 条封顶的前缀。
+test("the sample is capped so a huge pack still answers in bounded bytes", () => {
+  const h = setup();
+  try {
+    const many = Array.from({ length: 30 }, (_, i) => entry("pattern", `模式 ${i}`, `正文 ${i}`));
+    h.service.importSharePack(pack(many), {});
+    const out = h.service.deleteSharePack(PACK_ID, { dryRun: true });
+    assert.equal(out.deleted, 30);
+    assert.equal(out.sample.length, 20);
+    assert.ok(out.sample.every((s) => typeof s.type === "string" && typeof s.title === "string"));
+    assert.deepEqual(Object.keys(out.sample[0]).sort(), ["title", "type"],
+      "the sample carries only what a human needs to recognise the batch — no ids, no content bytes");
+    assert.equal(h.rows().length, 30, "the preview deletes nothing");
+    const real = h.service.deleteSharePack(PACK_ID, {});
+    assert.equal(real.deleted, 30, "the cap never caps the delete, only the report");
+    assert.equal(real.sample.length, 20);
+    assert.equal(h.rows().length, 0);
+  } finally { h.close(); }
+});
+
+// 上一轮评审点名的缺口：现有三把事务锁（saves 里的 fired、排空时刻的 inTx/rows/writesAtFire、
+// notifyWrite 次数）数的是「排空那一眼」的形状，所以「在 transaction() 返回之后再补一遍嵌入」
+// 那种写法能同时满足它们。这条把锚换成一个等式：**发射次数 == 本次真的写进库的行数**，
+// 不多不少，且退出一次都不许发。它能抓住的形状：重复排空（双份嵌入）、给没写成的行做向量（干跑/回滚/
+// 未知包）、以及「退出后把剩下的库重嵌一遍」（那既烧收件人的模型额度，也把外来行的向量重新
+// 写进已经删掉的行——后者由 searchVector 那一格兜住：向量集合永远只以库为准）。
+// 诚实记下它抓不到的那一半：如果实现把入队换成「事务返回后一次性补」，次数与向量列都对得上，
+// 本文件所有探针都读不到差别——差别只在 pendingEmbed 有没有被用过，那是 service 闭包内部的
+// 事，钉它要动生产代码的可测面，这一刀不换（见报告 leftover）。
+test("embeds fire exactly once per row a batch writes, and never for a withdrawal", async () => {
+  const h = setup();
+  try {
+    const first = h.service.importSharePack(pack([entry("decision", "选 SQLite", "正文 A"), entry("pitfall", "别用表连接", "正文 B")]), {});
+    assert.equal(h.fires.length, first.created, "one embed fire per written row, no more");
+    const preview = h.service.importSharePack(pack([entry("constraint", "别动镜像", "正文 C")], "桉"), { dryRun: true });
+    assert.equal(preview.created, 1);
+    assert.equal(h.fires.length, first.created, "a dry run writes no rows, so it must fire no embed");
+    const second = h.service.importSharePack(pack([entry("constraint", "别动镜像", "正文 C")], "杉", PACK_ID_2), {});
+    assert.equal(h.fires.length, first.created + second.created, "the second pack adds exactly its own rows");
+    assert.equal(h.embedded.length, h.fires.length, "no fire is dropped and none is invented");
+    assert.equal(await waitFor(() => h.service.embeddedCount() === 3), true, "all three live rows end up vectored");
+    const withdrawn = h.store.listBySharePackId(PACK_ID).map((m) => m.id);
+    const firesBefore = h.fires.length;
+    const out = h.service.deleteSharePack(PACK_ID, {});
+    assert.equal(out.deleted, 2);
+    assert.equal(h.fires.length, firesBefore,
+      "a withdrawal embeds nothing: it writes no row, and re-embedding the survivor would burn the recipient's model quota");
+    assert.equal(await waitFor(() => h.service.embeddedCount() === 1), true,
+      "the embedding column travels with the row: the two withdrawn rows take their vectors to the grave");
+    // 真正的读路径：向量检索的候选集合每次由 SQL 现取（store.searchVector），所以退出的行
+    // 不可能以「有向量的僵尸」身份回来。桩向量的余弦对任何 [0, n] 都是 1，这里要的就是
+    // 「全都入选」的宽口径，好让行数差直接显形。
+    const hits = h.service.searchVector([0, 1], { limit: 10, threshold: 0 });
+    assert.equal(hits.length, 1, "the withdrawn rows are invisible to vector recall");
+    assert.equal(hits[0].share_pack_id, PACK_ID_2);
+    for (const id of withdrawn) assert.equal(h.store.getById(id), undefined);
+  } finally { h.close(); }
+});
+
+// 分块锁（SQLite 一条语句最多绑 32766 个参数，SQLITE_MAX_VARIABLE_NUMBER）。车道 A 的水位
+// 按字节不按条数（MAX_PACK_BYTES = 3 MiB），所以「正文很短、条数很多」的包理论上能逼近那一格，
+// 而一条语句撞上限是整笔回滚 = 这个包永远撤不掉。这里不测 32766 本身（那要 32767 行真数据），
+// 测的是分块这件事真的发生了：600 行的包由**多条** DELETE 承担，每条绑的 `?` 严格少于全集，
+// 而绑数之和正好是 600（没有漏删的块、没有重复的块）。
+// 它防的回归：把 deleteBySharePackId 换回单条 IN（deletes.length 变 1、那条的绑数变 600）；
+// 以及「只删了第一块」那种半吊子分块（deleted 变 500、绑数之和变 500）。
+// 诚实记录这块观测的边界：它只数 DELETE FROM memories 的语句形状，不改任何返回值；chunk 尺寸
+// 若哪天被调到 ≥600，本用例会转红，那时把包加大而不是把断言调松——断言的意思是「一条语句
+// 绑不下整个包」，不是「chunk 等于 500」。
+test("a pack larger than one IN chunk is withdrawn in chunks that each bind less than the whole set", () => {
+  const h = setup();
+  try {
+    // 600 行由 store.save 直接落，不走 importSharePack：这条锁的是**删**那一侧的语句形状，
+    // 而本文件的嵌入探针每次发射都要全表数一遍行数（见 setup 里的 fires.rows），600 行走完整
+    // 导入会把用例变成 600×600 的读、测的还是导入侧（30 行那条已经覆盖）。落库带的那几列
+    // （source / share_pack_id / share_external_id / epistemic_status）与导入路径逐字同一套，
+    // 所以删除面读到的形状不是假的。
+    const many = Array.from({ length: 600 }, (_, i) => entry("pattern", `模式 ${i}`, `正文 ${i}`));
+    for (const e of many) {
+      h.store.save({ type: e.type, title: e.title, content: e.content, tags: e.tags, importance: e.importance,
+        epistemic_status: e.epistemic_status, source: IMPORTED_SOURCE, agent_scope: null, workspace_scope: null,
+        share_pack_id: PACK_ID, share_external_id: e.external_id });
+    }
+    assert.equal(h.rows().length, 600, "the multi-chunk path needs a pack bigger than one chunk to exist at all");
+    // 观测点：临时给这条连接的 prepare 加一层记账（取完立刻还原，见 finally）。store 内部
+    // 调的是 db.prepare(...)，属性查找在调用那一刻发生，所以自己的这一层会先被命中；
+    // delete 之后原型上的方法照原样回来。不改任何返回值，也不留第二份实现。
+    const db = h.store.db;
+    const originalPrepare = db.prepare;
+    const sqls = [];
+    db.prepare = function (sql) { sqls.push(sql); return originalPrepare.call(this, sql); };
+    let out;
+    try {
+      out = h.service.deleteSharePack(PACK_ID, {});
+    } finally {
+      delete db.prepare;
+    }
+    assert.equal(db.prepare, originalPrepare, "the observation must be taken back off the connection");
+    assert.equal(out.deleted, 600, "chunking must not lose a row, and must not report a chunk's count as the total");
+    assert.equal(h.rows().length, 0, "every chunk is really deleted, not just the first one");
+    // 两条 IN 都得分块：memories 与 memory_provenance 绑的是同一份 id 快照，只分其中一条
+    // 等于另一半还挂着那个上限。
+    for (const prefix of ["DELETE FROM memories WHERE id IN (", "DELETE FROM memory_provenance WHERE memory_id IN ("]) {
+      const statements = sqls.filter((sql) => sql.startsWith(prefix));
+      const bound = statements.map((sql) => (sql.match(/\?/g) || []).length);
+      assert.ok(bound.length >= 2, `${prefix}… must run as more than one statement for a 600-row pack (saw ${bound.length})`);
+      assert.equal(bound.reduce((sum, n) => sum + n, 0), 600,
+        `${prefix}… chunks must partition the id set: nothing deleted twice, nothing left out`);
+      for (const n of bound) assert.ok(n < 600, `one statement bound all ${n} ids — that is the unbounded IN list this lock exists to stop`);
+    }
+    // 整包的 UNIQUE 槽位随分块一起释放（最后一块最容易漏：它绑的是余数）。
+    h.store.save({ type: "pattern", title: "模式 0", content: "撤完还能再落回同一格",
+      source: IMPORTED_SOURCE, share_pack_id: PACK_ID, share_external_id: many[0].external_id });
+    assert.equal(h.store.getByShareExternalId(many[0].external_id).content, "撤完还能再落回同一格");
+    assert.equal(h.rows().length, 1);
   } finally { h.close(); }
 });

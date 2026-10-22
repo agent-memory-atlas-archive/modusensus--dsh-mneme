@@ -2574,9 +2574,10 @@ export function createService({ store, mirror, config, onWrite, logger, document
     }
   });
 
-  // 车道 C 收侧的入库（spec §5）：内聚块在 src/share-import.js，这里只做依赖注入 +
-  // barrel 出口。注入的是本文件的 transaction 而不是 store.runAtomically——嵌入队列
-  // 由 transaction 的最外层 COMMIT 排空，换那个助手等于静默不嵌入（#372 修过两次）。
+  // 车道 C 收侧的入库与整包退出（spec §5）：内聚块在 src/share-import.js，这里只做依赖
+  // 注入 + barrel 出口。注入的是本文件的 transaction 而不是 store.runAtomically——嵌入
+  // 队列由 transaction 的最外层 COMMIT 排空，换那个助手等于静默不嵌入（#372 修过两次）；
+  // 退出那侧用它则是为了 finally 里的 syncMirror + notifyWrite（删完得让其余读侧知道）。
   const shareImport = createShareImport({ store, transaction, scheduleEmbed });
 
   return {
@@ -2596,6 +2597,10 @@ export function createService({ store, mirror, config, onWrite, logger, document
     // 那组 passthrough 的注释）要求导入从 service 进，否则两皮各摸一遍 store、幂等
     // 口径随之变成两份。
     importSharePack: shareImport.importSharePack,
+    // 整包退出（C4）与导入同住 src/share-import.js：收侧的「进与出」共用同一份 store
+    // 注入与同一个事务口径，键名照计划里的契约留在 service 的返回表上，两张皮（C5/C6）
+    // 只认 service 这一个入口——api 层不直接摸 store 那条纪律对退出同样成立。
+    deleteSharePack: shareImport.deleteSharePack,
     toApiList,
     isVisibleInScope,
     // issue #471 政策轴：按下/松开与读取照 store 那三条件透传（纯 bookkeeping，
