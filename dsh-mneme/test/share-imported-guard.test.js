@@ -39,6 +39,8 @@ test("saveWithDedupe never merges into an imported row", () => {
     const after = store.getById(foreign.id);
     assert.equal(after.content, before.content);
     assert.equal(after.updated_at, before.updated_at, "a foreign row's updated_at must not move");
+    assert.equal((after.content_history ?? []).length, (before.content_history ?? []).length,
+      "merging into a foreign row would also push its content_history");
   } finally {
     try { store.close(); } catch { /* closed */ }
     rmSync(dir, { recursive: true, force: true });
@@ -81,11 +83,12 @@ test("saveWithDedupe never merges into an imported row named by _mergeInto", () 
   }
 });
 
-// 字面量锁：钉死汇流口两处闸门的形状。它不证明闸门有效（那是上面两条行为锁的活），
-// 它防的是将来某次重构把其中一处改名、挪进别的文件或干脆删掉——上面两条各自只测得到
-// 一条路，删掉另一条闸门要等到有人专门给它写用例才会被抓到，而这条锁当场就红。
-// 它锁字面量，所以谓词变量改名 / 参数名换掉也算红：那是「实现漂了，锁跟着走」，
-// 不是误报（改的人必须知道自己动的是哪两处）。
+// 字面量锁：钉死汇流口两处闸门的形状。有效性不用它证明——上面两条行为锁各咬一道闸门
+// （摘掉候选集那条只有第一条转红，摘掉显式目标那条只有第二条转红，两处都实测过）。
+// 本锁补的是行为测试看不见的那一类回归：闸门被改名、被挪进别的文件、或两条并成一条
+// ——代码照旧跑对，但「这里有两道、缺一不可」这个事实消失了，而契约正靠这两道分头
+// 守同题合并与点名并入。它锁字面量，所以谓词变量改名 / 参数名换掉也算红：那是
+// 「实现漂了，锁跟着走」，不是误报（改的人必须知道自己动的是哪两处）。
 const SERVICE_SITES = [
   ["src/service.js", ".filter((m) => !isImportedRow(m))"],
   ["src/service.js", "!isImportedRow(explicitCandidate)"],
@@ -96,4 +99,44 @@ test("the saveWithDedupe choke point keeps both guard sites", () => {
     assert.ok(readFileSync(resolve(here, "..", file), "utf8").includes(needle),
       `${file} must keep the imported-row guard at the choke point: ${needle}`);
   }
+});
+
+// 池子清单（B2）。巩固、sleep 降级、模式扫描、关系补全、整理并入读的是各自的**行池**，
+// 不经过汇流口，而且池子里就有 setArchived / demoteToSummary 这种不经 saveWithDedupe
+// 的直接改行动作——堵了汇流口不等于堵了它们，所以每处都要单独挂谓词、也要单独锁住。
+// 为什么用字面量清单而不是给九个池子各写一条行为用例：多数池子挂在 LLM 路由后面
+// （dream/sleep 主流程要全套打桩才跑得起来），而行为用例永远测不到「将来新增的第十处」——
+// 清单是死的，加池子必须在这里加一行，漏挂当场红。代价是它也会为行为等价的改写转红
+// （谓词挪进 helper、变量改名），那是「实现漂了，锁跟着走」，不是误报（AGENTS.md 自查 8）。
+// service.js 不在清单里：汇流口那两处由上面的 SERVICE_SITES 锁，同一文件不该有两份清单。
+const POOL_SITES = [
+  ["src/dream.js", "const memories = withoutPaused(service, service.all().filter((m) => !isImportedRow(m) && !m.archived && m.type !== \"summary\" && m.type !== \"document\"));"],
+  ["src/dream.js", "const inputs = withoutPaused(service, service.all().filter((m) => !isImportedRow(m) && !m.archived && !m.forgotten && m.type !== \"summary\" && m.type !== \"document\"));"],
+  ["src/dream.js", "let memories = withoutPaused(service, service.all().filter((m) => !isImportedRow(m) && !m.archived && m.type !== \"summary\" && m.type !== \"document\"));"],
+  ["src/dream.js", "const summaryAll = withoutPaused(service, service.all().filter((m) => !isImportedRow(m) && !m.archived && m.type !== \"summary\" && m.type !== \"document\"));"],
+  ["src/dream/sleep.js", "const memories = withoutPaused(service, service.all().filter((m) => !isImportedRow(m) && !m.archived && !m.forgotten && m.type !== \"summary\" && m.type !== \"document\"));"],
+  ["src/dream/sleep.js", "for (const m of withoutPaused(service, service.all().filter((m) => !isImportedRow(m)))) {"],
+  ["src/dream/sleep.js", "!isImportedRow(m) && !m.archived && m.type !== \"summary\" && m.type !== \"pattern\""],
+  ["src/dream/sleep.js", "const memories = withoutPaused(service, service.all().filter((m) => !isImportedRow(m) && !m.archived && !m.forgotten));"],
+  ["src/organize.js", "store.list({ type: candidate.type, limit: null }).filter((m) => !isImportedRow(m) && !m.archived && scopeMatches(m, candidate))"]
+];
+
+test("every row pool that can rewrite or archive is guarded", () => {
+  for (const [file, needle] of POOL_SITES) {
+    assert.ok(readFileSync(resolve(here, "..", file), "utf8").includes(needle),
+      `${file} must guard its row pool with isImportedRow: ${needle.slice(0, 60)}`);
+  }
+});
+
+// 第二条比清单粗但更耐改写：不锁整句形状，只锁「dream.js 里出现 service.all() 的那行
+// 要么带谓词、要么按 source 取行」。它对换行、缩进、条件顺序都不敏感，只对「新增一处
+// 没挂谓词的池子」和「谓词改名」敏感；它给 dream.js 兜底是因为这里的池子清一色是
+// service.all()，而 sleep.js（多行 service.list）与 organize.js（store.list）取行 API
+// 不同，要扩就先按各自的 API 写判据，别把这条当万能。
+test("dream.js has no unguarded service.all() pool left", () => {
+  const text = readFileSync(resolve(here, "../src/dream.js"), "utf8");
+  const offenders = text.split("\n")
+    .map((line, i) => [i + 1, line])
+    .filter(([ , line]) => line.includes("service.all()") && !line.includes("isImportedRow") && !line.includes("m.source === \"dream\""));
+  assert.deepEqual(offenders, [], `unguarded pools at ${offenders.map(([n]) => n).join(", ")}`);
 });
