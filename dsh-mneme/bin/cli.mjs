@@ -246,6 +246,18 @@ function failHttp(cfg, status, pathname, data, text) {
   } else if (status === 404) {
     hint = `\n资源不存在：${pathname}`;
   }
+  // 拒答体自己带的下一步必须转出去，不然命令侧只能再写一份错误分支。撞上的这一刀是
+  // share 的 413：响应体是 {error:"too-large", bytes, limitBytes, hint, report}，
+  // 旧实现只取 data.error，于是现场只剩「请求失败（HTTP 413）：too-large」——「大了
+  // 多少」与「用 --type/--tag 分批」那两句留在体里没人看得见（措辞只许有一份，就在
+  // 拒发的那侧，同 RECLAIM_CONFIRM_HINT 的口径）。完整 report（含 skip_list）走
+  // --json：下面 rawJson 把整个响应体原样交给 stderr，这里不复制第二份打印器。
+  if (data && typeof data === 'object') {
+    if (typeof data.hint === 'string' && data.hint.trim()) hint += `\n${data.hint.trim()}`;
+    if (Number.isFinite(data.bytes) && Number.isFinite(data.limitBytes)) {
+      hint += `\n量到 ${formatBytes(data.bytes)}，水位 ${formatBytes(data.limitBytes)}`;
+    }
+  }
   fail(cfg, `请求失败（HTTP ${status}）${serverError ? `：${serverError}` : ''} [${pathname}]${hint}`, {
     rawJson: cfg.jsonMode && text ? text : undefined,
   });
