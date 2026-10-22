@@ -50,7 +50,13 @@ test("reply returns the pack body with kind and disposition-ready filename", () 
 });
 
 test("oversized packs answer 413 with the measured size and the batching hint", () => {
-  const fat = [{ id: "f", type: "decision", title: "t", content: "字".repeat(2_000_000), tags: [], archived: 0, forgotten: 0 }];
+  const secret = "P@ssw0rd-for-prod-db";
+  const fat = [
+    { id: "f", type: "decision", title: "t", content: "字".repeat(2_000_000), tags: [], archived: 0, forgotten: 0 },
+    // 这条是给「拒发也带 report」那格用的：整库被水位挡下时，出口照样看得见跳过清单，
+    // 而清单随答复体外发——含凭据那行的标题必须在源头就留空，不然这一路是第二次泄露。
+    { id: "s", type: "decision", title: `生产库密码 ${secret} 别丢`, content: `password: ${secret}`, tags: [], archived: 1, forgotten: 0 }
+  ];
   const out = shareReply({ ...baseArgs, service: { all: () => fat }, options: {} });
   assert.equal(out.status, 413);
   assert.equal(out.body.error, "too-large");
@@ -61,6 +67,8 @@ test("oversized packs answer 413 with the measured size and the batching hint", 
   // 本层只许取它的 report）。
   assert.ok(!("memories" in out.body), "413 body must not carry the pack body");
   assert.equal(out.body.report.included, 1, "但报告要给全：分批的依据就是这份数");
+  assert.ok(!JSON.stringify(out.body).includes(secret), "the refused reply must not ship the credential in a title");
+  assert.deepEqual(out.body.report.skip_list, [{ title: "", reason: "archived" }]);
 });
 
 test("empty library answers 200 with included 0 — not an error", () => {

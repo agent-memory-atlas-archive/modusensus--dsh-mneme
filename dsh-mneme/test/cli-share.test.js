@@ -87,6 +87,9 @@ async function startPlane() {
     url: `http://127.0.0.1:${port}`,
     state,
     overLimit() { state.rows = FAT_ROWS; },
+    // 终端那格要看得懂「标题为什么是空的」，得有一批含凭据的被跳过行；默认那批
+    // THIN_ROWS 被好几条用例共用作计数基准，不能为了这一格改它。
+    use(rows) { state.rows = rows; },
     close: () => new Promise((r) => { server.closeIdleConnections?.(); server.close(r); })
   };
 }
@@ -164,6 +167,27 @@ test("CLI share --dry-run：报数并解释没写文件，输出目录一个字�
     assert.equal(combo.code, 0, combo.stderr);
     assert.ok(!existsSync(both), "--dry-run 在场时 --out 不得落盘");
     assert.deepEqual(listFiles(ctx.out), []);
+  });
+});
+
+test("CLI 的跳过清单：含凭据那行不给标题，终端要写得像「有意不给」", { timeout: 60000 }, async () => {
+  await withPlane(async (ctx) => {
+    // 这条锁的是终端那一格：src/share.js 在源头把命中密钥判据的行的标题留空，skip_list
+    // 于是只剩原因。空标题直接打出来是一行尾随空格，读的人会当成「这条本来没标题」，
+    // 而它恰恰是最需要被看见的那一类拒绝。
+    const secret = "P@ssw0rd-for-prod-db";
+    ctx.plane.use([
+      row({ id: "1", type: "project", title: "干净的归档行", content: "没有凭据", archived: 1 }),
+      row({ id: "2", type: "decision", title: `生产库密码 ${secret} 别丢`, content: `password: ${secret}`, archived: 1 })
+    ]);
+    const dry = await runCli(ctx, ["share", "--dry-run", ...ctx.auth]);
+    assert.equal(dry.code, 0, dry.stderr);
+    assert.match(dry.stdout, /^干跑报告: 0 条$/m);
+    assert.match(dry.stdout, /- \[archived\] 干净的归档行/);
+    assert.match(dry.stdout, /- \[archived\] （标题不外发）/);
+    // 终端与落盘是同一份 report 的两张嘴：这里也不许出现那个值。
+    assert.ok(!dry.stdout.includes(secret), "CLI 不许把凭据标题打到终端");
+    assert.ok(!dry.stderr.includes(secret), "错误面同样不许");
   });
 });
 

@@ -90,25 +90,40 @@ export function createHomeRedactor(homeDir) {
  * 不是漏网。
  *
  * 跳过的分支也返回脱敏后的 title：跳过清单不只在本机看 —— 打包侧把它原样写进
- * pack.report.skip_list，CLI 再整份打到终端（车道 A3/A7 的口径）。未遮的 title 等于把
- * 用户名装进这份「设计上不含它」的文件，而泄露面最大的恰恰是不进包的那几条。所以在
- * 源头遮，每个消费方拿到的都是安全字符串；下游不需要、也不该再各补一刀。遮的仍是
- * 同一个 redact，本模块只有这一条脱敏路径。
+ * pack.report.skip_list，CLI 再整份打到终端（车道 A3/A7 的口径），而 413 那次拒发
+ * 仍带着同一份 report 出去（src/share-http.js）。未遮的 title 等于把用户名装进这份
+ * 「设计上不含它」的文件，而泄露面最大的恰恰是不进包的那几条。所以在源头遮，每个
+ * 消费方拿到的都是安全字符串；下游不需要、也不该再各补一刀。遮的仍是同一个 redact，
+ * 本模块只有这一条脱敏路径。
+ *
+ * 但「遮过 home」不等于「可以外发」：一条被密钥判据认中的行，它的**标题**常常就是
+ * 那条凭据的回声（最终评审的复现：标题「生产库密码 P@ssw0rd-for-prod-db 别丢」+ 正文
+ * `password: …`，被跳过原因是 archived）。规则表只认「关键词 + 赋值号 + 值的形状」，
+ * 单看这一串标题它并不命中 —— 所以这里判的是**整行**含不含凭据，命中就连带标题一起
+ * 不给：正文不发的那条，它的标题也不该跟着包走。留空而不是给摘要/哈希：skip_list 随包
+ * 外发，一个哈希是递给收侧的离线爆破 oracle，而低熵口令正是这类行最常见的内容。
+ * 方向上的代价只有「少看得见一条标题」，计数仍给全量。
+ *
+ * 因此扫描面在判序**之前**算一次（原因归属仍按下面的判序，空白照旧先于敏感）：代价是
+ * 归档行也进扫描，不再是「进包候选 + 敏感命中」那一小撮。量级没变 —— 整库逐条扫描实测
+ * 98 ms（docs/SHARE.md），而这条路径本来就要付一次全表读（同处约 1.1 s）。
  */
 export function classifyRowForShare(row, { redact = (t) => t } = {}) {
   const title = redact(row?.title ?? "");
-  if (row?.archived) return { include: false, reason: "archived", title };
-  if (row?.forgotten) return { include: false, reason: "forgotten", title };
-  if (SHARE_READONLY_TYPES.has(row?.type)) return { include: false, reason: "readonly_type", title };
-  if (SHARE_EXCLUDED_TYPES.has(row?.type)) return { include: false, reason: "excluded_type", title };
-  if (informationlessReason(row)) return { include: false, reason: "blank_or_noise", title };
   // 扫描面用 `scanSensitive` 这个「任意文本」口径的导出，不用带开关的那个工厂面：
   // 工厂在 sensitiveScanEnabled 关时返回 null（sensitive-scan.js:199），而那个键管的是
   // **写入侧**可观测性。分享边界本身就是安全边界（spec §4）——用户没开写入闸门时
   // 恰恰最需要这里照常在扫，跟着开关走等于裸发整库。
   const scanned = scanSensitive([row?.title, row?.content, ...(Array.isArray(row?.tags) ? row.tags : [])]
     .filter((s) => typeof s === "string").join("\n"));
-  if (scanned) return { include: false, reason: "sensitive", title };
+  const skipTitle = scanned ? "" : title;
+  if (row?.archived) return { include: false, reason: "archived", title: skipTitle };
+  if (row?.forgotten) return { include: false, reason: "forgotten", title: skipTitle };
+  if (SHARE_READONLY_TYPES.has(row?.type)) return { include: false, reason: "readonly_type", title: skipTitle };
+  if (SHARE_EXCLUDED_TYPES.has(row?.type)) return { include: false, reason: "excluded_type", title: skipTitle };
+  if (informationlessReason(row)) return { include: false, reason: "blank_or_noise", title: skipTitle };
+  // 命中判据时标题恒为空串，与「这条压根没标题」同一个出口形状（下游只看到字符串）。
+  if (scanned) return { include: false, reason: "sensitive", title: "" };
   const content = redact(row?.content ?? "");
   return {
     include: true,
@@ -173,8 +188,9 @@ function shareFilterSet(value) {
  * 她没跳过的行），别当成可读性优化来「合并条件」。
  *
  * skip_list 截到 SHARE_SKIP_LIST_MAX，skipped 的六个计数仍走全量——截的是清单不是账。
- * 清单里的 title 用 classifyRowForShare 返回值原样写入：它已在源头遮过 home，这里补
- * 第二刀是「两个口径」的开始，不是更安全。
+ * 清单里的 title 用 classifyRowForShare 返回值原样写入：它已在源头遮过 home，命中密钥
+ * 判据的那几条也已在源头留空（标题是凭据的回声，而这份清单随包外发）。这里补第二刀
+ * 是「两个口径」的开始，不是更安全。
  */
 export function buildSharePack({
   rows, alias = "", homeDir, packageVersion, filters = {},

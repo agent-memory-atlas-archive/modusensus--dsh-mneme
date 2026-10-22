@@ -727,7 +727,10 @@ function printShare(pack, { dryRun }) {
   const parts = named.filter(([k]) => (s[k] ?? 0) > 0).map(([k, zh]) => `${zh} ${s[k]}`);
   console.log(`  跳过: ${parts.length ? parts.join(', ') : '无'}`);
   for (const item of (r.skip_list ?? []).slice(0, 20)) {
-    console.log(`    - [${item.reason}] ${item.title}`);
+    // 标题为空有两种：这条本来没标题，或它整行被密钥判据命中、标题在源头就留空了
+    // （src/share.js：skip_list 随包外发，而凭据常常就写在标题里）。终端要让人看清
+    // 后一种是「有意不给」，不是「数据缺失」。
+    console.log(`    - [${item.reason}] ${item.title || '（标题不外发）'}`);
   }
   // 50 是 src/share.js 的 SHARE_SKIP_LIST_MAX：CLI 是零依赖 HTTP 客户端，不 import
   // 服务端模块（同 MEMORY_TYPES 那条理由），所以这里写字面量。截的只是清单，skipped

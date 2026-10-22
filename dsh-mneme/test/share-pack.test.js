@@ -6,7 +6,8 @@
 //      所有已发出去的包。键里有内容锚（第四格），且「用的是进包的那对值」由包自己
 //      证明——拿遮之前的标题去铸，收侧一律判成手改包。
 //   c) 取行口径：哪些行不进包、以什么原因不进（跳过清单的读数就靠这些字面量），以及
-//      不进的那几条返回的 title 也已经是遮过 home 的 —— 清单会进包体、会上终端。
+//      不进的那几条返回的 title 也已经是遮过 home 的 —— 清单会进包体、会上终端；整行
+//      命中密钥判据的那几条连标题都不许给（标题往往是那条凭据的回声）。
 //   d) 分享边界用的是未门控的文本扫描面 —— 换成 config 门控的那个工厂，用户没开
 //      写入闸门就等于裸发整库（静态锁，见最后一条用例）。
 //   e) 打包口径逐条钉死：水位量的是**最终序列化字节**（不是条数也不是字符数——中文差
@@ -152,25 +153,67 @@ test("archived, forgotten and out-of-scope types are skipped with a reason", () 
 });
 
 test("a skipped row's title comes back redacted, from here", () => {
-  // 跳过清单不是「只在本地看」的：A3 把 verdict.title 原样写进 pack.report.skip_list，
-  // A7 又把这份清单打到终端。一条标题里带本机 home 前缀的记忆只要不进包，未脱敏的
-  // title 就把用户名装进了那份「设计上不含它」的文件。所以在源头遮，消费方才不必
-  // 各自补第二刀（也才没有「忘了补」这一类回归可犯）。
+  // 跳过清单不是「只在本地看」的：buildSharePack 把 verdict.title 原样写进
+  // pack.report.skip_list，CLI 又把这份清单打到终端，413 那次拒发还带着同一份 report。
+  // 一条标题里带本机 home 前缀的记忆只要不进包，未脱敏的 title 就把用户名装进了那份
+  // 「设计上不含它」的文件。所以在源头遮，消费方才不必各自补第二刀（也才没有「忘了补」
+  // 这一类回归可犯）。
   const redact = createHomeRedactor("/fake/home/alex");
   const leanOn = (over) => classifyRowForShare(row({ title: "/fake/home/alex/退路方案", ...over }), { redact });
   for (const [over, reason] of [
     [{ archived: 1 }, "archived"],
     [{ forgotten: 1 }, "forgotten"],
     [{ type: "document" }, "readonly_type"],
-    [{ type: "summary" }, "excluded_type"],
-    // sensitive 这一级扫的是未脱敏原文（先扫再遮），遮完的标题仍要安全。
-    [{ content: "key sk-abcdefghijklmnopqrstuvwxyz012345" }, "sensitive"]
+    [{ type: "summary" }, "excluded_type"]
   ]) {
     const verdict = leanOn(over);
     assert.equal(verdict.reason, reason);
     assert.equal(verdict.title, "~/退路方案");
     assert.ok(!verdict.title.includes("alex"), "leaked home prefix in skip title");
   }
+  // sensitive 这一档换了出口：标题恒为空串。上一版在这里断言 `~/退路方案`，那是错的
+  // 期待——命中密钥判据的行，它的标题正是那条凭据的回声，遮 home 遮不掉它（见下一条）。
+  const sensitive = leanOn({ content: "key sk-abcdefghijklmnopqrstuvwxyz012345" });
+  assert.equal(sensitive.reason, "sensitive");
+  assert.equal(sensitive.title, "", "a credential-bearing row must not hand over its title");
+});
+
+test("a credential-bearing row never contributes its title, whatever the skip reason was", () => {
+  // 最终评审的复现（对出货代码跑的，不是对某个中间态）：一条**因非敏感原因**被跳过的行
+  // ——归档位——标题里写着一句人话的口令提示，正文里是 `password: <那个值>`。旧写法把
+  // scanSensitive 留在 classifyRowForShare 末尾，前面那五个跳过分支早就带着标题 return
+  // 了，于是 `skip_list` 里原样出现「生产库密码 P@ssw0rd-for-prod-db 别丢」，而这份清单
+  // 是随包外发的（整库被水位拒掉那次，413 答复里也带同一份 report）。
+  // 断言写成「整个包里找不到那个值」，而不是「那一条记录的 title 为空」：后者只锁住
+  // skip_list 一格，包体还有 memories、别名与 413 那条 report 副本。
+  const secret = "P@ssw0rd-for-prod-db";
+  const rows = [
+    row({ title: `生产库密码 ${secret} 别丢`, content: `password: ${secret}`, archived: 1 }),
+    row({ title: `老库口令 ${secret}`, content: `api_key = ${secret}abcdefgh`, forgotten: 1 }),
+    row({ title: `${secret} 的指针`, content: `secret: ${secret}`, type: "document" }),
+    row({ title: `${secret} 的总览`, content: `token: ${secret}`, type: "summary" }),
+    // sensitive 那一档也照同一句口径：以前它给的是遮过 home 的标题，同样原样外发。
+    row({ title: `生产库密码 ${secret} 别丢`, content: `password: ${secret}` }),
+    // 对照组：同一批里一条干净的归档行，标题照旧要给——否则这条锁只是「全都不给」。
+    row({ title: "干净的归档行", content: "没有凭据", archived: 1 })
+  ];
+  const { pack } = packInput(rows);
+  const text = JSON.stringify(pack);
+  assert.ok(!text.includes(secret), "a credential leaked into the shipped pack");
+  assert.deepEqual(pack.report.skip_list, [
+    { title: "", reason: "archived" },
+    { title: "", reason: "forgotten" },
+    { title: "", reason: "readonly_type" },
+    { title: "", reason: "excluded_type" },
+    { title: "", reason: "sensitive" },
+    { title: "干净的归档行", reason: "archived" }
+  ]);
+  // 原因归属不许被这次收紧带跑：判序照旧（空白/噪声仍先于敏感，见上一条用例的顺序锁），
+  // 这里只是不给标题，不是给另一个原因。
+  assert.deepEqual(pack.report.skipped, {
+    archived: 2, forgotten: 1, readonly_type: 1, excluded_type: 1, blank_or_noise: 0, sensitive: 1
+  });
+  assert.equal(pack.report.included, 0);
 });
 
 test("a credential in the body drops the whole row instead of redacting it", () => {
