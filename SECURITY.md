@@ -24,7 +24,7 @@ The following security features are implemented and maintained in the project:
 
 | Feature | Description | Status |
 |---|---|---|
-| `apiToken` Authentication | When a token is configured, **write** routes plus the sensitive reads (`/export`, `/external-api`, `/vector-config`, `/maintenance/*`) require `Authorization: Bearer <apiToken>`; comparison uses `crypto.timingSafeEqual`. Plain reads stay open by design — see [Security Model](#5-security-model-what-actually-protects-what) | ✅ Implemented |
+| `apiToken` Authentication | When a token is configured, **write** routes plus the sensitive reads (`/export`, `/external-api`, `/vector-config`, `/maintenance/*`, `/share`) require `Authorization: Bearer <apiToken>`; comparison uses `crypto.timingSafeEqual`. Plain reads stay open by design — see [Security Model](#5-security-model-what-actually-protects-what) | ✅ Implemented |
 | `policyEpoch` Memory Governance | Bumping `policyEpoch` downgrades all prior `dream_runs` to historical evidence; their receipts no longer drive real-time memory decisions | ✅ Implemented |
 | `conflictFreezeEnabled` Conflict Freeze | Conflicting memories are not auto-merged; they are flagged as pending human review, preserving data integrity | ✅ Implemented |
 | CAS (Compare-and-Swap) Guard | Prevents concurrent write conflicts; ensures atomic write operations | ✅ Implemented |
@@ -405,7 +405,7 @@ This project is licensed under the **MIT License**. See [LICENSE](https://github
 
 | 特性 | 描述 | 状态 |
 |---|---|---|
-| `apiToken` 鉴权 | 配置 token 后，**写**路由与敏感读（`/export`、`/external-api`、`/vector-config`、`/maintenance/*`）需 `Authorization: Bearer <apiToken>`，比较使用 `crypto.timingSafeEqual`。普通读按设计保持开放——见[安全模型](#5-安全模型什么在真正保护什么) | ✅ 已实现 |
+| `apiToken` 鉴权 | 配置 token 后，**写**路由与敏感读（`/export`、`/external-api`、`/vector-config`、`/maintenance/*`、`/share`）需 `Authorization: Bearer <apiToken>`，比较使用 `crypto.timingSafeEqual`。普通读按设计保持开放——见[安全模型](#5-安全模型什么在真正保护什么) | ✅ 已实现 |
 | `policyEpoch` 记忆治理 | 提升 `policyEpoch` 后，所有先前的 `dream_runs` 降级为历史证据，其 receipt 不再驱动实时记忆决策 | ✅ 已实现 |
 | `conflictFreezeEnabled` 冲突冻结 | 冲突记忆不自动合并，标记为待人工复核，保护数据完整性 | ✅ 已实现 |
 | CAS（比较并交换）守卫 | 防止并发写入冲突，确保原子写操作 | ✅ 已实现 |

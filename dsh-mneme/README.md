@@ -499,7 +499,7 @@ dsh plugin --profile web add "C:/path/to/modusensus-dsh-mneme-0.9.0.tgz"
 | `conflictFreezeMaxPending` | `100` | 冲突冻结队列最大挂起数（1-1000）：超出后不再入队（防队列无限膨胀） |
 | `escapePromptVariables` | `true` | 注入文本花括号转义（v0.8.0 恢复，issue #162）：注入边界把 `{{...}}` 转义，防止 hot memory / 记忆原文里的 Go template / Vue 语法触发宿主 interpolate 抛错卡死会话（v0.7.4 曾修复、v0.7.11 误删） |
 
-> 🔐 **API 安全**：DSH 无内置鉴权且默认仅监听 `127.0.0.1`。插件 API 默认开放（便于 Web 面板即装即用）——**未配 `apiToken` 时读和写都开放**，真正的围栏是回环 + 宿主监听器的 Host/Origin 校验（它防 DNS rebinding 与跨站浏览器请求，但不建立身份）。如需防护（如局域网暴露），在配置中设置 `apiToken`：此时**写操作**（新增/更新/删除/导入/画像/规则/命令/开关/开关计费类）与**敏感读**（`/export`、`/external-api`、`/vector-config`、`/vector-reindex`、`/maintenance/*`、`/runtime/provision`）需携带 `Authorization: Bearer <token>`（前端设置面板填同一个 token）；只读的 `list` / `search` / `semantic` / `inject-preview` 等**仍然开放**，不要把它们当成被 token 保护的面。`/api/dsh-mneme/vector-config` 返回的 `apiKey` 已掩码（`sk-***…`），存储仍保留明文供调用；前端回传空或掩码值表示"不改 key"。
+> 🔐 **API 安全**：DSH 无内置鉴权且默认仅监听 `127.0.0.1`。插件 API 默认开放（便于 Web 面板即装即用）——**未配 `apiToken` 时读和写都开放**，真正的围栏是回环 + 宿主监听器的 Host/Origin 校验（它防 DNS rebinding 与跨站浏览器请求，但不建立身份）。如需防护（如局域网暴露），在配置中设置 `apiToken`：此时**写操作**（新增/更新/删除/导入/画像/规则/命令/开关/开关计费类）与**敏感读**（`/export`、`/external-api`、`/vector-config`、`/vector-reindex`、`/maintenance/*`、`/runtime/provision`、`/share`）需携带 `Authorization: Bearer <token>`（前端设置面板填同一个 token）；只读的 `list` / `search` / `semantic` / `inject-preview` 等**仍然开放**，不要把它们当成被 token 保护的面。`/api/dsh-mneme/vector-config` 返回的 `apiKey` 已掩码（`sk-***…`），存储仍保留明文供调用；前端回传空或掩码值表示"不改 key"。
 >
 > 安全模型全表（哪些路由免鉴权、为什么）见 [SECURITY.md](../SECURITY.md#5-security-model-what-actually-protects-what)。
 

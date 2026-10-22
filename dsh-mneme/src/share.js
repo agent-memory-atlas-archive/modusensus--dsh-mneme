@@ -16,8 +16,8 @@ export const SHARE_KIND = "mneme.share/v1";
 // 几千条的库不该因此产出一份比包还长的报告。超限就截断，计数仍给全量。
 export const SHARE_SKIP_LIST_MAX = 50;
 
-// 体积水位留在 3 MiB，上限是两侧 readBody 各自写死的 4 MiB（api.js:55、
-// api-standalone.js:29）。留 1 MiB 是给 JSON 包装与接收侧再序列化的余量——
+// 体积水位留在 3 MiB，上限是两侧 readBody 各自写死的 4 MiB（api.js:57、
+// api-standalone.js:31）。留 1 MiB 是给 JSON 包装与接收侧再序列化的余量——
 // 包本身要作为 body 原样 POST 回去，水位贴上限等于给自己埋 413。
 export const MAX_PACK_BYTES = 3 * 1024 * 1024;
 
