@@ -77,6 +77,12 @@ const USAGE = `${CLI_NAME} —— DSH 记忆插件（@modusensus/dsh-mneme）外
                                --vacuum        执行后整库 VACUUM（需配 --apply）
                                只清「可由记忆库重建的输入快照」与「归档行的向量」，
                                一条记忆都不删；收益按 VACUUM 前后体积量
+  share [--alias 名字] [--type a,b] [--tag 标签] --out <文件>
+                               打一个可外发的脱敏分享包（不改库，纯读）
+                               --alias 名字     在包里署名，对方看到的是这个而不是你的路径
+                               --type/--tag     收窄到某几类/某个标签（超限分批用这两个）
+                               --out <文件>     写出包文件；--dry-run 只报数不落盘
+                               跳过归档/已遗忘/只读指针行/summary，密钥 PII 整条不进包
 
 选项：
   --url <url>                  覆盖服务地址
@@ -124,8 +130,10 @@ const KNOWN_FLAGS = new Set([
   'url', 'token', 'type', 'title', 'content', 'importance', 'tags', 'source',
   'limit', 'offset', 'mode', 'topk', 'top-k', 'min-importance', 'minimportance',
   'older-than', 'olderthandays',
+  'alias', 'tag', 'out',
   // 布尔旗标
-  'apply', 'vacuum', 'json', 'help', 'version'
+  'apply', 'vacuum', 'json', 'help', 'version',
+  'dry-run', 'dryrun',
 ]);
 
 /** `--foo=bar` / `--foo` 取出小写键名；非旗标词返回 null。 */
@@ -699,6 +707,73 @@ async function cmdReclaim(cfg, flags) {
   }
 }
 
+// --out 的例子写的是 `~/Desktop/pack.json`。Git Bash 会替她展开，PowerShell 与 cmd
+// 不会——那两侧 `~/…` 是字面量，writeFileSync 直接 ENOENT，现场只剩一坨堆栈。CLI 不
+// 接管 shell 的活，但引号里这一格得自己补（同 CONFIG_DIR 走 os.homedir()）。
+function expandHome(p) {
+  if (typeof p !== 'string') return p;
+  if (p !== '~' && !p.startsWith('~/') && !p.startsWith('~\\')) return p;
+  const rest = p.slice(1).replace(/^[/\\]+/, '');
+  return path.join(os.homedir(), rest);
+}
+
+function printShare(pack, { dryRun }) {
+  const r = pack?.report ?? {};
+  const s = r.skipped ?? {};
+  console.log(`${dryRun ? '干跑报告' : '分享包'}: ${r.included ?? 0} 条` +
+    (pack?.alias ? `  来自 ${pack.alias}` : ''));
+  const named = [['archived', '归档'], ['forgotten', '已遗忘'], ['readonly_type', '只读指针行'],
+    ['excluded_type', '不随包走'], ['blank_or_noise', '空白/噪声'], ['sensitive', '密钥/PII']];
+  const parts = named.filter(([k]) => (s[k] ?? 0) > 0).map(([k, zh]) => `${zh} ${s[k]}`);
+  console.log(`  跳过: ${parts.length ? parts.join(', ') : '无'}`);
+  for (const item of (r.skip_list ?? []).slice(0, 20)) {
+    console.log(`    - [${item.reason}] ${item.title}`);
+  }
+  // 50 是 src/share.js 的 SHARE_SKIP_LIST_MAX：CLI 是零依赖 HTTP 客户端，不 import
+  // 服务端模块（同 MEMORY_TYPES 那条理由），所以这里写字面量。截的只是清单，skipped
+  // 的六个计数走全量——不写这句她会以为全场只跳了 50 条。
+  if ((r.skip_list ?? []).length >= 50) console.log('    … 跳过清单已截断，计数仍为全量');
+  if (dryRun) console.log(`  没写文件：加 --out <路径> 才会落盘`);
+  else console.log(`  发给对方即可，她用自己的 ${CLI_NAME} receive 吃进去（车道 C）`);
+}
+
+async function cmdShare(cfg, flags) {
+  requireToken(cfg);
+  const out = expandHome(flagValue(flags, 'out'));
+  const dryRun = flagBool(flags, 'dry-run') || flagBool(flags, 'dryrun');
+  if (!out && !dryRun) {
+    fail(
+      cfg,
+      `share 要么写文件（--out <路径>），要么只看报告（--dry-run）：` +
+        `不写文件又把整库打到 stdout 会让报告被 JSON 淹掉。\n` +
+        `例子：${CLI_NAME} share --out ~/Desktop/pack.json`
+    );
+  }
+  const typeRaw = flagValue(flags, 'type');
+  const body = {};
+  if (typeRaw) body.type = typeRaw.split(',').map((t) => t.trim()).filter(Boolean);
+  const alias = flagValue(flags, 'alias');
+  if (alias) body.alias = alias;
+  const tag = flagValue(flags, 'tag');
+  if (tag) body.tag = tag;
+  // 超水位那次服务端答 413，apiRequest 对非 2xx 走的是 failHttp：它把响应体里的 hint
+  // 与量到的字节转出去再 exit(1)。所以这里**没有**可达的 error 分支——加 `if
+  // (pack?.error)` 就是第二份出口，措辞迟早跟拒发那一侧分家（#411 的同一口径）。
+  const pack = await apiRequest(cfg, 'POST', '/share', { body });
+  const r = pack?.report ?? {};
+  if (cfg.jsonMode) {
+    console.log(stringify(dryRun ? { report: r, pack } : { report: r, file: out }));
+  } else {
+    printShare(pack, { dryRun });
+  }
+  if (dryRun) return;
+  fs.writeFileSync(out, JSON.stringify(pack), 'utf8');
+  // --json 时 stdout 只许那一份 JSON：后面追一行「已写出」会把 JSON.parse 撞在
+  // position 536（jq 同理）。落盘路径已在上面的 payload 里（file 键），这行只对
+  // 人有用，就只给人看（同 cmdReclaim：json 模式打印完就结束）。
+  if (!cfg.jsonMode) console.log(`  已写出: ${out}`);
+}
+
 /* ---------------------------------- 入口 ---------------------------------- */
 async function main(argv) {
   const { positionals, flags } = parseArgv(argv);
@@ -736,6 +811,8 @@ async function main(argv) {
       return cmdDelete(cfg, rest);
     case 'reclaim':
       return cmdReclaim(cfg, flags);
+    case 'share':
+      return cmdShare(cfg, flags);
     default:
       fail(cfg, `未知命令: ${cmd}\n运行 \`${CLI_NAME} --help\` 查看帮助。`);
   }
