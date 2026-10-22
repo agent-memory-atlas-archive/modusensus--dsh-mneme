@@ -361,3 +361,29 @@ test("CLI share --type/--alias/--tag：按数据面认得的形状上线", { tim
     assert.deepEqual(listFiles(ctx.out), []);
   });
 });
+
+// CLI 与 src/share.js 之间没有 import 关系（bin/cli.mjs 是零依赖 HTTP 客户端，那条理由
+// 写在它自己的注释里），所以「六个跳过原因键」和「50 的截断数」在 CLI 侧是抄过去的字面量。
+// 抄的东西不会自己报错：share.js 改一个键名，CLI 就把那一档读成 0（跳过原因在终端上凭空
+// 少一类）；改了上限，那句「跳过清单已截断」就打错格数。这条静态锁是两份文本之间唯一的
+// 接缝——它不重跑逻辑，只比对字面量集合与那个数。
+test("CLI 抄过去的原因键与截断数跟 src/share.js 同源", () => {
+  const shareText = readFileSync(resolve(dirname(CLI), "..", "src", "share.js"), "utf8");
+  const cliText = readFileSync(CLI, "utf8");
+
+  const skippedBlock = shareText.match(/const skipped = \{([^}]*)\}/)?.[1] ?? "";
+  const shareKeys = [...skippedBlock.matchAll(/([a-z_]+):\s*0/g)].map((m) => m[1]);
+  const namedBlock = cliText.match(/const named = \[([\s\S]*?)\];/)?.[1] ?? "";
+  const cliKeys = [...namedBlock.matchAll(/\['([a-z_]+)'/g)].map((m) => m[1]);
+  // 两条正则都必须真的抓到东西，否则这个用例退化成永真（同本文件对假服务的口径）。
+  assert.equal(shareKeys.length, 6, `share.js 的 skipped 应有六个键，抓到 ${shareKeys.length} 个：${shareKeys}`);
+  assert.equal(cliKeys.length, 6, `cli.mjs 的 named 应有六档，抓到 ${cliKeys.length} 个：${cliKeys}`);
+  assert.deepEqual(cliKeys, shareKeys, "CLI 的档位名必须与 report.skipped 的键逐字同序");
+
+  const shareMax = Number(shareText.match(/SHARE_SKIP_LIST_MAX = (\d+)/)?.[1]);
+  // CLI 那一侧的形状是 `if ((r.skip_list ?? []).length >= 50)`：抓 `).length >= N`。
+  const cliCap = Number(cliText.match(/\)\.length >= (\d+)/)?.[1]);
+  assert.ok(Number.isInteger(shareMax) && shareMax > 0, "share.js 的截断常量要读得出来");
+  assert.ok(Number.isInteger(cliCap) && cliCap > 0, "cli.mjs 的截断格数要读得出来");
+  assert.equal(cliCap, shareMax, "CLI 那句「已截断」的格数必须等于 SHARE_SKIP_LIST_MAX");
+});

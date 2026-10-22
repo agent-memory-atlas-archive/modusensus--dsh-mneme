@@ -149,9 +149,14 @@ test("dream.js has no unguarded service.all() pool left", () => {
 // 一个真改归档面动作的——apply 只认 dryRun 报告点名过的 id（src/organize.js 硬规则 3b），
 // 执行那一步走 store.setArchived，全程不经 saveWithDedupe，汇流口那两道闸门到这里都管不到。
 // 报告点错一次名，就等于我们在替别人决定他那条记忆还活不活跃。
-// 外来行故意比同标题的本方行 importance 更高：store.list 的排序是
-// `importance DESC, updated_at DESC, id`，摘掉谓词时它必然排在比对池首位、被精确层的
-// rows.find 截胡——本用例因此对「谓词被删」是确定性地转红，而不是看 UUID 抽签。
+// 两条候选各管一个方向，缺一不可：
+//   ① 「同题的本方行照旧命中」——外来行 importance 更高（5 vs 3），摘掉谓词时它在
+//      store.list 的默认排序（`importance DESC, updated_at DESC, id`）里排在前面，
+//      会被精确层的 rows.find 截胡；这条要防的是「守卫过宽，把自己人的命中也挡了」。
+//      它**不**能单独证明守卫不惰性：那条命中依赖排序，而排序是实现细节。
+//   ② 「外来行单独占一个标题」——比对池里除了它没有别的同题行，于是「摘掉谓词 → 这条
+//      被点名」与排序无关：pool 里只有一条候选行，find 到的必然是它。非惰性这件事现在
+//      由这条独立证明，① 的 importance 差只是让两条用例顺带覆盖「抢位」那一种形态。
 test("organize never names an imported row as an archive target", async () => {
   const dir = mkdtempSync(join(tmpdir(), "dsh-mneme-imported-organize-"));
   const store = createStore(join(dir, "memory.db"));
@@ -167,10 +172,14 @@ test("organize never names an imported row as an archive target", async () => {
     });
     const foreign = store.save({ type: "preference", title: "写库先用 SQLite", content: "对方库里的原文", importance: 5, tags: [], source: IMPORTED_SOURCE });
     const mine = store.save({ type: "preference", title: "写库先用 SQLite", content: "我自己的记录", importance: 3, tags: [] });
+    const lonely = store.save({ type: "preference", title: "只有外来行有这个标题", content: "对面写的原文", importance: 1, tags: [], source: IMPORTED_SOURCE });
 
     const report = await organize({
       mode: "dryRun",
-      candidates: [{ type: "preference", title: "写库先用 SQLite", content: "同一标题的新说法" }]
+      candidates: [
+        { type: "preference", title: "写库先用 SQLite", content: "同一标题的新说法" },
+        { type: "preference", title: "只有外来行有这个标题", content: "同一标题的新说法" }
+      ]
     });
     const named = report.items.map((item) => item.match?.id).filter(Boolean);
     assert.ok(!named.includes(foreign.id),
@@ -178,17 +187,22 @@ test("organize never names an imported row as an archive target", async () => {
     // 守卫的口径是「不许替别人决定」，不是「比对池干脆谁都看不见」——本方同题行必须照旧命中。
     assert.equal(report.items[0].verdict, "exact", "our own same-title row must still be reported");
     assert.equal(report.items[0].match.id, mine.id);
+    // ②：这一格里比对池除了那条外来行没有别人，守卫摘掉后它必然被点名——不借排序的力。
+    assert.equal(report.items[1].verdict, "new", "a lone imported row must not become a match either");
+    assert.equal(report.items[1].match, null);
+    assert.ok(!named.includes(lonely.id), "the lone foreign row leaked into the report");
 
     // 报告没点过名 → apply 连「调用方自己报出外来行 id」这条越权路也拒掉：整条链上
     // 外来行既进不了比对池，也拿不到归档许可。
     const outcome = await organize({
       mode: "apply",
       run_id: report.run_id,
-      decisions: [{ action: "archive", id: foreign.id }]
+      decisions: [{ action: "archive", id: foreign.id }, { action: "archive", id: lonely.id }]
     });
     assert.equal(outcome.archived, 0);
     assert.match(outcome.skipped[0].error, /not flagged as a match/);
     assert.ok(!store.getById(foreign.id).archived, "the foreign row's archive bit stays where the owner left it");
+    assert.ok(!store.getById(lonely.id).archived, "same for the lone one");
   } finally {
     try { store.close(); } catch { /* closed */ }
     rmSync(dir, { recursive: true, force: true });
