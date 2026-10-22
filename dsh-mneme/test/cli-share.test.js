@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseShareBody, shareReply } from "../src/share-http.js";
@@ -116,7 +116,10 @@ async function withPlane(fn) {
   const plane = await startPlane();
   const s = scratch();
   try {
-    return await fn({ plane, home: s.home, out: s.out, auth: ["--url", plane.url, "--token", TOKEN] });
+    return await fn({
+      plane, home: s.home, out: s.out, url: plane.url, token: TOKEN,
+      auth: ["--url", plane.url, "--token", TOKEN]
+    });
   } finally {
     s.cleanup();
     await plane.close();
@@ -126,14 +129,20 @@ async function withPlane(fn) {
 /**
  * HOME/USERPROFILE 一起改：os.homedir() 先读 HOME、Windows 再读 USERPROFILE，子进程里的
  * `~` 与 `~\` 才都展开进临时目录（断言失败时也不会有产物落进真人 home）。
- * 同时清空 DSH_MNEME_URL/TOKEN 并把 cwd 放到临时目录：本机那份 ~/.dsh-mneme/cli.json 与
- * 环境变量不参与，测试不可能悄悄打到真宿主上。
+ * 同时把 cwd 放到临时目录：本机那份 ~/.dsh-mneme/cli.json 不参与，产物也只进 scratch。
+ *
+ * DSH_MNEME_URL/TOKEN 给的是 **fixture 那一面**，不是清空。清空会顺着
+ * `firstNonEmpty(flag, env, file) ?? DEFAULT_URL` 落到 `DEFAULT_URL = 127.0.0.1:8790`，
+ * 那正是她本机活实例的默认端口：今天每个调用点都显式带 --url/--token 所以打不到，但那是
+ * 「暂时没漏」而不是「漏不到」。指到 fixture 之后，未来少带一对旗标的调用点打的是本测试
+ * 自己起的那面；那种错会变成断言当场红，而不是拿她的活库跑测试、还因为只读路由回 401
+ * 而表现成「这条用例偶尔红」。
  */
 function runCli(ctx, args, extraEnv = {}) {
   return new Promise((res, rej) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd: ctx.out,
-      env: { ...process.env, HOME: ctx.home, USERPROFILE: ctx.home, DSH_MNEME_URL: "", DSH_MNEME_TOKEN: "", ...extraEnv },
+      env: { ...process.env, HOME: ctx.home, USERPROFILE: ctx.home, DSH_MNEME_URL: ctx.url, DSH_MNEME_TOKEN: ctx.token, ...extraEnv },
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";
@@ -166,6 +175,20 @@ test("CLI share --dry-run：报数并解释没写文件，输出目录一个字�
     const combo = await runCli(ctx, ["share", "--dry-run", "--out", both, ...ctx.auth]);
     assert.equal(combo.code, 0, combo.stderr);
     assert.ok(!existsSync(both), "--dry-run 在场时 --out 不得落盘");
+    assert.deepEqual(listFiles(ctx.out), []);
+  });
+});
+
+test("漏传 --url/--token 的调用点打到的是 fixture 那一面，不是她本机 8790", { timeout: 60000 }, async () => {
+  await withPlane(async (ctx) => {
+    // 这条锁的是 runCli 那份 env，不是 CLI 的行为：DSH_MNEME_URL/TOKEN 给的是本测试自己
+    // 起的端口，所以「未来某个调用点忘了带旗标」落在这里是当场可看见的一次请求，而不是
+    // 悄悄打到 `DEFAULT_URL = 127.0.0.1:8790`（她本机活实例的默认端口，只读面回 401、
+    // 老构建回 404，表现成「这条用例偶尔红」）。清空那两个变量才是这里要防的回归。
+    const before = ctx.plane.state.requests.length;
+    const run = await runCli(ctx, ["share", "--dry-run"]);
+    assert.equal(run.code, 0, run.stderr);
+    assert.equal(ctx.plane.state.requests.length, before + 1, "请求要落到 fixture 这一面");
     assert.deepEqual(listFiles(ctx.out), []);
   });
 });
@@ -246,27 +269,25 @@ test("CLI share --out 的 `~` 前缀：展开到子进程 home（PowerShell/cmd 
     // Git Bash 会展开 `~/…`，PowerShell 与 cmd 给到 CLI 的是字面量 —— USAGE 里的例子正是
     // 这一串，所以 expandHome 是那个例子在 Windows 上能不能用的全部区别。
     const NAMES = ["dsh-mneme-cli-share-tilde-probe.json", "dsh-mneme-cli-share-tilde-probe-win.json"];
-    try {
-      const tilde = await runCli(ctx, ["share", "--out", `~/${NAMES[0]}`, ...ctx.auth]);
-      assert.equal(tilde.code, 0, `tilde 展开失败就是 writeFileSync 的 ENOENT 堆栈：${tilde.stderr}`);
-      assert.ok(existsSync(join(ctx.home, NAMES[0])), `${NAMES[0]} 应落在子进程 home 里，got: ${tilde.stdout}`);
-      assert.ok(tilde.stdout.includes(NAMES[0]) && !tilde.stdout.includes(`~/${NAMES[0]}`),
-        `打印的应是展开后的路径，got: ${tilde.stdout}`);
+    const tilde = await runCli(ctx, ["share", "--out", `~/${NAMES[0]}`, ...ctx.auth]);
+    assert.equal(tilde.code, 0, `tilde 展开失败就是 writeFileSync 的 ENOENT 堆栈：${tilde.stderr}`);
+    assert.ok(existsSync(join(ctx.home, NAMES[0])), `${NAMES[0]} 应落在子进程 home 里，got: ${tilde.stdout}`);
+    assert.ok(tilde.stdout.includes(NAMES[0]) && !tilde.stdout.includes(`~/${NAMES[0]}`),
+      `打印的应是展开后的路径，got: ${tilde.stdout}`);
 
-      const backslash = await runCli(ctx, ["share", "--out", `~\\${NAMES[1]}`, ...ctx.auth]);
-      assert.equal(backslash.code, 0, backslash.stderr);
-      assert.ok(existsSync(join(ctx.home, NAMES[1])), `${NAMES[1]}：反斜杠形态同一条规则（expandHome 认 ~\\）`);
+    const backslash = await runCli(ctx, ["share", "--out", `~\\${NAMES[1]}`, ...ctx.auth]);
+    assert.equal(backslash.code, 0, backslash.stderr);
+    assert.ok(existsSync(join(ctx.home, NAMES[1])), `${NAMES[1]}：反斜杠形态同一条规则（expandHome 认 ~\\）`);
 
-      // 绝对路径不受影响：expandHome 只改 `~`/`~/`/`~\` 开头，别的原样交给 writeFileSync。
-      const abs = join(ctx.out, "abs.json");
-      const plain = await runCli(ctx, ["share", "--out", abs, ...ctx.auth]);
-      assert.equal(plain.code, 0, plain.stderr);
-      assert.ok(existsSync(abs) && !existsSync(join(ctx.home, "abs.json")));
-    } finally {
-      // 兜底：万一这台机器上 HOME 覆盖没生效，产物就落在真人 home 里 —— 测试自己擦干净。
-      // 这两个名字只由本文件铸造，force 删除平时是 no-op。
-      for (const name of NAMES) { try { rmSync(join(homedir(), name), { force: true }); } catch { /* 忽略 */ } }
-    }
+    // 绝对路径不受影响：expandHome 只改 `~`/`~/`/`~\` 开头，别的原样交给 writeFileSync。
+    const abs = join(ctx.out, "abs.json");
+    const plain = await runCli(ctx, ["share", "--out", abs, ...ctx.auth]);
+    assert.equal(plain.code, 0, plain.stderr);
+    assert.ok(existsSync(abs) && !existsSync(join(ctx.home, "abs.json")));
+    // 这里**不**留「万一 HOME 覆盖没生效就去真人 home 里把这两个名字擦掉」的兜底：那个
+    // rmSync 的靶子是 os.homedir()，只有在测试本来就该红（覆盖失效）的情况下才会动她家目录，
+    // 而它删的是「同名」不是「本测试刚写的那个 inode」。HOME 覆盖有没有生效由上面两条
+    // existsSync(join(ctx.home, …)) 负责——红了就停手，产物留在临时 home 里等她自己看。
   });
 });
 
