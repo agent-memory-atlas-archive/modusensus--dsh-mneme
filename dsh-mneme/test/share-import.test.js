@@ -54,7 +54,7 @@ function setup() {
     store, mirror: null, config: { embeddingModel: "stub" },
     onWrite: () => { writes++; }
   });
-  // 方法名照 src/service.js 探测的那两个（schedule ?? embedSingle）：猜错的话第四条
+  // 方法名照 src/service.js 探测的那两个（schedule ?? embedSingle）：猜错的话 lock d 那条
   // 用例会「绿得没意义」——嵌入根本没被调用也测不出来。这里刻意不给 schedule()，
   // 走的是 embedSingle → store.setEmbedding 那一支，正是导入路径要的那一条。
   // 探针记录（已跑过、不留在文件里）：把这一整套 setEmbedder 摘掉、或把实现里的
@@ -82,6 +82,14 @@ test("a foreign pack lands as new rows with the guard's identity", () => {
     assert.equal(row.share_pack_id, PACK_ID);
     assert.ok(row.tags.includes(importedTagFor("桉")));
     assert.notEqual(row.created_at, "2026-10-01T00:00:00.000Z", "created_at is the store's, not the pack's");
+    // content_hash 与 created_at 同一族：两格都由 store 铸造，包里的值传不进去（spec §5
+    // 记的三个事实前两条）。这条不是防呆——是「unchanged 只许当读数」的前提：接收侧一旦
+    // 能吃下发件侧的锚，那一格就从给人看的数变成动作依据，同 title 同锚但正文不同的两条
+    // 就会被判成「已经吃过」而静默不建。库里这条行带的必须是收件人自己算的哈希。
+    // 先锁形状再锁不等：只写 notEqual 的话 content_hash 读成 undefined 也算「不等于 anchor」，
+    // 那条断言就成了永远绿的空锁。
+    assert.match(row.content_hash, /^[0-9a-f]{64}$/, "the stored anchor is the recipient's own sha256");
+    assert.notEqual(row.content_hash, "anchor", "content_hash is the store's, not the pack's");
   } finally { h.close(); }
 });
 
@@ -93,6 +101,10 @@ test("re-importing the same pack creates nothing and deletes nothing", () => {
     const again = h.service.importSharePack(pack([entry("decision", "选 SQLite", "正文 A"), entry("pitfall", "别用表连接", "正文 B")]), {});
     assert.equal(again.created, 0);
     assert.equal(again.skipped_existing, 2);
+    // unchanged 在这里是 0，不是 bug：包里的锚是发送方**遮之前**的归一化哈希，库里这一格
+    // 是收件人按收到的字节重算的（上一条用例锁的就是这件事）。所以这条计数只能回答
+    // 「两侧的尺看起来一样吗」，永远不能回答「这条要不要建」——后者只看 share_external_id。
+    assert.equal(again.unchanged, 0, "the two anchors legitimately differ; unchanged is a reading, not a decision");
     assert.equal(h.rows().length, before, "idempotent means nothing removed either");
   } finally { h.close(); }
 });
