@@ -44,6 +44,16 @@ PowerShell 与 cmd 不会——那两侧它是字面量，`writeFileSync` 直接
 | `agent_scope` / `workspace_scope` | 不进包 | 里面是本机绝对路径与 agent 模板名 |
 | 正文里的 home 前缀 | 换成 `~` | 正文字符串里同样会带出用户名目录 |
 
+**`report` 只有四个键：`included` / `deduped` / `skipped` / `skip_list`**。`deduped` 记的是**包内折叠**：
+`external_id = sha256(pack_id \0 type \0 title \0 content_hash)`，键里没有 scope（包里也不带 scope），而库里
+同 type、同标题、同内容锚、scope 不同的两条是合法的两行（`store.js:1233` 的去重键吃 `agent_scope` /
+`workspace_scope` / `sensitivity` 三维），于是它们在包里共用一把键。为什么在出包侧折成一条，而不是留着让
+对面处理：撞键的第二条 INSERT 会撞上车道 C 那条 `share_external_id` UNIQUE 索引，抛错穿出
+`runAtomically` 的 ROLLBACK，**整包一条都进不去**（spec §5：先查管重复导入、UNIQUE 管并发，可同一个包
+内部的两条谁都查不到，因为那时一行都没落；「重跑一次就 created=0」也救不了——两次撞的是同一个死键）。而标题与内容锚都相同的两条，到了对面那台没有 scope 的库里本来就是同一条
+记忆，发两份只是多两行一样的东西。读数因此变成：`included` 是**实际发出的条数**，`included + deduped` 才是
+「够格进包的行数」，两个数都摆在报告里，没有哪一条是被静默吃掉的。
+
 **跳过清单有上限，账没有**：`report.skip_list` 截到 `SHARE_SKIP_LIST_MAX` = 50（常量在 `src/share.js`），
 `report.skipped` 的六个计数仍走全量。本机这次 5,837 条跳过 → 清单里只有
 遍历顺序上前 50 个被跳过的行，CLI 又只打前 20 行，打满 50 格时终端补一句「跳过清单已截断，计数仍为全量」。

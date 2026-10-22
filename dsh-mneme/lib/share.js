@@ -191,6 +191,18 @@ function shareFilterSet(value) {
  * 清单里的 title 用 classifyRowForShare 返回值原样写入：它已在源头遮过 home，命中密钥
  * 判据的那几条也已在源头留空（标题是凭据的回声，而这份清单随包外发）。这里补第二刀
  * 是「两个口径」的开始，不是更安全。
+ *
+ * `report.deduped`：同一份包里铸出同一把 `external_id` 的行只发一条。键是
+ * `(pack_id, type, title, content_hash)`，**没有 scope**，而库里同 type 同标题同内容锚、
+ * scope 不同的两条是合法的两行（store.js:1233 的去重键带 agent/workspace/sensitivity
+ * 三维）——所以「两条不同记忆铸出同一个键」是常态，不是畸形数据。为什么在出包侧折叠：
+ * ①对面那台库没有 scope 这一维（包里就不带它），这两条到对面就是同一条记忆，正文与
+ * 标题逐字节相同，发两份只是让她多两行一样的东西；②不折叠的后果不是重复而是**整包失败**
+ * ——车道 C 的 `share_external_id` 是 UNIQUE 索引，第二条 INSERT 抛错会穿出 runAtomically
+ * 的 ROLLBACK 把整包带走（spec §5 明写「先查管常规重复导入、UNIQUE 管并发」，可同一个包
+ * 内部的两条先查谁都查不到，因为那时一行都没落）。「重跑就 created=0」救不了它：重跑吃的
+ * 是同一个死键。方向上的代价只有少发一条重复正文，`included` 因此是**实际发出的条数**，
+ * 折叠掉的数在 `deduped` 里，两份账相加才是「够格进包的行数」。
  */
 export function buildSharePack({
   rows, alias = "", homeDir, packageVersion, filters = {},
@@ -202,6 +214,10 @@ export function buildSharePack({
   const skipped = { archived: 0, forgotten: 0, readonly_type: 0, excluded_type: 0, blank_or_noise: 0, sensitive: 0 };
   const skipList = [];
   const memories = [];
+  // 折叠过的键（见模块头那段 `report.deduped` 的理由）。用 Set 而不是再查一次 memories：
+  // 一个包几千条，`some` 会变成平方。
+  const shipped = new Set();
+  let deduped = 0;
   for (const source of Array.isArray(rows) ? rows : []) {
     // 两条判据都在定性之前（见上文：筛掉的不是跳过的，一次都不许进那份账）。
     if (wantedTypes && !wantedTypes.has(source?.type)) continue;
@@ -215,10 +231,11 @@ export function buildSharePack({
     // 键的四个入参一律取自 verdict.row，不是 source：收侧是按包内字节重算的（spec §5），
     // 铸造侧多吃一个遮之前的字节，对面就判成手改包而整包拒绝。内容锚同理——它是发送方
     // 遮之前的归一化锚（决策 4），但**包里的 content_hash 就是这一个值**，重算吃得准。
-    memories.push({
-      external_id: deriveExternalId(packId, verdict.row.type, verdict.row.title, verdict.row.content_hash),
-      ...verdict.row
-    });
+    const externalId = deriveExternalId(packId, verdict.row.type, verdict.row.title, verdict.row.content_hash);
+    // 同键的第二条不发（见模块头）：留第一条，字节层面两条本就同文同题同锚。
+    if (shipped.has(externalId)) { deduped += 1; continue; }
+    shipped.add(externalId);
+    memories.push({ external_id: externalId, ...verdict.row });
   }
   const pack = {
     kind: SHARE_KIND,
@@ -226,7 +243,7 @@ export function buildSharePack({
     alias: typeof alias === "string" ? alias.trim() : "",
     generated_at: generatedAt,
     source_version: String(packageVersion ?? ""),
-    report: { included: memories.length, skipped, skip_list: skipList },
+    report: { included: memories.length, deduped, skipped, skip_list: skipList },
     memories
   };
   const bytes = Buffer.byteLength(JSON.stringify(pack), "utf8");

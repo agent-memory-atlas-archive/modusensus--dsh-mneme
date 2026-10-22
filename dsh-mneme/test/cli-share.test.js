@@ -191,6 +191,24 @@ test("CLI 的跳过清单：含凭据那行不给标题，终端要写得像「�
   });
 });
 
+test("CLI 报得出包内折叠：included 少的那几条要有去处", { timeout: 60000 }, async () => {
+  await withPlane(async (ctx) => {
+    // 同标题、同正文、同内容锚而 scope 不同的两条在库里是两条合法记忆，在包里共用一把
+    // external_id，于是出包侧折成一条。终端只报 `干跑报告: 1 条` 的话，读的人以为自己
+    // 少发了 —— 这一格要说清那条去哪了（src/share.js 的 report.deduped）。
+    ctx.plane.use([
+      row({ id: "1", type: "decision", title: "同一个标题", content: "同一份正文", content_hash: "same-hash", agent_scope: "preset-a" }),
+      row({ id: "2", type: "decision", title: "同一个标题", content: "同一份正文", content_hash: "same-hash", agent_scope: "preset-b" })
+    ]);
+    const dry = await runCli(ctx, ["share", "--dry-run", ...ctx.auth]);
+    assert.equal(dry.code, 0, dry.stderr);
+    assert.match(dry.stdout, /^干跑报告: 1 条$/m);
+    assert.match(dry.stdout, /包内重复已折叠: 1 条/);
+    assert.match(dry.stdout, /跳过: 无/, "折叠不走跳过那本账");
+    assert.deepEqual(JSON.parse(ctx.plane.state.lastBodyText).report.skip_list, []);
+  });
+});
+
 test("CLI share --out：数据面答复逐字落盘，解析回来 kind 与 report 都对", { timeout: 60000 }, async () => {
   await withPlane(async (ctx) => {
     const dest = join(ctx.out, "pack.json");

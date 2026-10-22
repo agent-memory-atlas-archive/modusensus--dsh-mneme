@@ -726,6 +726,10 @@ function printShare(pack, { dryRun }) {
     ['excluded_type', '不随包走'], ['blank_or_noise', '空白/噪声'], ['sensitive', '密钥/PII']];
   const parts = named.filter(([k]) => (s[k] ?? 0) > 0).map(([k, zh]) => `${zh} ${s[k]}`);
   console.log(`  跳过: ${parts.length ? parts.join(', ') : '无'}`);
+  // 折叠不是跳过：那条记忆够格进包，只是包里已经有了它（同标题同正文同内容锚、scope
+  // 不同的两条）。不印出来的话 `included` 会比她心里的「够格的条数」少几条，而那正好是
+  // 会让人怀疑口径少发了的那类差额。src/share.js 的 report.deduped。
+  if ((r.deduped ?? 0) > 0) console.log(`  包内重复已折叠: ${r.deduped} 条（对面只吃一条）`);
   for (const item of (r.skip_list ?? []).slice(0, 20)) {
     // 标题为空有两种：这条本来没标题，或它整行被密钥判据命中、标题在源头就留空了
     // （src/share.js：skip_list 随包外发，而凭据常常就写在标题里）。终端要让人看清

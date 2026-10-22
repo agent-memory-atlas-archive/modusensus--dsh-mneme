@@ -4,7 +4,9 @@
 //      pack 侧各钉一条：白名单是逐层收窄的，只锁一层就有一层可以顺手放宽。
 //   b) 幂等键的派生必须与接收侧重算一致（车道 C 靠它），改一个参数顺序就是破坏
 //      所有已发出去的包。键里有内容锚（第四格），且「用的是进包的那对值」由包自己
-//      证明——拿遮之前的标题去铸，收侧一律判成手改包。
+//      证明——拿遮之前的标题去铸，收侧一律判成手改包。键里没有 scope，所以同键的孪生行
+//      是常态：出包侧折叠成一条、`report.deduped` 记账，包内每个 id 必须互不相同
+//      （车道 C 的 share_external_id 是 UNIQUE 索引，包内撞键等于整包回滚）。
 //   c) 取行口径：哪些行不进包、以什么原因不进（跳过清单的读数就靠这些字面量），以及
 //      不进的那几条返回的 title 也已经是遮过 home 的 —— 清单会进包体、会上终端；整行
 //      命中密钥判据的那几条连标题都不许给（标题往往是那条凭据的回声）。
@@ -277,6 +279,9 @@ test("pack carries the whitelist and nothing else", () => {
   }
   assert.equal(m.type, "decision");
   assert.match(m.external_id, /^[0-9a-f]{16}$/);
+  // report 的键集合同样是格式的一部分：车道 C 与面板都按这四个键读，多一个是新字段、
+  // 少一个是断账（deduped 就是为「included 从此只数实际发出的条数」补的那一格）。
+  assert.deepEqual(Object.keys(pack.report), ["included", "deduped", "skipped", "skip_list"]);
 });
 
 test("external_id recomputes from the fields that actually ship in the pack", () => {
@@ -316,11 +321,39 @@ test("two rows sharing type and title still ship two distinct ids", () => {
   ];
   const { pack } = packInput(rows);
   assert.equal(pack.report.included, 2);
+  // 正文不同 ⇒ 内容锚不同 ⇒ 两把键：这条锁的是「折叠不许把该发的两条折成一条」。
+  assert.equal(pack.report.deduped, 0);
   assert.equal(new Set(pack.memories.map((m) => m.external_id)).size, 2);
   assert.deepEqual(
     pack.memories.map((m) => deriveExternalId(pack.pack_id, m.type, m.title, m.content_hash)),
     pack.memories.map((m) => m.external_id)
   );
+});
+
+test("rows that collapse to one external_id ship once and the fold is counted", () => {
+  // 键是 (pack_id, type, title, content_hash)，**没有 scope**，而库里同 type 同标题同
+  // 内容锚、scope 不同的两条是合法的两行（store.js:1233 的去重键吃三维 scope）。于是它们
+  // 在包里共用一把键，`included` 却说有两条。发两条的后果不是「对面多一行重复」：车道 C
+  // 的 share_external_id 挂 UNIQUE 索引，第二条 INSERT 抛错穿出 runAtomically 的
+  // ROLLBACK，**整包吃不进去**；ledger 里那句「重跑就 created=0」救不了它——两次撞的是
+  // 同一个死键，那行始终没落库。裁定：出包侧折叠成一条并记账。折叠只可能发生在标题与
+  // 内容锚都相同的行上，到对面那台没有 scope 的库里那就是同一条记忆。
+  const twin = (over) => row({ title: "同一个标题", content: "同一份正文", content_hash: "same-hash", ...over });
+  const { pack } = packInput([
+    twin({ agent_scope: "preset-a", workspace_scope: "/fake/home/alex/proj-a" }),
+    twin({ agent_scope: "preset-b", workspace_scope: "/fake/home/alex/proj-b" }),
+    twin({ agent_scope: null, workspace_scope: null }),
+    row({ type: "history", title: "另一条", content: "别的正文", content_hash: "other-hash" })
+  ]);
+  assert.equal(pack.report.included, 2, "included 从此是「实际发出的条数」");
+  assert.equal(pack.report.deduped, 2, "折叠掉的必须记账，否则这份账还是少两条");
+  assert.equal(pack.memories.length, 2);
+  // 包内每个 id 互不相同：这条是车道 C 那份 UNIQUE 索引在出包侧的前置条件。
+  assert.equal(new Set(pack.memories.map((m) => m.external_id)).size, pack.memories.length);
+  // 留下的是哪一条不重要（标题/正文/锚三者相同），但它必须自己能被重算——收侧是按包内
+  // 字节验键的，折叠不许顺手改掉任何字段。
+  assert.equal(pack.memories[0].external_id, deriveExternalId(pack.pack_id, "decision", "同一个标题", "same-hash"));
+  assert.equal(pack.memories[0].content, "同一份正文");
 });
 
 test("report counts every skip reason and caps the list it shows", () => {
