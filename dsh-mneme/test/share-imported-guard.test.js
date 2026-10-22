@@ -4,6 +4,8 @@
 // 静态锁盯池子：巩固/降级读的是各自的行池，堵了汇流口不等于堵了它们——
 // 池子里还有 setArchived / demoteToSummary 这些不经 saveWithDedupe 的动作。
 // 静态锁也盯汇流口本身（下方 SERVICE_SITES）：池子清单归 B2，service.js 不在它那九处里。
+// 行为锁也盯整理动作面（B3）：那里唯一能归档别人行的通道是「dryRun 点名 → apply 执行」，
+// 执行那一半不经汇流口，所以必须在报告那一半就把外来行挡在可点名集之外。
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -14,6 +16,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createStore } from "../src/store.js";
 import { createService } from "../src/service.js";
+import { createOrganizer } from "../src/organize.js";
 import { IMPORTED_SOURCE, isImportedRow } from "../src/memory-source.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -139,4 +142,55 @@ test("dream.js has no unguarded service.all() pool left", () => {
     .map((line, i) => [i + 1, line])
     .filter(([ , line]) => line.includes("service.all()") && !line.includes("isImportedRow") && !line.includes("m.source === \"dream\""));
   assert.deepEqual(offenders, [], `unguarded pools at ${offenders.map(([n]) => n).join(", ")}`);
+});
+
+// 本用例是 POOL_SITES 里 organize 那一行的行为对偶，放在清单之后是刻意的：清单锁得住
+// 「那句过滤还在」，锁不住「它真的改变了比对结果」，而 organize 恰好是九处里唯一后面接着
+// 一个真改归档面动作的——apply 只认 dryRun 报告点名过的 id（src/organize.js 硬规则 3b），
+// 执行那一步走 store.setArchived，全程不经 saveWithDedupe，汇流口那两道闸门到这里都管不到。
+// 报告点错一次名，就等于我们在替别人决定他那条记忆还活不活跃。
+// 外来行故意比同标题的本方行 importance 更高：store.list 的排序是
+// `importance DESC, updated_at DESC, id`，摘掉谓词时它必然排在比对池首位、被精确层的
+// rows.find 截胡——本用例因此对「谓词被删」是确定性地转红，而不是看 UUID 抽签。
+test("organize never names an imported row as an archive target", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "dsh-mneme-imported-organize-"));
+  const store = createStore(join(dir, "memory.db"));
+  try {
+    const service = createService({ store, mirror: null, config: {} });
+    // 向量档给「无信号」：命中只能来自精确层，红了能立刻知道是哪一层出的问题。
+    const { organize } = createOrganizer({
+      store,
+      embedQuery: async () => null,
+      saveWithDedupe: service.saveWithDedupe,
+      transaction: service.transaction,
+      finalize: () => {}
+    });
+    const foreign = store.save({ type: "preference", title: "写库先用 SQLite", content: "对方库里的原文", importance: 5, tags: [], source: IMPORTED_SOURCE });
+    const mine = store.save({ type: "preference", title: "写库先用 SQLite", content: "我自己的记录", importance: 3, tags: [] });
+
+    const report = await organize({
+      mode: "dryRun",
+      candidates: [{ type: "preference", title: "写库先用 SQLite", content: "同一标题的新说法" }]
+    });
+    const named = report.items.map((item) => item.match?.id).filter(Boolean);
+    assert.ok(!named.includes(foreign.id),
+      "a foreign row must never reach the report: the report is apply's only archive licence");
+    // 守卫的口径是「不许替别人决定」，不是「比对池干脆谁都看不见」——本方同题行必须照旧命中。
+    assert.equal(report.items[0].verdict, "exact", "our own same-title row must still be reported");
+    assert.equal(report.items[0].match.id, mine.id);
+
+    // 报告没点过名 → apply 连「调用方自己报出外来行 id」这条越权路也拒掉：整条链上
+    // 外来行既进不了比对池，也拿不到归档许可。
+    const outcome = await organize({
+      mode: "apply",
+      run_id: report.run_id,
+      decisions: [{ action: "archive", id: foreign.id }]
+    });
+    assert.equal(outcome.archived, 0);
+    assert.match(outcome.skipped[0].error, /not flagged as a match/);
+    assert.ok(!store.getById(foreign.id).archived, "the foreign row's archive bit stays where the owner left it");
+  } finally {
+    try { store.close(); } catch { /* closed */ }
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
