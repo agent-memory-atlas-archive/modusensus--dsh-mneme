@@ -146,7 +146,10 @@ test("GET on the share route is not an open read", async () => {
     const route = shareRoute(s);
     s.store.save({ type: "decision", title: "选 SQLite", content: "正文", tags: [] });
     const out = await callShare(route, { method: "GET", body: "" });
-    assert.ok(out.status === 405 || out.status === 404, `GET must not build a pack, got ${out.status}`);
+    // 状态码锁死 405，不留 404 这个后门：#411 说两张皮只许差在鉴权与路径，
+    // 而数据面那半（本文件末尾）已经只认 405。这里容忍 404 就等于让「面板哪天
+    // 掉回末尾 404」也算通过——两张皮悄悄多出一处差别，没人报警。
+    assert.equal(out.status, 405, `GET 必须回 405，got ${out.status}`);
     assert.ok(!out.body || !("memories" in out.body), "GET 不许把包交出去");
   } finally { s.close(); }
 });
