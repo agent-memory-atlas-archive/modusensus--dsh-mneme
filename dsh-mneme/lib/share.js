@@ -269,6 +269,10 @@ export const PACK_ID_RE = /^[0-9a-f]{16}$/;
 // 能入库的类型 = TYPE_FILE 的键集减去两个不随包走的排除项。这里重述一份而不是
 // import mirror 的表，与 SHARE_READONLY_TYPES 同一理由：包的兼容面比镜像宽，
 // 镜像哪天放开某个类型不该自动扩大接收侧的入库范围。形状由测试静态锁比对防漂。
+// 耦合是双向的：出包口径不看 MIRROR_EXCLUDED_TYPES——某类若进了那个集合却没人对本表
+// 做过决定，它照样随包发出、却在收侧把**整包**毒掉（invalid-type 是整包拒绝）；
+// test/share-validate.test.js 的静态锁（直接 Object.keys(TYPE_FILE)）正是让这类
+// 不匹配当场转红、而不是静默发生的仪器。
 export const SHARE_ALLOWED_TYPES = new Set([
   "preference", "project", "decision", "history", "pitfall", "constraint", "rejected_solution", "pattern"
 ]);
@@ -281,13 +285,13 @@ const IMPORTED_TAG_MAX = 32;
 /** 外来行的来源标签。别名是分享者自报的自由字符串，在这里被压成一条安全标签；
  *  空别名走中性值，绝不拿对面的机器身份（用户名、路径）兜底。 */
 export function importedTagFor(alias) {
-  // 换行与制表符按**删除**处理：标签必须单行（面板与镜像的元数据都按行切），而别名里
-  // 混进 \r\n 是排版或传输的产物，不是名字里的分隔。代价是别名 "a\nb" 与 "ab" 读出
-  // 同一个标签——来源标签只是给人看的读数，外来行的身份是 share_pack_id + external_id，
-  // 撞名不并行走也不丢行，所以这里不换那点碰撞率。
+  // 整类空白（含换行与制表符）**一条规则**：游程折成一个 "-"。上一版删 \r\n\t、折其余
+  // 空白——同一字符类开两条规则，而删除那侧恰恰制造 "a\nb" 与 "ab" 的同标签碰撞，
+  // 还从收件人实际看得见的来源读数里擦掉词缝。「标签必须单行」两个行为都满足，不构成
+  // 区分理由；仓库先例是 mirror.js 的 oneLine()：只折不删。
   // trim 排在折叠**之前**：全空白的别名折叠后会剩一个 "-"，于是拿到 `from--` 而不是
   // 中性值——「空别名走 from-shared」这条契约就漏在半空白那种写法上。
-  const flat = String(alias ?? "").replace(/[\r\n\t]+/g, "").trim().replace(/\s+/g, "-");
+  const flat = String(alias ?? "").trim().replace(/\s+/g, "-");
   if (!flat) return "from-shared";
   return `from-${flat}`.slice(0, IMPORTED_TAG_MAX);
 }
