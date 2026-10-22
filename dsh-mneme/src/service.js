@@ -2053,7 +2053,8 @@ export function createService({ store, mirror, config, onWrite, logger, document
     //    哪天有人给这个调用加上 includeArchived，报出来的就是他自己收起来的行）；
     //  · 带 scope 标注：外来行落的是 NULL scope，两条在他的视图里根本不在同一格——
     //    scope 这一半与 saveWithDedupe 的去重键同口径（scopeKeyOf 把 NULL 归一成「未标注」），
-    //    但这里**不比 sensitivity**：去重键是五格，这里是三格，见下面「刻意更宽」那条；
+    //    但这里**不比 sensitivity**：去重键是五格（type / title / 两个 scope / sensitivity），
+    //    这里只有四格，少了 sensitivity 那一格，见下面「刻意更宽」那条；
     //  · 外来行（isImportedRow）：这一格最容易被「顺手简化」掉。少了它，第二次导入别的
     //    包时会把上一包别人的原文报成「你库里已经有一条」，existing_id 指向一行他既不能
     //    改写、在 C4 之前也删不掉的行——撞名读数从「要不要处理我这条」变成「去处理别人
@@ -2064,8 +2065,11 @@ export function createService({ store, mirror, config, onWrite, logger, document
     // 两处差别都要写明免得日后被读成等价：去重只扫 `store.list({type, limit: 100})` 那个窗口
     // （第 101 条以后的同名行它根本看不见，我们扫全库），并且多比一格 sensitivity（同名同
     // scope 而敏感度不同的两条，去重会各建一行、我们照样报撞名）。方向是安全的：宽的一侧只
-    // 会多报，漏报才是「收件人看不见这条」那种要命的形状。别把它读成「并入目标就是这一条」。
-    // 标题两侧 trim，与去重那侧的 title.trim() 同一把尺。
+    // 会多报，漏报才是「收件人看不见这条」那种要命的形状。读的时候按「这里报的都是真同名
+    // 行」，别按「dedupe 会吃的就是这些行」。
+    // 标题两侧 trim，与去重那侧的 title.trim() 同一把尺。最后还有一处对照根本不成立，记下
+    // 免得日后又被拼回等价：dream summary 那一支的键是 source 而不是 title，那种行的
+    // 「假如允许并入」目标跟这里的「同名第一条」不是同一格东西。
     const ownByKey = new Map();
     for (const m of store.list({ limit: null })) {
       if (m.archived || isImportedRow(m)) continue;
