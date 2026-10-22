@@ -229,12 +229,21 @@ test("a credential in the body drops the whole row instead of redacting it", () 
 test("a blank memory is skipped as blank_or_noise before the sensitive check", () => {
   // 空白/噪声的唯一判据是 informationlessReason（src/write-admission.js:117），它按
   // title+content 的**组合**口径判：两侧归一后都不剩字才算命中（"blank" 全空、
-  // "noise" 只剩标点）。share 不另写一套空白判定 —— 判据只许有一份。
+  // "noise" 只剩标点）。组合口径答的是「这条写入有没有信息」，分享边界要答的是「对面吃不吃得下」，
+  // 所以 share 在这一格里另加一条：正文 trim 后为空就是空白行。
   assert.equal(classifyRowForShare(row({ title: "", content: "" }), {}).reason, "blank_or_noise");
   assert.equal(classifyRowForShare(row({ title: "", content: "   " }), {}).reason, "blank_or_noise");
   assert.equal(classifyRowForShare(row({ title: "...", content: "---" }), {}).reason, "blank_or_noise");
-  // 组合口径的另一面：标题还有字、正文一片空白的那条**不算**信息缺失，照常进包。
-  assert.equal(classifyRowForShare(row({ content: "   " }), {}).include, true);
+  assert.equal(classifyRowForShare(row({ title: "有标题", content: undefined }), {}).reason, "blank_or_noise");
+  assert.equal(classifyRowForShare(row({ title: "有标题", content: null }), {}).reason, "blank_or_noise");
+  // 组合口径的另一面**在分享边界上翻了**（最终评审第 3 条）：上一版这里断言
+  // 「标题有字、正文空白」那条 include === true，那是把判据本意当成了出口本意。收侧的
+  // content 列 NOT NULL，车道 C 还逐条校验非空（spec §5），一条空正文不是少发一条，是
+  // 把整包毒掉——校验不过就什么都不导入，对面手里只有一个报错的包。原因键仍是这六个
+  // （多开第七个要同时改 docs 表、CLI 档位名和计数锁），而「它没有正文」本来就是空白的意思。
+  assert.equal(classifyRowForShare(row({ content: "   " }), {}).reason, "blank_or_noise");
+  // 反过来，正文有一个字就该进：这条锁的是「新判据不许把有正文的行一起挡掉」。
+  assert.equal(classifyRowForShare(row({ content: "一个字" }), {}).include, true);
   // 顺序锁（空白先于敏感）：判据只看 title/content，扫描面却含 tags，所以一条正文
   // 为空、标签里带凭据的记忆两条都命中。报 blank_or_noise 才是对的原因 —— 没有正文
   // 就没有可泄露的东西，记成 sensitive 会让跳过清单的读数把用户指向错的那一类。
@@ -242,6 +251,20 @@ test("a blank memory is skipped as blank_or_noise before the sensitive check", (
     classifyRowForShare(row({ title: "", content: "", tags: ["sk-abcdefghijklmnopqrstuvwxyz012345"] }), {}).reason,
     "blank_or_noise"
   );
+});
+
+test("a pack never ships a memory whose content is blank", () => {
+  // 上一条锁的是单行判定，这条锁的是出口：车道 C 按 spec §5 逐条校验 content 非空，
+  // 包里混进一条空正文 = 校验不过 = 整包一条都不入库。空正文在这个口径下不是「少发一条」，
+  // 是「这一包废了」，所以它必须在出包侧就没掉。
+  const { pack } = packInput([
+    row({ title: "有标题", content: "   " }),
+    row({ type: "history", title: "有标题", content: "" }),
+    row({ type: "pattern", title: "正常一条", content: "有正文" })
+  ]);
+  assert.equal(pack.report.included, 1);
+  assert.equal(pack.report.skipped.blank_or_noise, 2);
+  for (const m of pack.memories) assert.ok(String(m.content).trim(), `blank content shipped: ${m.title}`);
 });
 
 test("the row that enters the pack carries only the whitelisted fields", () => {

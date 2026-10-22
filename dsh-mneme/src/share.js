@@ -86,8 +86,8 @@ export function createHomeRedactor(homeDir) {
  *
  * 「空白/噪声」这一级不自建判据：复用 informationlessReason（write-admission.js:117），
  * 它的口径是 title+content 的**组合**判定 —— 两侧归一后都不剩字才命中（"blank" 全空、
- * "noise" 只剩标点/空白）。所以标题还有字、正文空白的那条照常进包，这是判据本意，
- * 不是漏网。
+ * "noise" 只剩标点/空白）。组合口径管的是「这条写入有没有信息」，分享边界要问的是另一个
+ * 问题：对面能不能吃下这一条。所以这里另外补一刀「正文 trim 后为空」（见函数内注释）。
  *
  * 跳过的分支也返回脱敏后的 title：跳过清单不只在本机看 —— 打包侧把它原样写进
  * pack.report.skip_list，CLI 再整份打到终端（车道 A3/A7 的口径），而 413 那次拒发
@@ -121,7 +121,16 @@ export function classifyRowForShare(row, { redact = (t) => t } = {}) {
   if (row?.forgotten) return { include: false, reason: "forgotten", title: skipTitle };
   if (SHARE_READONLY_TYPES.has(row?.type)) return { include: false, reason: "readonly_type", title: skipTitle };
   if (SHARE_EXCLUDED_TYPES.has(row?.type)) return { include: false, reason: "excluded_type", title: skipTitle };
-  if (informationlessReason(row)) return { include: false, reason: "blank_or_noise", title: skipTitle };
+  // 正文 trim 后为空即算空白，这一格 `informationlessReason` 够不着：它判的是 title+content
+  // 的**组合**（两侧归一后都不剩字才命中），所以「标题有字、正文一片空白」在它眼里是有信息
+  // 的。上一版据此让那条进包，判据本身没错，错在出口：收侧的 `content` 列 NOT NULL，车道 C
+  // 还按 spec §5 逐条校验非空，一条空正文不是少发一条而是**把整包毒掉**（校验不过 → 什么都不
+  // 导入，对面拿着一个报错的包不知道差在哪一条）。这里不开第七个原因键：六个键被 docs/SHARE.md
+  // 的表、CLI 的档位名与本文件的计数三方钉死，多一个就是第四份要跟着改的口径；而「这条不该进包」
+  // 的原因确实就是「它没有正文」，同一格读数不撒谎。
+  if (!String(row?.content ?? "").trim() || informationlessReason(row)) {
+    return { include: false, reason: "blank_or_noise", title: skipTitle };
+  }
   // 命中判据时标题恒为空串，与「这条压根没标题」同一个出口形状（下游只看到字符串）。
   if (scanned) return { include: false, reason: "sensitive", title: "" };
   const content = redact(row?.content ?? "");
