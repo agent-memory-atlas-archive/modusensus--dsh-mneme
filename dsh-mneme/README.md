@@ -532,7 +532,8 @@ dsh plugin --profile web add "C:/path/to/modusensus-dsh-mneme-0.9.0.tgz"
 | `GET` | `/search?q&mode=keyword\|vector\|hybrid\|auto&topK&occurred_from&occurred_to&agent_scope&workspace_scope` | 搜索（关键词 / 向量 / hybrid=向量领位关键词补位 / 自动）。scope 两参声明调用方身份（不传 = 不解析，行为与旧版一致；任一给出则 strictScope 硬过滤与 A2 软加权随之生效） |
 | `GET` | `/context?q&topK&threshold&agent_scope&workspace_scope` | 注入候选一站式聚合（issue #370，#363 承诺）：宿主注入管线 `injectCandidates` 全语义（优先级分层 / 编码门控 / heat / scope 软加权 / hybrid 语义路 / pin 前置）+ 画像 + 规则，返回 `{profile, rules, items, pinnedCount}` 结构化条目，不含渲染文本。`threshold` 是 **importance 阈值**（默认 3，与 `/search` 的相似度阈值同名不同义）；`topK` 默认 5（对齐宿主 `maxInjectedItems`）；scope 语义与 `/search` 同口径；跨轮轮换 / 热记忆 / 时间前缀不含（调用方自管）；recall_runs 注入分账与宿主注入同口径（#217 `mode='inject'`） |
 | `POST` | `/bootstrap` | 冷启动（v0.8.4）：从仓库目录反向构建初始记忆，body `{dir}` 必填；幂等（(type,title,scope) 去重 + `_overwrite` 原地刷新），零 LLM、必有产出 |
-| `POST` | `/maintenance/reclaim` | 无损回收（#275 / #411，与面板同口径）：**只有 POST**（独立面没有 GET 预估分支）。字段只从 JSON body 读；`dryRun` 默认 `true`，只有 `dryRun:false` 且 `confirm:true` 才真删；`vacuum` 只允许显式指定 |
+| `POST` | `/maintenance/reclaim` | 无损回收（#275 / #411，与面板同口径）：**只有 POST**（本路径不提供 GET 预估分支）。字段只从 JSON body 读；`dryRun` 默认 `true`，只有 `dryRun:false` 且 `confirm:true` 才真删；`vacuum` 只允许显式指定 |
+| `POST` | `/share` | 记忆分享包：把活跃记忆按口径打成可外发的 JSON 包，纯读不写库；取行与跳过口径、脱敏规则与 3 MiB 体积水位见 [docs/SHARE.md](docs/SHARE.md)。本路径的 GET 一律 405 |
 
 ### curl 示例
 
@@ -708,6 +709,7 @@ npm run sync       # 把 src/ 同步到 lib/（发布时由 prepack 钩子自动
 - [连续性抢救（#249 N3）：触发器口径与事件契约](docs/CONTINUITY.md)
 - [Sleep Mode：空闲四阶段深度维护](docs/SLEEP.md)
 - [存储与回收：表结构、保留期、`dsh-mneme reclaim`](docs/STORAGE.md)
+- [记忆分享包：导出与跳过口径、体积水位（`dsh-mneme share`）](docs/SHARE.md)
 - [独立服务 daemon（`dsh-mneme-serve`）](docs/DAEMON.md)
 - [与 Zep / Graphiti / Mem0 / Letta / Hindsight 的能力对比](../docs/COMPARISON.md)
 
