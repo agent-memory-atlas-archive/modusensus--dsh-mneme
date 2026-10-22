@@ -101,3 +101,163 @@ export function shareReply({ service, packageVersion, homeDir, now = () => new D
     return { status: 500, body: { error: "internal" } };
   }
 }
+
+// --- 接收侧（车道 C，spec §5）--------------------------------------------------
+// 入库与整包退出同属「两张皮只许差在鉴权与路径」那条纪律（#411），所以这两组解析/答复
+// 也住在本模块，与出包侧同一个形状：只回 {status, body}，绝不写 res。
+//
+// 这里刻意**不**重跑 validateSharePack：整包闸门住在 share.js、由 service 的
+// importSharePack 自己调（src/share-import.js）。本层再判一次就是第二套口径——两份实现
+// 各自演进时最坏情况是「路由放行、service 拒」或反过来，而一个包有没有合格从此没有准信。
+// 失败靠 err.code 鸭子类型映射成状态码：ShareImportError 是刻意不从 service 再导出的
+// （类跨模块之后，instanceof 就退化成「只在同一个实例内成立」），码才是契约。
+
+/**
+ * 导入错误码 → HTTP 状态。一张表喂两张皮（数据面那半也从这儿取），码集由 share.js 的
+ * validateSharePack 定：闸门新增一格必须在这里登记。认不出的码走「500 + 日志」那一条，
+ * 绝不静默降级成 400 冒充「你的包不合格」——那会把存储故障报成对方的错。
+ */
+export const SHARE_IMPORT_ERRORS = Object.freeze({
+  "invalid-kind": 400,
+  "invalid-pack-id": 400,
+  "invalid-memories": 400,
+  "empty-pack": 400,
+  "invalid-type": 400,
+  "invalid-entry": 400,
+  "external-id-mismatch": 400,
+  "duplicate-external-id": 400
+});
+
+/**
+ * 「收侧没接线」的码（headless 或旧装配里没有那两个方法）。与 RECLAIM_UNAVAILABLE 同一
+ * 处置：字面量只许住在本模块，两张皮都从这一个导出取，否则各写一种拼法就没法按码分支。
+ */
+export const SHARE_IMPORT_UNAVAILABLE = "share-import-unavailable";
+
+/**
+ * 缺省即干跑：没有 confirm 就是预览。脾气照 readReclaimFields 的 confirm（只认真布尔），
+ * 但这一面的方向更硬——写的是**收件人的库**，所以唯一的入口就是 confirm，`dryRun` 之类
+ * 的第二个旋钮一概不认（reclaim 的 body 形状里就带 dryRun，手熟的人会顺手发来，把它读成
+ * 「要写」等于替她点头）。
+ */
+function readDryRun(body) {
+  return body?.confirm !== true;
+}
+
+/**
+ * 答复壳里唯一由本层加的一格。service 那一侧收的是 opts.dryRun、不认识 dry_run，对面读的
+ * 却是这一格，所以放在本层加：两张皮拿到的键才完全相同。
+ *
+ * `dryRun !== false` 而不是 `=== true`：认不出的值（字符串、对象、undefined）一律落回**干跑**，
+ * 与解析侧同一个失败方向；而传下去的那个布尔值与写进答复的那一格永远同一个数——「其实没写、
+ * 却说写了」和「其实写了、却说没写」都是说谎，这一格不许和实参分家。
+ */
+function withDryRun(reply, dryRun) {
+  return { ...reply, dry_run: dryRun !== false };
+}
+
+/**
+ * 解析 POST /receive 的 body（已读成文本）→ { pack, dryRun }。
+ *
+ * 三个码分开是有原因的：invalid-json（发坏了）、invalid-body（顶层就不是对象）、
+ * missing-pack（对象里没有包）——对面据此知道改哪一头，而它们全是 400。空 body 是
+ * **错**的，与出包侧相反：那边「一个字节都不发」是整库口径，这边压根没东西可写。
+ *
+ * pack 那一格只判「是不是个对象」，不判包：数组或 `{kind:"nope"}` 都往下交，由闸门整包拒
+ * （invalid-kind）。判据只许有一处。
+ *
+ * @returns {{ok: true, pack: object, dryRun: boolean} | {ok: false, error: string}}
+ */
+export function parseReceiveBody(text) {
+  if (text === undefined || text === null || String(text).trim() === "") return { ok: false, error: "invalid-body" };
+  let body;
+  try {
+    body = JSON.parse(String(text));
+  } catch {
+    return { ok: false, error: "invalid-json" };
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return { ok: false, error: "invalid-body" };
+  if (!body.pack || typeof body.pack !== "object") return { ok: false, error: "missing-pack" };
+  return { ok: true, pack: body.pack, dryRun: readDryRun(body) };
+}
+
+/**
+ * 解析 POST /receive/undo 的 body → { packId, dryRun }。顶层形状与「有没有 id」是两个错，
+ * 与 receive 侧同一口径（发坏了 / 发错了形状 / 没填）。
+ *
+ * id 在这里 trim，与 deleteSharePack 首行同一把尺；非字符串与空白一律不进删除那条路——
+ * 让空白去 service 那儿换回一个 `pack_id: ""` 的 0 删除，读数上看不出是「没填」还是
+ * 「那个包本来就没导入过」，而这两种在出口是完全不同的事。
+ *
+ * @returns {{ok: true, packId: string, dryRun: boolean} | {ok: false, error: string}}
+ */
+export function parseUndoBody(text) {
+  if (text === undefined || text === null || String(text).trim() === "") return { ok: false, error: "invalid-body" };
+  let body;
+  try {
+    body = JSON.parse(String(text));
+  } catch {
+    return { ok: false, error: "invalid-json" };
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return { ok: false, error: "invalid-body" };
+  const packId = typeof body.packId === "string" ? body.packId.trim() : "";
+  if (!packId) return { ok: false, error: "missing-pack-id" };
+  return { ok: true, packId, dryRun: readDryRun(body) };
+}
+
+/**
+ * 入库的答复。`pack` 原样交给 service，校验在那儿跑（见本段开头那句「判据只许有一处」）。
+ *
+ * 抛错在这儿兜住并回 500，不留给调用方的 try：两侧 handler 的形状都是
+ * `try { return readBody(...).then(...) } catch`，外层 try 在 .then 的回调里已经退栈，
+ * 从这里抛出去就是一个没人接的 rejection（#410）。warn 可选——数据面的 logger 未必接得上，
+ * 少一个回调不许把异常漏出去。
+ *
+ * @param {{service: {importSharePack?: Function}, pack: object, dryRun?: boolean,
+ *          warn?: ((msg: string) => void)|null}} input
+ * @returns {{status: number, body: object}}
+ */
+export function receiveReply({ service, pack, dryRun, warn = null }) {
+  if (typeof service?.importSharePack !== "function") {
+    return { status: 503, body: { error: SHARE_IMPORT_UNAVAILABLE } };
+  }
+  const dry = dryRun !== false;
+  try {
+    return { status: 200, body: withDryRun(service.importSharePack(pack, { dryRun: dry }), dry) };
+  } catch (error) {
+    const code = typeof error?.code === "string" ? error.code : null;
+    const status = code === null ? undefined : SHARE_IMPORT_ERRORS[code];
+    if (status) {
+      // detail 是闸门给的那一格（哪个字段、哪个坏类型），只转发不加工；没有就不造这一格。
+      const detail = typeof error.detail === "string" && error.detail ? { detail: error.detail } : {};
+      return { status, body: { error: code, ...detail } };
+    }
+    warn?.(`[dsh-mneme] share import failed: ${String(error)}`);
+    return { status: 500, body: { error: "internal" } };
+  }
+}
+
+/**
+ * 整包退出的答复。这一面**不查** SHARE_IMPORT_ERRORS：packId 的形状闸门在 parseUndoBody，
+ * service 那侧不抛带码的错（非字符串/空白它回一个 0 删除，不是异常），所以真抛出来就是
+ * 存储故障。别在这儿补第二张表——那张表只会成为 SHARE_IMPORT_ERRORS 的影子。
+ *
+ * 答复里的 pack_id 是 service 的读数而不是请求的回显（非字符串/空白那一支它回 ""），
+ * 本层不改写、不兜底；dry_run 由 withDryRun 加，与入库那侧同一格键。
+ *
+ * @param {{service: {deleteSharePack?: Function}, packId: string, dryRun?: boolean,
+ *          warn?: ((msg: string) => void)|null}} input
+ * @returns {{status: number, body: object}}
+ */
+export function undoReply({ service, packId, dryRun, warn = null }) {
+  if (typeof service?.deleteSharePack !== "function") {
+    return { status: 503, body: { error: SHARE_IMPORT_UNAVAILABLE } };
+  }
+  const dry = dryRun !== false;
+  try {
+    return { status: 200, body: withDryRun(service.deleteSharePack(packId, { dryRun: dry }), dry) };
+  } catch (error) {
+    warn?.(`[dsh-mneme] share undo failed: ${String(error)}`);
+    return { status: 500, body: { error: "internal" } };
+  }
+}

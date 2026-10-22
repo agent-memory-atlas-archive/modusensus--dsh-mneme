@@ -14,7 +14,7 @@ import { describeLocalRuntime, publicRuntimeStatus } from "./runtime/loader.js";
 import { hostModulesDir, provisionRuntime } from "./runtime/provision.js";
 import { classify, fetchLatestVersion, PACKAGE_VERSION } from "./version-check.js";
 import { parseReclaimQuery, parseReclaimJson, readReclaimFields, reclaimReply, RECLAIM_UNAVAILABLE } from "./reclaim-http.js";
-import { parseShareBody, shareReply, shareFilename } from "./share-http.js";
+import { parseShareBody, shareReply, shareFilename, parseReceiveBody, receiveReply, parseUndoBody, undoReply } from "./share-http.js";
 import { readPipelineDoc, loadPipelines, projectPipelineDir } from "./pipeline.js";
 import { loadRunsById, runsDir, RUNS_SUFFIX } from "./pipeline-runs.js";
 import { observationDir, loadObservationsById } from "./pipeline-observations.js";
@@ -1503,6 +1503,82 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
           }
           sendJson(res, out.status, out.body);
         });
+      } catch {
+        sendJson(res, 500, { error: "internal" });
+      }
+    }
+  });
+
+  // --- 分享包入库与整包退出（车道 C，spec §5）--------------------------------
+  // 写库的一面（token-write：非 GET 要 Bearer）。判据一条都不在这里：包体合格不合格住在
+  // share.js 的闸门（由 service 的 importSharePack 调），错误码 → 状态的映射住在
+  // share-http.js 那份共用实现里——#411 的口径是两张皮只许剩鉴权与路径不同。本侧独有的
+  // 只有把 warn 接到宿主 logger 上（不接就是一条静默的 500，现场只剩 internal）。
+  //
+  // 非 POST 一律 405。这**故意**与上面的 /maintenance/reclaim 不同（那边掉到末尾 404）：
+  // 每条 receive 都有一个数据面双胞胎（C6 的 POST /receive、/receive/undo），那里只认
+  // 405，状态码差一次就是第三处差别——一致性在这里比「照抄本文件的邻居」更硬。
+  //
+  // 外层 try 与 .catch 都要留着：外层那个在 .then 的回调里已经退栈，回调里抛出去就是没人接
+  // 的 rejection，客户端拿到的不是 500 而是「一个字节都没回」（#410）。
+  register({
+    kind: "exact",
+    path: "/api/dsh-mneme/receive",
+    policy: "token-write",
+    handler(req, res) {
+      try {
+        if (req.method !== "POST") {
+          sendJson(res, 405, { error: "method-not-allowed" });
+          return;
+        }
+        return readBody(req, res).then((text) => {
+          if (text === null) return; // readBody 已经答过 413，再写一次就是双写响应
+          const parsed = parseReceiveBody(text);
+          if (!parsed.ok) {
+            sendJson(res, 400, { error: parsed.error });
+            return;
+          }
+          const out = receiveReply({
+            service,
+            pack: parsed.pack,
+            dryRun: parsed.dryRun,
+            warn: (msg) => ctx.logger?.warn?.(msg)
+          });
+          sendJson(res, out.status, out.body);
+        }).catch(() => sendJson(res, 500, { error: "internal" }));
+      } catch {
+        sendJson(res, 500, { error: "internal" });
+      }
+    }
+  });
+
+  // 退出按 pack_id 收起一整包（物删不归档，理由见 src/share-import.js）。dry-run 同样是
+  // 缺省：没带 confirm 就只报「会删掉几条」，与 reclaim、与入库那侧同一个脾气。
+  register({
+    kind: "exact",
+    path: "/api/dsh-mneme/receive/undo",
+    policy: "token-write",
+    handler(req, res) {
+      try {
+        if (req.method !== "POST") {
+          sendJson(res, 405, { error: "method-not-allowed" });
+          return;
+        }
+        return readBody(req, res).then((text) => {
+          if (text === null) return;
+          const parsed = parseUndoBody(text);
+          if (!parsed.ok) {
+            sendJson(res, 400, { error: parsed.error });
+            return;
+          }
+          const out = undoReply({
+            service,
+            packId: parsed.packId,
+            dryRun: parsed.dryRun,
+            warn: (msg) => ctx.logger?.warn?.(msg)
+          });
+          sendJson(res, out.status, out.body);
+        }).catch(() => sendJson(res, 500, { error: "internal" }));
       } catch {
         sendJson(res, 500, { error: "internal" });
       }
