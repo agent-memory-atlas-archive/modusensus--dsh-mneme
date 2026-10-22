@@ -19,7 +19,7 @@
 - **写路径只能在 `service.transaction(fn)` 里**。`scheduleEmbed`（`src/service.js:310-351`）在 `txDepth > 0` 时只是入队，**只有 `transaction()` 最外层提交时才排空**（`:1234`）；裸用 `store.runAtomically` 会静默不嵌入。
 - **`created_at` / `content_hash` 由 store 自己落**，不接受调用方传值（`src/store.js:1154`、`:1160`、`:1200-1201`，AGENTS.md 纪律 5 的单调时间戳防御段）。包里的 `created_at` 不入库。
 - **幂等主路径是事务内先查 `share_external_id`**，命中即跳过；UNIQUE 索引只兜两个宿主并发的竞态（输的一侧整笔回滚、重跑得 `created = 0`）。约束报错**不许**被 catch 后继续跑。
-- **批删必须跟 `store.remove()` 一样清 side table**（`src/store.js:1333-1346` 会先删 `memory_provenance` 再删 `memories`，因为 `foreign_keys` pragma 从没开），并在同一个事务里 `incrementGeneration()`。
+- **批删必须跟 `store.remove()` 一样清 side table**（`src/store.js` 的 `remove()` 先删 `memory_provenance` 再删 `memories`，并在同一事务里 `incrementGeneration()`）。清的理由**不是**「外键没开」：C1 实测 `node:sqlite` 默认就开着 `PRAGMA foreign_keys`，级联是活的；留显式删除是因为**不该让清理依赖一个没人钉住的驱动默认值**。
 - 新路由必须显式声明 `policy`（`token-write`），`createRouteRegistrar` 漏声明即抛错。`token-write` 只存在于宿主内侧 `src/api.js`；standalone 侧是一道全局 Bearer 门（`src/api-standalone.js:326`），**不许发明同名分支**。
 - `token-write` 路由要进 SECURITY.md **两处 × 中英两份**（`test/security-doc.test.js` 一个过滤器取 `open||token-write`，另一个取 `token||token-write`），并同步 `README.md` 与 `docs/DAEMON.md` 的清单——后者不在任何测试的视野里。
 - 每张皮对 `GET /receive`、`GET /receive/undo` 都答 **405**（车道 A 已定的纪律：两张皮只许差在鉴权、路径、以及面板侧独有的 `Content-Disposition`/logger）。
@@ -228,8 +228,9 @@ Expected: FAIL —— 第一条报 `no such column: share_pack_id`（`toRow` 读
   /**
    * 整包退出。删空一个不存在的包是幂等的 0，不是错误——对方点第二次「收起这个包」
    * 与「收起一个从来没导入过的包」都该是这个答案。
-   * provenance 必须同事务清掉：本库从没开过 foreign_keys pragma，留着就是悬空链接
-   * （与 remove() :1333-1346 同一处置）。
+   * provenance 同事务清掉是双保险，而不是因为外键没开：C1 实测 node:sqlite 默认
+   * 开着 PRAGMA foreign_keys，级联是活的。不把清理押在一个没人钉住的驱动默认值上
+   * （与 remove() 同一处置）。
    */
   function deleteBySharePackId(packId) {
     if (typeof packId !== "string" || !packId) return 0;
