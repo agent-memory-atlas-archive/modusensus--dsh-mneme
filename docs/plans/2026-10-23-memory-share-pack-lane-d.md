@@ -1075,7 +1075,7 @@ git commit -m "feat(panel): receive dialog previews the pack before it writes th
 ### Task D4: 外来区（筛选 chip + 来源徽标 + 抽屉「收起这个包」）
 
 **Files:**
-- Modify: `lib/client.js`（字典两份 + `ForeignBadge` + CSS 一条 + `filterQS` + 外来 chip（只管浏览态，搜索态按下无效）+ 卡片与时间线两处徽标 + `MemoryDrawer` 的 meta 行与动作区 + 父级 `onUndone`。`visible` 那一行**不动**，理由在 Step 6）
+- Modify: `lib/client.js`（字典两份 + `ForeignBadge` + CSS 一条 + `filterQS` + 外来 chip（只管浏览态：搜索态不许**开启**，已开着时永远许关掉）+ 卡片与时间线两处徽标 + `MemoryDrawer` 的 meta 行与动作区 + 父级 `onUndone`。`visible` 那一行**不动**，理由在 Step 6）
 - Modify: `test/client-share.test.js`（追加两条锁）
 
 **Interfaces:**
@@ -1250,7 +1250,7 @@ D2 那段 CSS 之后追加一行（`--mneme-ok` 与 `.mneme-saved` 同源，已�
 理由（这条是本轮扫描改掉的裁定）：搜索态那张 DTO 的 `source` 是召回渠道而不是行来源
 （`src/service.js:939` 给每条候选盖 `source: "keyword"|"vector"|"bm25"`），按它筛等于按一个
 假信号筛——`m.source === "imported"` 在搜索结果里恒不成立，「外来 chip 亮着却筛空/筛不空」
-正是最难看的那种错。所以外来筛选只管**浏览态**，搜索态由那颗 chip 自己按下无效（Step 7）。
+正是最难看的那种错。所以外来筛选只管**浏览态**；搜索态那颗 chip 不许被开启，但已经开着时永远许关掉（Step 7）。
 
 - [ ] **Step 7: chip 与两处徽标**
 
@@ -1400,7 +1400,7 @@ git add dsh-mneme/lib/client.js dsh-mneme/test/client-share.test.js
 git commit -m "feat(panel): foreign area filter, source badge, and per-pack withdrawal"
 ```
 
-**自查（D4）**：徽标在没有 `from-` 标签的外来行上是不是安静地不出现（不显示「来自 undefined」）？`foreignOnly` 与 `archivedOnly` 同时开时是否可能互斥到恒空——若是，服务端 `source=imported` 与 `archived=only` 是两个独立开关（`src/api.js:376`、`:381`），互斥结果恒空是**读数**而不是 bug，不许在面板里偷偷关掉其中一个；`undoPack(true)` 成功后有没有走 `onUndone`（关抽屉 + 刷新）而不是留在原地？
+**自查（D4）**：徽标在没有 `from-` 标签的外来行上是不是安静地不出现（不显示「来自 undefined」）？`foreignOnly` 与 `archivedOnly` 同时开时是否可能互斥到恒空——若是，服务端 `source=imported` 与 `archived=only` 是两个独立开关（都在 `/api/dsh-mneme/list` 那一个 handler 里解析，不带行号免得漂），互斥结果恒空是**读数**而不是 bug，不许在面板里偷偷关掉其中一个；`undoPack(true)` 成功后有没有走 `onUndone`（关抽屉 + 刷新）而不是留在原地？
 
 ---
 
@@ -1442,7 +1442,7 @@ Expected: `docs/SHARE.md` 五处（`:8`、`:176`、`:298`、`:419`、`:424-425`�
   「写进去了」这句只由答复的 `dry_run` 说，不按按钮状态推；撞名是 advisory 读数
   （只对「本轮真正会新建的那些」判过），所以清单为空不等于「没有冲突」。
 - **外来区**：工具条「外来」chip 走服务端的 `source=imported` 精确筛选（**只管浏览态**：
-  有搜索词时这颗键按下无效，并说明为什么——搜索结果里没有可用的来源读数，见下面「已知代价」第一条）；
+  有搜索词时这颗键不许被开启（已经开着的话永远许关掉），并说明为什么——搜索结果里没有可用的来源读数，见下面「已知代价」第一条）；
   行上是
   `from-<别名>` 徽标（读数就是 `importedTagFor` 打的那条标签，库里没有单独的别名列）；
   抽屉里显示所属 `pack_id` 并给「收起这个包」，**两段**：先干跑清点条数（并列出 `sample`
@@ -1471,7 +1471,7 @@ Expected: `docs/SHARE.md` 五处（`:8`、`:176`、`:298`、`:419`、`:424-425`�
    下发（`src/api.js` 那个 items 的 map），而 `/search` 的 DTO 里 `source` 是**召回渠道**
    （`keyword`/`vector`/`bm25`，`src/service.js:939`）而不是行来源——`searchMemories` 给每条候选
    盖上渠道时把 provenance 覆盖了，所以「这条是不是外来的」在那张 DTO 上读不出来。
-   于是：外来 chip 有搜索词时按下无效（带自己的文案，不假装筛过）、`from-<别名>` 徽标在搜索态
+   于是：外来 chip 有搜索词时不许被开启（已开着时永远许关掉，不把她锁在一个解不开的状态里；带自己的文案说明原因，不假装筛过）、`from-<别名>` 徽标在搜索态
    不出现、抽屉里也没有「收起这个包」。绕法一律是**清掉搜索词回浏览态**。
    这两个事实由 `test/share-foreign-rows.test.js` 的第三条用例钉着。要真修的是召回侧那个字段的
    命名（它同时让搜索结果那张卡片脚上显示 `keyword` 而不是行来源——既存症状，本车道不动），
