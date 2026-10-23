@@ -729,6 +729,30 @@ window.__ModuleLoader__.load({
         "memory.explorer.imported": "已合并 {n} 条编辑",
         "memory.explorer.importFailed": "导入失败",
         "memory.explorer.importNoFile": "请先选择文件",
+        "memory.explorer.sharePack": "分享记忆包…",
+        "memory.explorer.shareTitle": "分享记忆包",
+        "memory.explorer.shareHint": "把本机活跃记忆打成一个可外发的包：密钥/PII 整条不发，本机路径抹成 ~，归档与遗忘的不进。",
+        "memory.explorer.shareAlias": "分享别名",
+        "memory.explorer.shareAliasBlank": "留空 = from-shared",
+        "memory.explorer.shareType": "只发这一类",
+        "memory.explorer.shareBuild": "生成",
+        "memory.explorer.shareBuilding": "生成中…",
+        "memory.explorer.shareFailed": "生成失败",
+        "memory.explorer.shareIncluded": "进包 {n} 条",
+        "memory.explorer.shareDeduped": "另有 {n} 条同键折叠，够格进包 {m} 条",
+        "memory.explorer.shareSkipped": "跳过 {n} 条",
+        "memory.explorer.share.skip.archived": "归档",
+        "memory.explorer.share.skip.forgotten": "已遗忘",
+        "memory.explorer.share.skip.readonly_type": "只读指针行",
+        "memory.explorer.share.skip.excluded_type": "不外发的类型",
+        "memory.explorer.share.skip.blank_or_noise": "空白或噪声",
+        "memory.explorer.share.skip.sensitive": "密钥或 PII",
+        "memory.explorer.shareSkipList": "跳过清单（{n} 条）",
+        "memory.explorer.shareSkipListCapped": "清单只列前 {n} 条，上面计数是全量",
+        "memory.explorer.shareNoTitle": "（标题不外发）",
+        "memory.explorer.shareTooLarge": "包体 {bytes} 字节，超过 {limit} 字节水位",
+        "memory.explorer.shareEmpty": "没有够格外发的条目，包是空的",
+        "memory.explorer.shareDownload": "下载包文件",
         "memory.explorer.newMemory": "新增记忆…",
         "memory.explorer.newTitle": "新增记忆",
         "memory.explorer.newHint": "手动写一条记忆。同类型同标题会并入既有条目，而不是长出第二行。",
@@ -1402,6 +1426,30 @@ window.__ModuleLoader__.load({
         "memory.explorer.imported": "Merged {n} edits",
         "memory.explorer.importFailed": "Import failed",
         "memory.explorer.importNoFile": "Choose a file first",
+        "memory.explorer.sharePack": "Share memories…",
+        "memory.explorer.shareTitle": "Memory share pack",
+        "memory.explorer.shareHint": "Pack your active memories for someone else: rows holding secrets are dropped whole, home paths become ~, archived and forgotten rows stay in.",
+        "memory.explorer.shareAlias": "Share alias",
+        "memory.explorer.shareAliasBlank": "blank = from-shared",
+        "memory.explorer.shareType": "Only this type",
+        "memory.explorer.shareBuild": "Build",
+        "memory.explorer.shareBuilding": "Building…",
+        "memory.explorer.shareFailed": "Could not build the pack",
+        "memory.explorer.shareIncluded": "{n} rows in the pack",
+        "memory.explorer.shareDeduped": "{n} folded as duplicates; {m} rows qualified",
+        "memory.explorer.shareSkipped": "{n} rows skipped",
+        "memory.explorer.share.skip.archived": "Archived",
+        "memory.explorer.share.skip.forgotten": "Forgotten",
+        "memory.explorer.share.skip.readonly_type": "Read-only pointers",
+        "memory.explorer.share.skip.excluded_type": "Excluded types",
+        "memory.explorer.share.skip.blank_or_noise": "Blank or noise",
+        "memory.explorer.share.skip.sensitive": "Secrets or PII",
+        "memory.explorer.shareSkipList": "Skip list ({n})",
+        "memory.explorer.shareSkipListCapped": "List shows the first {n}; the counts above are complete",
+        "memory.explorer.shareNoTitle": "(title withheld)",
+        "memory.explorer.shareTooLarge": "Pack is {bytes} bytes, over the {limit}-byte water mark",
+        "memory.explorer.shareEmpty": "Nothing qualified - the pack is empty",
+        "memory.explorer.shareDownload": "Download pack file",
         "memory.explorer.newMemory": "New memory…",
         "memory.explorer.newTitle": "New memory",
         "memory.explorer.newHint": "Write one memory by hand. Same type + same title merges into the existing entry instead of minting a second row.",
@@ -2056,6 +2104,16 @@ window.__ModuleLoader__.load({
       ".mneme-menu button:hover{background:var(--dsw-alias-interactive-bg-hover)}",
       ".mneme-impdialog{position:absolute;right:0;top:calc(100% + 6px);width:300px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 12px 32px color-mix(in srgb,var(--dsw-alias-label-primary) 16%,transparent);padding:14px;z-index:20;animation:mneme-fadein .1s ease-out}",
       ".mneme-improw{display:flex;align-items:center;gap:8px;margin-top:10px}",
+      // 车道 D 的分享/接收弹层：宽度与滚动共用 impdialog 的锚，正文一律 --mneme-* 语义层
+      // （纪律 10：宿主 label-tertiary/label-dimmed 是分隔线层，不是正文色）。
+      ".mneme-sharedialog{width:340px;max-height:min(72vh,560px);overflow-y:auto}",
+      ".mneme-sharebody{margin-top:10px;display:flex;flex-direction:column;gap:2px}",
+      ".mneme-sharebreak{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}",
+      ".mneme-sharebreakitem{font-size:11px;line-height:15px;color:var(--mneme-fg-dim);font-variant-numeric:tabular-nums}",
+      ".mneme-sharelist{margin-top:4px;max-height:132px;overflow-y:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 8px}",
+      ".mneme-sharow{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;line-height:16px}",
+      ".mneme-sharowtitle{color:var(--dsw-alias-label-primary);min-width:0;word-break:break-word}",
+      ".mneme-sharowreason{flex:none;color:var(--mneme-fg-dim)}",
       // 瞬时操作提示（删除/归档）：挂在浏览层底部居中，不被抽屉卸载吞掉
       ".mneme-x{position:relative}",
       ".mneme-toast{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-1);font-size:12.5px;line-height:18px;padding:7px 16px;border-radius:10px;z-index:30;box-shadow:0 8px 24px color-mix(in srgb,var(--dsw-alias-label-primary) 25%,transparent);animation:mneme-fadein .15s ease-out}",
@@ -6188,6 +6246,165 @@ window.__ModuleLoader__.load({
       );
     }
 
+    // --- 分享包弹层（车道 D，spec §6）---
+    // 这一面的支点只有一句：**看见 report 之前不给下载**。服务端一次 POST 就把包和报告
+    // 一起交回，所以这一格拦不住靠协议、只能靠界面自己：CLI 那侧没人拦得住，面板至少要让
+    // 「随手把整库外发」停一步。八个类型下拉、六个跳过原因都只许是 src/share.js 的投影，
+    // 一条判据都不在这里复述（#411 口径）。
+    const SHARE_TYPE_OPTIONS = ["preference", "project", "decision", "history", "pitfall", "constraint", "rejected_solution", "pattern"];
+    // 顺序即 share.js 的判序（classifyRowForShare 从上往下命中）；报告按这个顺序排，
+    // 跨文件锁在 test/client-share.test.js 里同时锁内容与顺序。
+    const SHARE_SKIP_REASONS = ["archived", "forgotten", "readonly_type", "excluded_type", "blank_or_noise", "sensitive"];
+
+    /**
+     * 服务端 Content-Disposition 里的文件名。拼法只住在 src/share-http.js 的
+     * shareFilename（日期 + pack_id 前 8 位），面板复制一份就是第二个口径：旧服务端没带
+     * 这一格时宁可短（pack_id 兜底），也不许在这里再拼一次日期。
+     */
+    const dispositionName = (value) => {
+      const m = /filename="?([^";]+)"?/.exec(value || "");
+      return m ? m[1] : "";
+    };
+
+    // 出包报告。两笔账必须同屏：进包条数与「够格」条数是两个数（包内同键折叠），
+    // 跳过计数是全量而跳过清单截到 50——只报清单会让人以为跳过的就清单里那些。
+    function ShareReport({ t, report, listOpen, setListOpen }) {
+      const skipped = report.skipped || {};
+      const list = Array.isArray(report.skip_list) ? report.skip_list : [];
+      const totalSkipped = SHARE_SKIP_REASONS.reduce((n, k) => n + (skipped[k] || 0), 0);
+      return h("div", { className: "mneme-sharebody" },
+        h("div", { className: "mneme-saved" }, t("memory.explorer.shareIncluded").replace("{n}", String(report.included ?? 0))),
+        (report.deduped || 0) > 0 && h("div", { className: "mneme-featsubhint" },
+          t("memory.explorer.shareDeduped")
+            .replace("{n}", String(report.deduped))
+            .replace("{m}", String(report.included + report.deduped))),
+        totalSkipped > 0 && h("div", { className: "mneme-featsubhint" },
+          t("memory.explorer.shareSkipped").replace("{n}", String(totalSkipped))),
+        totalSkipped > 0 && h("div", { className: "mneme-sharebreak" },
+          SHARE_SKIP_REASONS.filter((k) => (skipped[k] || 0) > 0).map((k) =>
+            h("span", { key: k, className: "mneme-sharebreakitem" },
+              `${t(`memory.explorer.share.skip.${k}`)} ${skipped[k]}`))),
+        list.length > 0 && h("div", null,
+          h("button", {
+            type: "button",
+            className: "mneme-footbtn",
+            "aria-expanded": String(listOpen),
+            onClick: () => setListOpen(!listOpen)
+          }, t("memory.explorer.shareSkipList").replace("{n}", String(list.length))),
+          listOpen && h("div", { className: "mneme-sharelist" },
+            list.map((row, i) => h("div", { key: `${i}-${row.reason}`, className: "mneme-sharow" },
+              // 命中密钥/PII 的那几条服务端就不给标题（空串），这里不许拿正文或摘要兜底：
+              // 摘要是递给对面的离线爆破 oracle（src/share.js 的 skipTitle 那段）。
+              h("span", { className: "mneme-sharowtitle" }, row.title || t("memory.explorer.shareNoTitle")),
+              h("span", { className: "mneme-sharowreason" }, t(`memory.explorer.share.skip.${row.reason}`)))),
+            // 截断的判据用「清单比账短」而不是硬写 50：服务端的水位改了，这里跟着走。
+            totalSkipped > list.length && h("div", { className: "mneme-sharow" },
+              h("span", { className: "mneme-sharowreason" },
+                t("memory.explorer.shareSkipListCapped").replace("{n}", String(list.length))))))
+      );
+    }
+
+    function ShareDialog({ t, onClose }) {
+      const [alias, setAlias] = useState("");
+      const [type, setType] = useState(""); // "" = 整库口径：这个键压根不发
+      const [busy, setBusy] = useState(false);
+      const [pack, setPack] = useState(null);
+      const [fileName, setFileName] = useState("");
+      const [tooLarge, setTooLarge] = useState(null);
+      const [err, setErr] = useState("");
+      const [listOpen, setListOpen] = useState(false);
+
+      const build = () => {
+        setBusy(true);
+        setErr("");
+        setPack(null);
+        setTooLarge(null);
+        setFileName("");
+        setListOpen(false);
+        const body = {};
+        if (alias.trim()) body.alias = alias.trim();
+        if (type) body.type = type;
+        apiFetch("/api/dsh-mneme/share", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        })
+          .then(async (res) => {
+            const d = await res.json().catch(() => null);
+            // 413 的答复不是包：{error, bytes, limitBytes, hint, report}。报告要给，
+            // 包体一个字节都不许在内存里留着——服务端正是因为它太大才拒的。
+            if (res.status === 413) { setTooLarge(d || {}); setBusy(false); return; }
+            if (!res.ok || !d || !d.report) { setErr(t("memory.explorer.shareFailed")); setBusy(false); return; }
+            setPack(d);
+            setFileName(dispositionName(res.headers.get("content-disposition")));
+            setBusy(false);
+          })
+          .catch(() => { setErr(t("memory.explorer.shareFailed")); setBusy(false); });
+      };
+
+      const rep = pack && pack.report;
+      // included 为 0 时不给下载：那种包对面吃的是 empty-pack（400），给一个必败的文件
+      // 不如在这里说清「没有够格外发的条目」。
+      const canDownload = !!rep && rep.included > 0;
+
+      const download = () => {
+        const blob = new Blob([JSON.stringify(pack, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName || `dsh-mneme-share-${pack.pack_id}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      };
+
+      return h("div", { className: "mneme-impdialog mneme-sharedialog", role: "region", "aria-label": t("memory.explorer.shareTitle") },
+        h("div", { className: "mneme-set-title" }, t("memory.explorer.shareTitle")),
+        h("div", { className: "mneme-featsubhint", style: { marginTop: 4 } }, t("memory.explorer.shareHint")),
+        h("div", { className: "mneme-improw" },
+          h("span", { className: "mneme-featnumlabel" }, t("memory.explorer.shareAlias")),
+          // 尺子与服务端同一把：importedTagFor 把整串标签（含 from-）截到 32，留给别名的
+          // 就是 27。不拦的话她打的第 28 个字起在**对面**被静默吃掉，而这条标签是外来行
+          // 唯一的来源读数。数字由 test/client-share.test.js 跨文件钉住。
+          h("input", {
+            type: "text",
+            className: "mneme-select",
+            value: alias,
+            maxLength: 27,
+            placeholder: t("memory.explorer.shareAliasBlank"),
+            onChange: (e) => setAlias(e.target.value)
+          })
+        ),
+        h("div", { className: "mneme-improw" },
+          h("span", { className: "mneme-featnumlabel" }, t("memory.explorer.shareType")),
+          h("select", { className: "mneme-select", value: type, onChange: (e) => setType(e.target.value) },
+            h("option", { value: "" }, t("memory.tab.all")),
+            SHARE_TYPE_OPTIONS.map((k) => h("option", { key: k, value: k }, typeLabel(t, k))))
+        ),
+        h("div", { className: "mneme-improw", style: { justifyContent: "flex-end" } },
+          h("button", { type: "button", className: "mneme-btn", disabled: busy, onClick: onClose },
+            t("memory.explorer.importCancel")),
+          h("button", { type: "button", className: "mneme-btn", disabled: busy, onClick: build },
+            busy ? t("memory.explorer.shareBuilding") : t("memory.explorer.shareBuild"))
+        ),
+        err && h("div", { className: "mneme-featsubhint", style: { color: "var(--mneme-danger)", marginTop: 8 } }, err),
+        tooLarge && h("div", { className: "mneme-featsubhint", style: { color: "var(--mneme-warn)", marginTop: 8 } },
+          // 提示语服务端给（SHARE_ERROR_HINT 只许有一份），面板只补自己那句字节数。
+          // 它写着 --type/--tag 的 CLI 口吻，这一格已知：docs/SHARE.md 车道 D 那节记着。
+          `${t("memory.explorer.shareTooLarge")
+            .replace("{bytes}", String(tooLarge.bytes ?? "?"))
+            .replace("{limit}", String(tooLarge.limitBytes ?? "?"))} ${tooLarge.hint || ""}`),
+        tooLarge && tooLarge.report && h(ShareReport, { t, report: tooLarge.report, listOpen, setListOpen }),
+        rep && h(ShareReport, { t, report: rep, listOpen, setListOpen }),
+        canDownload && h("div", { className: "mneme-improw", style: { justifyContent: "flex-end" } },
+          h("button", { type: "button", className: "mneme-btn", onClick: download },
+            t("memory.explorer.shareDownload"))),
+        rep && rep.included === 0 && h("div", { className: "mneme-featsubhint", style: { marginTop: 8 } },
+          t("memory.explorer.shareEmpty"))
+      );
+    }
+
     // #386 第 5 条：面板手动新增一条记忆。字段与 memory_save 工具对齐
     //（type/title/content/importance/tags），但**不放 scope/sensitivity**：归属的
     // 显式声明走详情抽屉那条路，它带「放宽可见性」二次确认；在新建表单里顺手盖
@@ -6335,6 +6552,7 @@ window.__ModuleLoader__.load({
       const [menuOpen, setMenuOpen] = useState(false);
       const [importOpen, setImportOpen] = useState(false);
       const [createOpen, setCreateOpen] = useState(false);
+      const [shareOpen, setShareOpen] = useState(false);
       const itemRefs = useRef(new Map());
       const moreRef = useRef(null);
 
@@ -6684,7 +6902,7 @@ window.__ModuleLoader__.load({
                 "aria-label": t("memory.explorer.more"),
                 "aria-expanded": String(menuOpen),
                 title: t("memory.explorer.more"),
-                onClick: () => { setMenuOpen(!menuOpen); setImportOpen(false); setCreateOpen(false); }
+                onClick: () => { setMenuOpen(!menuOpen); setImportOpen(false); setCreateOpen(false); setShareOpen(false); }
               }, "⋯"),
               menuOpen && h("div", { className: "mneme-menu", role: "menu" },
                 h("button", { type: "button", role: "menuitem", onClick: () => { setCreateOpen(true); setMenuOpen(false); } },
@@ -6694,13 +6912,16 @@ window.__ModuleLoader__.load({
                 h("button", { type: "button", role: "menuitem", onClick: () => { setMenuOpen(false); exportData("markdown"); } },
                   t("memory.explorer.exportMarkdown")),
                 h("button", { type: "button", role: "menuitem", onClick: () => { setImportOpen(true); setMenuOpen(false); } },
-                  t("memory.explorer.importMd"))
+                  t("memory.explorer.importMd")),
+                h("button", { type: "button", role: "menuitem", onClick: () => { setShareOpen(true); setMenuOpen(false); } },
+                  t("memory.explorer.sharePack")),
               ),
               importOpen && h(ImportDialog, {
                 t,
                 onClose: () => setImportOpen(false),
                 onImported: () => setReloadKey((k) => k + 1)
               }),
+              shareOpen && h(ShareDialog, { t, onClose: () => setShareOpen(false) }),
               createOpen && h(CreateDialog, {
                 t,
                 onClose: () => setCreateOpen(false),
