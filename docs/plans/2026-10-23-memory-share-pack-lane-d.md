@@ -1121,9 +1121,14 @@ D2 那段 CSS 之后追加一行（`--mneme-ok` 与 `.mneme-saved` 同源，已�
         + (archivedOnly ? "&archived=only" : "");
 ```
 
-在最后一行之后加一项——
+整段换成（注意分号随最后一行走：`archivedOnly` 那行的 `;` 必须挪到新行的末尾，否则是语法错）——
 
 ```js
+      const filterQS = (type === "all" ? "" : `&type=${encodeURIComponent(type)}`)
+        + (minImp ? `&minImportance=${minImp}` : "")
+        + (dateFromIso ? `&updatedFrom=${encodeURIComponent(dateFromIso)}` : "")
+        + (depositedOnly ? "&deposited=only" : "")
+        + (archivedOnly ? "&archived=only" : "")
         + (foreignOnly ? "&source=imported" : "");
 ```
 
