@@ -240,6 +240,26 @@ window.__ModuleLoader__.load({
         t("memory.explorer.scopeBadge"));
     };
 
+    /**
+     * 外来行的来源徽标（车道 D，spec §6 的「行上显示 from-<别名>」）。
+     * 别名不单独存列：`importedTagFor` 打的那条 `from-<别名>` 标签就是唯一读数，
+     * 所以这里只认标签，不猜别的来源。先判 `source === "imported"` 再判标签——
+     * 一个人手工给自己的一条打了 from-x 不算外来行，徽标会把它误报成别人的。
+     * 搜索态不出现这个徽标，且这是对的：那张 DTO 的 source 是召回渠道（src/service.js:939），
+     * 判据在那一侧读不出来。不许为了让搜索结果显示徽标而改成「认标签就算」——那会把
+     * 手工标签误报成外来行，也是 memory-source.js 那条契约的反面。
+     * from-shared 是空别名的中性值，照原样显示，不兜成「未知来源」。
+     */
+    const ForeignBadge = ({ m, t }) => {
+      const isImported = !!m && m.source === "imported";
+      if (!isImported) return null;
+      const tags = Array.isArray(m.tags) ? m.tags : [];
+      const tag = tags.find((x) => typeof x === "string" && x.startsWith("from-"));
+      if (!tag) return null;
+      return h("span", { className: "mneme-badge mneme-badge--foreign", title: tag },
+        t("memory.explorer.foreignBadge").replace("{alias}", tag.slice(5)));
+    };
+
     // Unified API fetcher: attaches the optional apiToken (set in the settings
     // view, persisted in localStorage) as a Bearer header. When no token has
     // been configured the header is omitted and the API stays open (default).
@@ -771,6 +791,16 @@ window.__ModuleLoader__.load({
         "memory.explorer.receiveConflicts": "撞名 {n} 条（不合并，请自己看）",
         "memory.explorer.receivePackCount": "包内 {n} 条",
         "memory.explorer.receiveStillDry": "没有写库：这一枪仍是干跑",
+        "memory.explorer.filterForeign": "外来",
+        "memory.explorer.filterForeignHint": "只看别人分享进来的记忆（source=imported）。这些行不参与本机的巩固、降级或整理。",
+        "memory.explorer.filterForeignSearchHint": "搜索时这一档不按：搜索结果里没有可用的来源读数。要看外来区请先清掉搜索词。",
+        "memory.explorer.foreignBadge": "来自 {alias}",
+        "memory.explorer.foreignPack": "所属分享包",
+        "memory.explorer.undoPack": "收起这个包",
+        "memory.explorer.undoPackPreview": "将删除这个包的 {n} 条外来记忆（物理删除）",
+        "memory.explorer.undoPackConfirm": "确认删除 {n} 条",
+        "memory.explorer.undoPackDone": "已收起 {n} 条",
+        "memory.explorer.undoPackFailed": "收起失败",
         "memory.explorer.newMemory": "新增记忆…",
         "memory.explorer.newTitle": "新增记忆",
         "memory.explorer.newHint": "手动写一条记忆。同类型同标题会并入既有条目，而不是长出第二行。",
@@ -1486,6 +1516,16 @@ window.__ModuleLoader__.load({
         "memory.explorer.receiveConflicts": "{n} title clashes (not merged - check them yourself)",
         "memory.explorer.receivePackCount": "{n} rows in the pack",
         "memory.explorer.receiveStillDry": "Nothing was written: that call stayed dry",
+        "memory.explorer.filterForeign": "Foreign",
+        "memory.explorer.filterForeignHint": "Only rows shared in by someone else (source=imported). They never join this machine's consolidation, demotion or tidying.",
+        "memory.explorer.filterForeignSearchHint": "Not applied while searching: search results carry no usable provenance readout. Clear the query to browse the foreign area.",
+        "memory.explorer.foreignBadge": "From {alias}",
+        "memory.explorer.foreignPack": "Share pack",
+        "memory.explorer.undoPack": "Withdraw this pack",
+        "memory.explorer.undoPackPreview": "This would delete {n} foreign rows from that pack (hard delete)",
+        "memory.explorer.undoPackConfirm": "Delete {n} rows",
+        "memory.explorer.undoPackDone": "Withdrew {n} rows",
+        "memory.explorer.undoPackFailed": "Withdrawal failed",
         "memory.explorer.newMemory": "New memory…",
         "memory.explorer.newTitle": "New memory",
         "memory.explorer.newHint": "Write one memory by hand. Same type + same title merges into the existing entry instead of minting a second row.",
@@ -2150,6 +2190,12 @@ window.__ModuleLoader__.load({
       ".mneme-sharow{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;line-height:16px}",
       ".mneme-sharowtitle{color:var(--dsw-alias-label-primary);min-width:0;word-break:break-word}",
       ".mneme-sharowreason{flex:none;color:var(--mneme-fg-dim)}",
+      // 外来徽标：只有文字色与描边，**不给底色**。`.mneme-badge--scope` / `--frozen` 那两类
+      // 有自己的 10–12% 色晕，而 `test/contrast.test.js` 的正文对比度是按**该条规则自己的
+      // 背景**合成的：`--mneme-ok` 在画布上是 4.62，铺上 12% 绿晕就掉到 4.17（<4.5）。
+      // 与其为它造一个新语义令牌或改用别的色，不如让这一颗走无晕的形状——来源读数本来就在
+      // 文字里（`from-<别名>`），不靠底色说话。
+      ".mneme-badge--foreign{color:var(--mneme-ok);border:1px solid color-mix(in srgb,var(--dsw-static-green-500,#22c55e) 32%,transparent)}",
       // 瞬时操作提示（删除/归档）：挂在浏览层底部居中，不被抽屉卸载吞掉
       ".mneme-x{position:relative}",
       ".mneme-toast{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-1);font-size:12.5px;line-height:18px;padding:7px 16px;border-radius:10px;z-index:30;box-shadow:0 8px 24px color-mix(in srgb,var(--dsw-alias-label-primary) 25%,transparent);animation:mneme-fadein .15s ease-out}",
@@ -5982,7 +6028,7 @@ window.__ModuleLoader__.load({
         decidedAt ?? null
       ].filter(Boolean).join(" · ");
 
-    function MemoryDrawer({ t, memory, conflict, deleting, deleteError, onClose, onDelete, onSaved }) {
+    function MemoryDrawer({ t, memory, conflict, deleting, deleteError, onClose, onDelete, onSaved, onUndone }) {
       const [editing, setEditing] = useState(false);
       const [title, setTitle] = useState(memory.title || "");
       const [content, setContent] = useState(memory.content || "");
@@ -5999,6 +6045,12 @@ window.__ModuleLoader__.load({
       const [saveError, setSaveError] = useState(false);
       const [copied, setCopied] = useState(false);
       const [entities, setEntities] = useState(null);
+      // 整包退出的两段：先干跑清点（点按钮那一发），再确认物删。撤是**物理删除**不是归档
+      // （归档行仍占 share_external_id 的 UNIQUE 位，撤了会导不回来，理由在
+      // src/share-import.js 的 deleteSharePack），所以这里比删除那条路多一站清点。
+      const [undoPreview, setUndoPreview] = useState(null);
+      const [undoBusy, setUndoBusy] = useState(false);
+      const [undoError, setUndoError] = useState(false);
 
       useEffect(() => {
         let cancelled = false;
@@ -6027,6 +6079,27 @@ window.__ModuleLoader__.load({
           })
           .catch(() => setSaveError(true))
           .finally(() => setBusy(false));
+      };
+
+      const undoPack = (confirm) => {
+        setUndoBusy(true);
+        setUndoError(false);
+        apiFetch("/api/dsh-mneme/receive/undo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // 不带 confirm 就是干跑：第一发只清点，第二发才删。packId 只从行上取
+          // （D1 的 share_pack_id），面板不自己拼也不猜。
+          body: JSON.stringify(confirm
+            ? { packId: memory.share_pack_id, confirm: true }
+            : { packId: memory.share_pack_id })
+        })
+          .then(async (res) => { if (!res.ok) throw new Error("http"); return res.json(); })
+          .then((d) => {
+            if (confirm && d.dry_run === false) onUndone(d.deleted ?? 0);
+            else setUndoPreview(d);
+          })
+          .catch(() => setUndoError(true))
+          .finally(() => setUndoBusy(false));
       };
 
       const save = () => {
@@ -6143,6 +6216,11 @@ window.__ModuleLoader__.load({
             h("span", { className: "mneme-dmetakey" }, t("memory.explorer.updated")),
             h("span", { className: "mneme-dmetaval", title: formatDate(memory.updated_at) },
               `${formatRelativeTime(memory.updated_at, t)}（${formatDateShort(memory.updated_at)}）`),
+            // 包号给人核对：与 `dsh-mneme undo-share <包文件>` 用的是同一个 pack_id，
+            // 两条路撤的是同一批行。
+            memory.share_pack_id && h(react.Fragment, null,
+              h("span", { className: "mneme-dmetakey" }, t("memory.explorer.foreignPack")),
+              h("span", { className: "mneme-dmetaval", title: memory.share_pack_id }, memory.share_pack_id)),
             Array.isArray(memory.tags) && memory.tags.length > 0 && h(react.Fragment, null,
               h("span", { className: "mneme-dmetakey" }, t("memory.explorer.tags")),
               h("span", { className: "mneme-dmetaval" }, memory.tags.join(" · ")))
@@ -6218,7 +6296,30 @@ window.__ModuleLoader__.load({
                   : h("button", { type: "button", className: "mneme-btn mneme-btndanger", onClick: () => setConfirmDelete(true) },
                       t("memory.explorer.delete")),
                 deleteError && h("span", { style: { fontSize: 12, color: "var(--mneme-danger)" } },
-                  t("memory.explorer.deleteFailed"))
+                  t("memory.explorer.deleteFailed")),
+                memory.share_pack_id && h(react.Fragment, null,
+                  undoPreview
+                    ? h(react.Fragment, null,
+                        h("span", { style: { fontSize: 12, color: "var(--mneme-warn)" } },
+                          t("memory.explorer.undoPackPreview").replace("{n}", String(undoPreview.deleted ?? 0))),
+                        // sample 是**清点时**的前 20 条（{type,title}，序为 updated_at DESC），
+                        // deleted 是这一笔真带走几行。两个数并发下可以差一条，谁也不是对方的
+                        // 依据（src/share-import.js 的 deleteSharePack 那段），所以这里只把
+                        // sample 当「我要收起的到底是哪一批」的核对清单，不参与条数。
+                        Array.isArray(undoPreview.sample) && undoPreview.sample.length > 0 &&
+                          h("div", { className: "mneme-sharelist" },
+                            undoPreview.sample.map((s, i) => h("div", { key: `${s.type}-${i}`, className: "mneme-sharow" },
+                              h("span", { className: "mneme-sharowtitle" }, s.title || ""),
+                              h("span", { className: "mneme-sharowreason" }, typeLabel(t, s.type))))),
+                        h("button", { type: "button", className: "mneme-btn mneme-btndangerconfirm", disabled: undoBusy, onClick: () => undoPack(true) },
+                          t("memory.explorer.undoPackConfirm").replace("{n}", String(undoPreview.deleted ?? 0))),
+                        h("button", { type: "button", className: "mneme-btn", disabled: undoBusy, onClick: () => setUndoPreview(null) },
+                          t("memory.explorer.cancel"))
+                      )
+                    : h("button", { type: "button", className: "mneme-btn mneme-btndanger", disabled: undoBusy, onClick: () => undoPack(false) },
+                        t("memory.explorer.undoPack"))),
+                undoError && h("span", { style: { fontSize: 12, color: "var(--mneme-danger)" } },
+                  t("memory.explorer.undoPackFailed"))
               )
         )
       );
@@ -6745,6 +6846,7 @@ window.__ModuleLoader__.load({
       // 方案 A：沉淀/归档筛选 chip——状态页「查看全部」也会带着它们跳转过来。
       const [depositedOnly, setDepositedOnly] = useState(false); // 只看 autoDream 巩固
       const [archivedOnly, setArchivedOnly] = useState(false); // 只看已归档
+      const [foreignOnly, setForeignOnly] = useState(false); // 只看外来行（source=imported）
       const [heatSort, setHeatSort] = useState(false); // 卡片页内热度降序（阶段二补口）
       const [pendingIds, setPendingIds] = useState(() => new Set());
       const [menuOpen, setMenuOpen] = useState(false);
@@ -6789,7 +6891,8 @@ window.__ModuleLoader__.load({
         + (minImp ? `&minImportance=${minImp}` : "")
         + (dateFromIso ? `&updatedFrom=${encodeURIComponent(dateFromIso)}` : "")
         + (depositedOnly ? "&deposited=only" : "")
-        + (archivedOnly ? "&archived=only" : "");
+        + (archivedOnly ? "&archived=only" : "")
+        + (foreignOnly ? "&source=imported" : "");
       const listUrl = (offset) => `/api/dsh-mneme/list?limit=${PAGE_SIZE}&offset=${offset}${filterQS}&order=chrono`;
 
       // Browse = paged, pure-chronological pages (order=chrono). The default
@@ -7203,6 +7306,19 @@ window.__ModuleLoader__.load({
                   title: t("memory.explorer.filterArchivedHint"),
                   onClick: () => setArchivedOnly(!archivedOnly)
                 }, t("memory.explorer.filterArchived")),
+                h("button", {
+                  className: foreignOnly ? "mneme-chip mneme-active" : "mneme-chip",
+                  // 搜索态不许**开启**这一档：/search 的 DTO 读不出行来源（`source` 被
+                  // searchMemories 盖成召回渠道，见 src/service.js:939），按一个假信号筛比筛不动
+                  // 更坏。但已经开着的时候永远许关掉——把它整个 disabled 会把她锁在一个解不开
+                  // 的状态里，只能先去清搜索词。
+                  disabled: !!query.trim() && !foreignOnly,
+                  title: query.trim()
+                    ? t("memory.explorer.filterForeignSearchHint")
+                    : t("memory.explorer.filterForeignHint"),
+                  "aria-pressed": String(foreignOnly),
+                  onClick: () => setForeignOnly(!foreignOnly)
+                }, t("memory.explorer.filterForeign")),
                 heatAvailable && h("button", {
                   className: heatSort ? "mneme-chip mneme-active" : "mneme-chip",
                   title: t("memory.explorer.heatSortHint"),
@@ -7260,6 +7376,7 @@ window.__ModuleLoader__.load({
                           h(ImportanceStars, { value: m.importance || 0, size: 12 }),
                           h(HeatBadge, { value: m.heat }),
                           h(ScopeBadge, { m, t }),
+                          h(ForeignBadge, { m, t }),
                           m.source && h("span", { className: "mneme-cardsrc", title: m.source }, m.source)
                         )
                       )),
@@ -7322,7 +7439,8 @@ window.__ModuleLoader__.load({
                                 h("span", { className: "mneme-xdot", style: { color: memoryTypeColor(m.type) }, title: typeLabel(t, m.type), "aria-hidden": "true" }),
                                 h("span", { className: "mneme-xtime" }, time),
                                 h("span", { className: "mneme-xname" }, m.title || m.content?.slice(0, 40)),
-                                h(ScopeBadge, { m, t })
+                                h(ScopeBadge, { m, t }),
+                                h(ForeignBadge, { m, t })
                               );
                             })
                           ))
@@ -7352,7 +7470,15 @@ window.__ModuleLoader__.load({
         deleteError,
         onClose: () => setSelectedId(null),
         onDelete: deleteById,
-        onSaved: applyMemoryUpdate
+        onSaved: applyMemoryUpdate,
+        onUndone: (n) => {
+          // 撤掉的是整包：选中那一行已经不存在，关抽屉 + 刷新列表 + 一句 toast
+          // （toast 形状照详情抽屉里 restored 那一条的先例，不带行号免得漂）。
+          setSelectedId(null);
+          setReloadKey((k) => k + 1);
+          setToastMsg(t("memory.explorer.undoPackDone").replace("{n}", String(n)));
+          setTimeout(() => setToastMsg(""), 2500);
+        }
       })
         ),
         view === "entity" && h(EntityPanel, { t, focusEntity: graphFocus, onJumpMemory: jumpToMemory }),

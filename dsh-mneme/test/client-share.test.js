@@ -146,3 +146,46 @@ test("the receive dialog never goes silent, and never lets a superseded preview 
   assert.ok(clientSource.includes('e.target.value = ""'),
     "选完清空控件值：否则改过的同一个文件再选一次不发 change，面板拿着旧包预览");
 });
+
+// 外来区三件：筛选、来源徽标、整包退出。锁的是「每件事都挂在一个服务端真值上」，
+// 而不是挂在一个界面自己造出来的判断上。
+test("the foreign filter is a browse-state server filter and stays inert while searching", () => {
+  assert.ok(clientSource.includes('foreignOnly ? "&source=imported" : ""'),
+    "浏览态交给服务端筛：分页与 total 同口径，本地筛会切掉尾巴");
+  // **搜索态不做本地过滤**（本轮扫描改掉的裁定，不是漏做）：/search 那张 DTO 的 source 是
+  // 召回渠道（keyword/vector/bm25，src/service.js:939），行的 provenance 被盖掉，「这条是不是
+  // 外来的」在这张 DTO 上压根读不出来。宁可让 chip 在搜索态明确失效并说清原因，也不要按一个
+  // 假信号筛——test/share-foreign-rows.test.js 的第三条用例锁着这个事实。
+  assert.ok(clientSource.includes("disabled: !!query.trim() && !foreignOnly"),
+    "有搜索词时不许**开启**外来筛选（按下无效），但任何时候都许关掉——只给 disabled 会把她锁在一个她解不开的状态里");
+  assert.ok(clientSource.includes('"memory.explorer.filterForeignSearchHint"'),
+    "失效要有自己的文案，不能只靠 disabled 让人猜");
+  assert.equal(clientSource.includes('(!foreignOnly || m.source'), false,
+    "不许退回「搜索态本地按 source 筛」那条假信号");
+  // 服务端不吃 source 这件事，不许用「给 search 的 URL 也拼一个键」的方式绕过去：
+  // 那条路由压根不读它（src/api.js 的 search handler 里没有 source 这一档），拼上去
+  // 只会造出一个「看起来筛过了、其实没有」的形状。全文件只许有一处拼这个参数。
+  assert.equal(clientSource.split("&source=imported").length - 1, 1,
+    "只有浏览态那一条 URL 会拼 source=imported");
+});
+
+// 来源徽标与撤销都按服务端给的真值门控：徽标认 source + from- 标签，撤销认 pack_id。
+test("the foreign badge and the withdraw action gate on server truth, not on guesswork", () => {
+  assert.ok(clientSource.includes('m.source === "imported"'),
+    "徽标先认 source，再认标签：人手工打的 from-* 标签不算外来行");
+  assert.ok(clientSource.includes('startsWith("from-")'),
+    "别名读数就是 importedTagFor 打的那条标签，面板不另找地方读别名");
+  assert.ok(clientSource.includes("memory.share_pack_id &&"),
+    "撤销按钮按包号自门控：/search 的 DTO 不带这一格，那种行按不了（已知代价，docs/SHARE.md 记着）");
+  assert.ok(clientSource.includes('apiFetch("/api/dsh-mneme/receive/undo"'),
+    "整包退出只许走这一枪");
+  assert.ok(clientSource.includes("{ packId: memory.share_pack_id, confirm: true }"),
+    "删除那一发要带 confirm 真值，且 packId 只从行上取");
+  assert.ok(clientSource.includes("d.dry_run === false"),
+    "撤成功的读数同样只由答复的 dry_run 说");
+  assert.ok(clientSource.includes("undoPreview.sample"),
+    "删除前的确认要带前缀样例（答复的 sample 最多 20 条，deleted 才是全量）");
+  // 撤是**物删**（docs/SHARE.md：归档行会占住 UNIQUE 位，撤了导不回来），文案不许写「归档」。
+  assert.equal(/memory\.explorer\.undoPack[A-Za-z]*"\s*:\s*"[^"]*(归档|archive)/i.test(clientSource), false,
+    "撤销的文案不许出现「归档」——它是物理删除");
+});
