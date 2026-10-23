@@ -1096,8 +1096,8 @@ test("the foreign filter is a browse-state server filter and stays inert while s
   // 召回渠道（keyword/vector/bm25，src/service.js:939），行的 provenance 被盖掉，「这条是不是
   // 外来的」在这张 DTO 上压根读不出来。宁可让 chip 在搜索态明确失效并说清原因，也不要按一个
   // 假信号筛——test/share-foreign-rows.test.js 的第三条用例锁着这个事实。
-  assert.ok(clientSource.includes("disabled: !!query.trim()"),
-    "有搜索词时 chip 必须按下无效，而不是看起来生效却筛不动");
+  assert.ok(clientSource.includes("disabled: !!query.trim() && !foreignOnly"),
+    "有搜索词时不许**开启**外来筛选（按下无效），但任何时候都许关掉——只给 disabled 会把她锁在一个她解不开的状态里");
   assert.ok(clientSource.includes('"memory.explorer.filterForeignSearchHint"'),
     "失效要有自己的文案，不能只靠 disabled 让人猜");
   assert.equal(clientSource.includes('(!foreignOnly || m.source'), false,
@@ -1173,7 +1173,12 @@ en，紧跟 D3 的 `"memory.explorer.receiveStillDry": "Nothing was written: tha
 D2 那段 CSS 之后追加一行（`--mneme-ok` 与 `.mneme-saved` 同源，已在对比度锁下过了浅/深两主题）——
 
 ```js
-      ".mneme-badge--foreign{color:var(--mneme-ok);background:color-mix(in srgb,var(--dsw-static-green-500,#22c55e) 12%,transparent);border:1px solid color-mix(in srgb,var(--dsw-static-green-500,#22c55e) 32%,transparent)}",
+      // 外来徽标：只有文字色与描边，**不给底色**。`.mneme-badge--scope` / `--frozen` 那两类
+      // 有自己的 10–12% 色晕，而 `test/contrast.test.js` 的正文对比度是按**该条规则自己的
+      // 背景**合成的：`--mneme-ok` 在画布上是 4.62，铺上 12% 绿晕就掉到 4.17（<4.5）。
+      // 与其为它造一个新语义令牌或改用别的色，不如让这一颗走无晕的形状——来源读数本来就在
+      // 文字里（`from-<别名>`），不靠底色说话。
+      ".mneme-badge--foreign{color:var(--mneme-ok);border:1px solid color-mix(in srgb,var(--dsw-static-green-500,#22c55e) 32%,transparent)}",
 ```
 
 - [ ] **Step 5: 实现 ForeignBadge**
@@ -1192,7 +1197,11 @@ D2 那段 CSS 之后追加一行（`--mneme-ok` 与 `.mneme-saved` 同源，已�
      * from-shared 是空别名的中性值，照原样显示，不兜成「未知来源」。
      */
     const ForeignBadge = ({ m, t }) => {
-      if (!m || m.source !== "imported") return null;
+      // 判据先于标签：`isImported` 就是 src/memory-source.js 那条契约的读数，
+      // 手工打了 from-x 标签的本机行不算外来行。正向字面量也要留着——test/client-share.test.js
+      // 的锁按 `m.source === "imported"` 钉这条契约，写成反向判断会让那条锁无处可钉。
+      const isImported = !!m && m.source === "imported";
+      if (!isImported) return null;
       const tags = Array.isArray(m.tags) ? m.tags : [];
       const tag = tags.find((x) => typeof x === "string" && x.startsWith("from-"));
       if (!tag) return null;
@@ -1250,9 +1259,11 @@ D2 那段 CSS 之后追加一行（`--mneme-ok` 与 `.mneme-saved` 同源，已�
 ```js
                 h("button", {
                   className: foreignOnly ? "mneme-chip mneme-active" : "mneme-chip",
-                  // 搜索态按不动就明确让它按不动：/search 的 DTO 读不出行来源（理由见 Step 6
-                  // 与 test/share-foreign-rows.test.js 第三条），拿假信号筛比筛不了更坏。
-                  disabled: !!query.trim(),
+                  // 搜索态不许**开启**这一档：/search 的 DTO 读不出行来源（`source` 被
+                  // searchMemories 盖成召回渠道，见 src/service.js:939），按一个假信号筛比筛不动
+                  // 更坏。但已经开着的时候永远许关掉——把它整个 disabled 会把她锁在一个解不开
+                  // 的状态里，只能先去清搜索词。
+                  disabled: !!query.trim() && !foreignOnly,
                   title: query.trim()
                     ? t("memory.explorer.filterForeignSearchHint")
                     : t("memory.explorer.filterForeignHint"),
@@ -1364,7 +1375,7 @@ meta 行（「标签」那一行 `Array.isArray(memory.tags) && …` **之前**�
 ```js
         onUndone: (n) => {
           // 撤掉的是整包：选中那一行已经不存在，关抽屉 + 刷新列表 + 一句 toast
-          // （toast 形状照 :6585-6586 那条 restored 的先例）。
+          // （toast 形状照详情抽屉里 restored 那一条的先例，不带行号免得漂）。
           setSelectedId(null);
           setReloadKey((k) => k + 1);
           setToastMsg(t("memory.explorer.undoPackDone").replace("{n}", String(n)));
