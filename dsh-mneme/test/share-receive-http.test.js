@@ -10,8 +10,9 @@
 //   也得回一个 500」。
 //   数据面与跨面——C6 把 Bearer 那半接上之后才补的：数据面自己的 .catch（#410 的形状在数据面
 //   才真的要命：链上没人返回 promise，输不掉就一个字节都不回）与一条**跨面**反分叉静态锁
-//   （两面都调同一批共用 builder）。src() helper 正是给后两条读的——车道 A 的同款先例是
-//   test/share-http.test.js 末尾那条，它也是两张皮都接上之后才补的。
+//   （两面都调同一批共用 builder）。src() helper 被三条静态锁各自消费——口径层的码集推导锁、
+//   「共用层只守卫 warn 一次」那把，与末尾这条跨面锁；本段说的 .catch 全是行为咬的，不扫源码。
+//   车道 A 的同款先例是 test/share-http.test.js 末尾那条，它也是两张皮都接上之后才补的。
 //
 // 装配台照 test/share-routes.test.js 的 shareSetup（同一套 api-routes-gaps 形状）并
 // **落文件库**：收侧吃的是真实 store 的两列身份与部分 UNIQUE 索引，`:memory:` 那个口径

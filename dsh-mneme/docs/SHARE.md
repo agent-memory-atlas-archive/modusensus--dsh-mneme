@@ -79,8 +79,8 @@ body 送上去——服务端永远看不到路径，也就不需要任何文件
 
 **`report` 只有四个键：`included` / `deduped` / `skipped` / `skip_list`**。`deduped` 记的是**包内折叠**：
 `external_id = sha256(pack_id \0 type \0 title \0 content_hash)`，键里没有 scope（包里也不带 scope），而库里
-同 type、同标题、同内容锚、scope 不同的两条是合法的两行（`store.js:1233` 的去重键吃 `agent_scope` /
-`workspace_scope` / `sensitivity` 三维），于是它们在包里共用一把键。为什么在出包侧折成一条，而不是留着让
+同 type、同标题、同内容锚、scope 不同的两条是合法的两行（`src/service.js:1388` 的去重键吃
+`agent_scope` / `workspace_scope` / `sensitivity` 三维），于是它们在包里共用一把键。为什么在出包侧折成一条，而不是留着让
 对面处理：撞键的第二条 INSERT 会撞上车道 C 那条 `share_external_id` UNIQUE 索引，抛错穿出收侧
 `transaction()` 的 ROLLBACK，**整包一条都进不去**（「收侧」那张表里「中途撞 UNIQUE」那一行）
 （spec §5：先查管重复导入、UNIQUE 管并发，可同一个包
@@ -105,7 +105,7 @@ body 送上去——服务端永远看不到路径，也就不需要任何文件
 「这条本来没标题」。代价是方向上的：被扣掉标题的那几条她只能按原因计数去库里自己找。
 
 **被按下（paused）的作用域照旧进包，这不是漏，别再按泄露登记**。取行走的是 `service.all()`
-（`src/share-http.js:82`，数据面那份「全库含归档/已遗忘」），而巩固那九个池子各自还套了一层
+（`src/share-http.js:100`，数据面那份「全库含归档/已遗忘」），而巩固那九个池子各自还套了一层
 `withoutPaused`（`src/dream.js:77`）——分享这一层刻意没有。理由是一条轴的归属：`paused` 管的是
 **注入与巩固**（「这个作用域现在别端给我看」，由 `scope-state` 在检索侧执行），它从来不表示「这行不属于我」，
 更不表示「这行不该离开这台机器」。分享是人主动按的一次导出，能收窄它的只有 `--type` / `--tag` 与那道水位。
@@ -131,7 +131,7 @@ body 送上去——服务端永远看不到路径，也就不需要任何文件
 | 对象 | 动作 | 为什么 |
 |---|---|---|
 | `document` / `summary` 两类 | 闸门整包拒（`invalid-type`） | 出包侧本来就不发（上面那张表的 `readonly_type` / `excluded_type` 两行），收侧再钉一次：包的兼容面比镜像宽，出包口径哪天放开某个类型，不该自动扩大接收侧的入库范围（`SHARE_ALLOWED_TYPES`） |
-| 任何一条不合格 | **整包拒**，停在第一个坏条目（`error` + `index` + `detail`） | 手改的包是被**拒**而不是被**修**：逐条跳过的话，收件人拿到的是一份「没人知道自己少了哪几条」的库，而少掉的恰恰是他手工动过的那几条 |
+| 任何一条不合格 | **整包拒**，停在第一个坏条目。线上答复只有 `{error, detail?}`：闸门确实报 `index`，但 `ShareImportError` 构造时就丢掉了它（`src/share-import.js:93` 只接 code 与 detail），这一格从来不上线（`src/share-http.js:250-251`，形状被 `test/share-receive-http.test.js` 的 deepEqual 钉死——`detail` 缺席时连这格都不造） | 手改的包是被**拒**而不是被**修**：逐条跳过的话，收件人拿到的是一份「没人知道自己少了哪几条」的库，而少掉的恰恰是他手工动过的那几条 |
 | 同包重跑（`external_id` 已在本库） | 跳过，`skipped_existing` +1，`created = 0` | 幂等的主路径是事务内先查 `share_external_id`；那把部分 UNIQUE 索引只兜两个宿主共用同一 `memoryDir` 的并发，是双保险不是主路 |
 | 与**自己**的条目同名（同 type 同标题、无 scope、非外来） | 建行照建，报进 `title_conflicts` | 不并入——「把别人的正文并进我的条目」正是这条设计要禁的动作。读数只对本轮真正会新建的条目判，所以它是给人看一眼的 advisory，**不是「没有别的撞名」的证明**：第二次吃同一个包时这一格恒空，而撞名在库里物理存在。`conflicts_checked` 是包里的条数，不是比过的条数 |
 | 中途撞 UNIQUE | 整笔回滚，一行不留（不 catch、不续跑） | 「约束报错就跳过这一条」看着宽容，实际会把「这个包还没吃过」报成「吃过了」；整包回滚后重跑一次本来就答 `created = 0` |
@@ -237,7 +237,8 @@ spec §12 等的三个数，读出来都是「口径成立」：
 | `buildSharePack` 全程（含那次冷副本全表读） | 855 ms |
 | `receive` 干跑 | 515 ms，报 `created = 5,805`、零写入 |
 | `receive --apply` | **2,870 ms / 5,805 条 ≈ 494 µs/条** |
-| 同一个包再吃一遍 | 763 ms，`created = 0`、`skipped_existing = 5,805`、`unchanged = 5,805`（幂等成立；那 763 ms 几乎全是 5,805 次 `share_external_id` 索引读 + 一次全活跃表扫的撞名表构建，**不写任何一行也照样要付**） || `undo-share` 干跑 | 78 ms，`deleted = 5,805`、`sample` 20 条 |
+| 同一个包再吃一遍 | 763 ms，`created = 0`、`skipped_existing = 5,805`、`unchanged = 5,805`（幂等成立；那 763 ms 几乎全是 5,805 次 `share_external_id` 索引读 + 一次全活跃表扫的撞名表构建，**不写任何一行也照样要付**） |
+| `undo-share` 干跑 | 78 ms，`deleted = 5,805`、`sample` 20 条 |
 | `undo-share --apply` | **242 ms / 5,805 条 ≈ 42 µs/条** |
 | 撤回之后重吃同一个包 | 2,323 ms，`created = 5,805` → UNIQUE 位确实随物删释放，「撤了导不回来」的死角不存在 |
 | 发得出去的那一批（单 type，project） | 1,315 条 / 1,148,442 B ≈ 1.10 MiB：干跑 276 ms → 真导入 **734 ms（558 µs/条）** → 物删 60 ms（46 µs/条） |
@@ -254,8 +255,14 @@ spec §12 等的三个数，读出来都是「口径成立」：
 - **分批是发件侧的事，不是收件侧的**：4.34 MiB 的整库包在源头就被 3 MiB 水位拒了，
   上面那格导入耗时是把 `buildSharePack` 直接产出的包喂给 `importSharePack` 的**进程内**读数，
   它比任何一次真实网络传输都大——真实场景一次吃进来的是单 type 那一格（1,315 条 ≈ 0.7 s）。
-  顺带一条压测线索：`deleteBySharePackId` 一行一个绑定参数，SQLite 上限 32,766，本次 5,805 行
-  远未接近，**暂不分块**；真要撞上得是「条数极多、每条极短」的包，那条路径今天无人验证。
+  那条压测线索已在 C4 闭掉：`deleteBySharePackId` 按 `DELETE_ID_CHUNK` = 500 分块（`src/store.js:1406`），
+  理由是 SQLite 单条语句最多绑 32,766 个参数（`SQLITE_MAX_VARIABLE_NUMBER`，实测第 32,767 个报
+  "too many SQL variables"，`src/store.js:1434-1435`），而包水位按字节不按条数，「条数极多、每条极短」
+  的包理论上够得到那一格——一条语句撞上限是整笔回滚，等于「这个包永远撤不掉」。分块在同一次
+  `runAtomically` 里切 IN 列表、`changes` 逐块求和、generation 只在最后加一次，语义与分块前逐点对齐。
+  多块路径有锁：600 行的包由**多条** DELETE 承担、每条绑数严格小于全集、各块并起来恰是 600
+  （`test/share-import.test.js` 的 600 行用例），本次 5,805 行的物删实测走的正是多块（12 块）。
+  没被够到的只剩上限本身——那要三万三千行以上才撞得着，测试里没有那个量级，这条不算被证伪过。
 
 活体端到端仍未发生：当前在跑的宿主加载的是比车道 A/B/C 更早的构建，`/share` 与 `/receive`
 在它那里都回 404。上面全部是进程内读数，网络往返、Bearer 与 4 MiB 入站上限那一档的成本
@@ -359,7 +366,10 @@ spec §12 等的三个数，读出来都是「口径成立」：
 ## 已知还没做
 
 **面板（车道 D）三件**：分享弹层、接收弹层（含干跑预览）、外来区筛选与「收起这个包」。
-今天这三步只有 CLI 与两张 HTTP 面走得通，本文档里任何「点一下」都不成立。车道 D 落地时要
+今天这三步都没有面板按钮，入口只有 CLI 与两张 HTTP 面。全篇唯一说得出口的「点一下」在**出包侧**：
+面板路由 `/share` 的成功响应自带 `Content-Disposition`，客户端拿到就落盘——那条下载路径今天就在
+（见上面「用法」两张皮那段）；收与撤连这一条都没有，两面都不出 `Content-Disposition`，浏览器形态的
+客户端在它们那里只能拿到 JSON。车道 D 落地时要
 一起清的三笔账：
 
 1. **`included` 不等于「够格进包的条数」**：`included` 是实际发出的条数，`included + deduped`
