@@ -52,7 +52,8 @@ function packFile(dir, name = "pack.json") {
  * 顶替数据面的假服务：真解析（parseReceiveBody/parseUndoBody 决定 400 错码）、真答复壳
  * （receiveReply/undoReply 决定 dry_run 那一格与错码映射），只有 service 是假的。
  * handlers.importError 让某个用例把导入变成带码失败（receiveReply 顺着
- * SHARE_IMPORT_ERRORS 表回 400），假服务自己不编状态码。
+ * SHARE_IMPORT_ERRORS 表回 400），handlers.deleteResult 让某个用例换一份退出读数
+ * （样例行数与 deleted 的比例就是 CLI 那句话的唯一输入），假服务自己不编状态码。
  */
 async function startPlane(handlers = {}) {
   const state = { requests: [], imports: [], deletes: [] };
@@ -73,7 +74,9 @@ async function startPlane(handlers = {}) {
     },
     deleteSharePack(packId, opts) {
       state.deletes.push({ packId, dryRun: opts?.dryRun });
-      return { pack_id: packId, deleted: 7, sample: [{ type: "decision", title: "t" }] };
+      // 默认那一份够 confirm/dry_run 的锁用；要盯「deleted 远大于列出的样例」这类数字
+      // 口径的用例自己带 deleteResult 进来——它仍然只替 service，答复壳还是真 undoReply。
+      return handlers.deleteResult ?? { pack_id: packId, deleted: 7, sample: [{ type: "decision", title: "t" }] };
     }
   };
   const server = createServer((req, res) => {
@@ -220,6 +223,71 @@ test("undo-share reads the pack_id out of the file the user already has", { time
   });
 });
 
+// 退出答复里的 sample 是服务端截过前缀的样例（src/share-import.js 的 DELETE_SAMPLE_MAX
+// 是 20），CLI 还要再截到 10，而 deleted 才是全集。不加说明，一个 500 行的包在终端上
+// 就是 10 条无名要点，人会读成「要收走的就是这些」（C7 评审点名的那条）。
+test("undo-share 列出的行要说得出自己是样例，全集那格用的是服务端的数", { timeout: 60000 }, async () => {
+  const rows = Array.from({ length: 20 }, (_, i) => ({ type: "decision", title: `row-${i}` }));
+  await withPlane({ deleteResult: { pack_id: PACK_ID, deleted: 500, sample: rows } }, async (ctx) => {
+    const f = packFile(ctx.home);
+    const out = await runCli(ctx, ["undo-share", f.path, "--apply", ...ctx.auth]);
+    assert.equal(out.code, 0, out.stderr);
+    assert.match(out.stdout, /^已收起: 500 条/m);
+    const bullets = out.stdout.split("\n").filter((l) => /^\s+· \[/.test(l));
+    assert.equal(bullets.length, 10, "样例只许列前 10 条");
+    assert.match(out.stdout, /样例[^\n]*不是全部清单/);
+    // 全集那格必须是服务端的 500，不能是「还有 490 条」这类把两次截断混在一起的数。
+    assert.match(out.stdout, /只列前 10 条[^\n]*500/);
+    const captionAt = out.stdout.indexOf("样例");
+    const bulletAt = out.stdout.indexOf("· [");
+    assert.ok(captionAt >= 0 && captionAt < bulletAt, "要点必须挂在样例这句话下面，不许吊在别句话后面");
+    assert.ok(!/全部行|就是这些|以下所有/.test(out.stdout), "样例话术不许升级成完整清单的口吻");
+
+    // --json 走的是同一份答复，打印分支加的两句不许漏进 stdout（jq 吃的还是那一个对象）。
+    const json = await runCli(ctx, ["undo-share", f.path, "--apply", "--json", ...ctx.auth]);
+    assert.equal(json.code, 0, json.stderr);
+    assert.equal(JSON.parse(json.stdout).deleted, 500);
+    assert.ok(!json.stdout.includes("样例"), "--json 的 stdout 只许那一份 JSON");
+  });
+});
+
+// 干跑一笔都没删，所以「这些行直接从库里带走」在那一格是假话；而它压着下面的样例，
+// 现场就成了「已经删掉的这几条」。干跑的说明书是行尾那句「没删：…加 --apply」。
+test("undo-share 干跑不许出现物删话术，读起来是一次预览而不是删除", { timeout: 60000 }, async () => {
+  const rows = Array.from({ length: 20 }, (_, i) => ({ type: "decision", title: `row-${i}` }));
+  await withPlane({ deleteResult: { pack_id: PACK_ID, deleted: 500, sample: rows } }, async (ctx) => {
+    const f = packFile(ctx.home);
+    const out = await runCli(ctx, ["undo-share", f.path, ...ctx.auth]);
+    assert.equal(out.code, 0, out.stderr);
+    assert.equal(ctx.plane.state.deletes[0].dryRun, true);
+    assert.match(out.stdout, /^将收起: 500 条/m);
+    assert.ok(!/物删|直接从库里带走/.test(out.stdout), "干跑不许断言行会被物删");
+    assert.match(out.stdout, /没删/);
+    // 样例的说明在干跑里同样要有——人正是拿这几条决定要不要加 --apply。
+    assert.match(out.stdout, /样例[^\n]*不是全部清单/);
+  });
+});
+
+// 空白 pack_id 与「没有 pack_id」是同一种「这个文件收不了」：本地就拒，别让它出门换回
+// 一个 missing-pack-id（服务端 parseUndoBody 自己也会 trim，这里改不了它的行为，
+// 只是不让人为了一个空格去 round-trip 一轮、并把 400 的现场当成服务端的问题）。
+test("空白 pack_id 在本地就拒，一个请求都不发", { timeout: 60000 }, async () => {
+  await withPlane({}, async (ctx) => {
+    const path = join(ctx.home, "blank-id.json");
+    writeFileSync(path, JSON.stringify({ kind: SHARE_KIND, pack_id: "   ", memories: [] }), "utf8");
+    const out = await runCli(ctx, ["undo-share", path, "--apply", ...ctx.auth]);
+    assert.notEqual(out.code, 0);
+    assert.match(out.stderr, /pack_id/);
+    assert.match(out.stderr, /十六进制/, "复用那句说明书：为什么要的是包文件而不是手抄编号");
+    assert.deepEqual(ctx.plane.state.requests, [], "空白 pack_id 不许打出去换回 400 missing-pack-id");
+
+    const json = await runCli(ctx, ["undo-share", path, "--apply", "--json", ...ctx.auth]);
+    assert.notEqual(json.code, 0);
+    assert.equal(json.stdout.trim(), "", `--json 的 stdout 不许掺解释行：${json.stdout}`);
+    assert.match(String(JSON.parse(json.stderr).error), /pack_id/);
+  });
+});
+
 test("a 400 from receive keeps the server's error code visible", { timeout: 60000 }, async () => {
   // 错码由真 service 抛出、真 receiveReply 顺着 SHARE_IMPORT_ERRORS 映射成 400——假服务
   // 不编状态码，码集一漂移这里就红。
@@ -261,6 +329,8 @@ test("undo-share without --apply is a dry-run: the physical delete needs the fla
     assert.equal(ctx.plane.state.deletes[0].dryRun, true, "service 那一侧读到的也得是干跑");
     assert.match(out.stdout, /^将收起: 7 条/m);
     assert.match(out.stdout, /没删/);
+    // 同一句物删话术在干跑里是假话（这一笔一个字没动），--apply 那条用例锁它出现。
+    assert.ok(!/物删|直接从库里带走/.test(out.stdout), "干跑不许断言行会被物删");
   });
 });
 

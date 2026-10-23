@@ -830,7 +830,10 @@ async function cmdUndoShare(cfg, rest, flags) {
   } catch (e) {
     fail(cfg, `读不到包文件 ${file}：${String(e?.message ?? e)}\n要的是当初 ${CLI_NAME} share --out 出来、发给对面那个 .json。`);
   }
-  const packId = typeof pack?.pack_id === 'string' ? pack.pack_id : '';
+  // trim 在这儿做：只有空格的 pack_id 与「没有 pack_id」是同一种「这个文件收不了」，
+  // 放它出门只是绕一圈换回 400 missing-pack-id，而那一格会被读成服务端的问题（服务端
+  // parseUndoBody 同样 trim，这里不改它的行为，只是不必为空格 round-trip）。
+  const packId = typeof pack?.pack_id === 'string' ? pack.pack_id.trim() : '';
   if (!packId) {
     fail(cfg, `这个文件里没有 pack_id，收起不了：${file}\nundo-share 收的是整包，编号就写在包文件的第一层，不用也不该手抄 16 位十六进制。`);
   }
@@ -850,9 +853,11 @@ function printReceive(d, { applied, undo = false }) {
   const conflicts = Array.isArray(d?.title_conflicts) ? d.title_conflicts : [];
   console.log(`${undo ? (applied ? '已收起' : '将收起') : applied ? '已导入' : '干跑'}: ${d?.created ?? 0} 条` +
     (d?.alias ? `  来自 ${d.alias}` : '') + (d?.skipped_existing ? `  已存在 ${d.skipped_existing}` : ''));
-  if (undo) {
+  if (undo && applied) {
     // 服务端是物删不是归档（src/share-import.js 的 deleteSharePack）：这句话是 --apply
-    // 与人之间唯一的说明书，不许软化成「移除」。
+    // 与人之间唯一的说明书，不许软化成「移除」。干跑那一笔一个字都没动，说「直接从库里
+    // 带走」是假话，还会把下面的样例压成「已经删掉的这几条」——干跑那侧的话术是 cmdUndo-
+    // Share 结尾的「没删：…加 --apply」，两句不许同时出现（同一件事说两遍就没人细看）。
     console.log('  物删：这些行直接从库里带走，不是归档；包文件还在，重新 receive 一遍即可再来');
   }
   if (conflicts.length) {
@@ -862,7 +867,18 @@ function printReceive(d, { applied, undo = false }) {
     for (const c of conflicts.slice(0, 10)) console.log(`    - [${c.type}] ${c.title}`);
     if (conflicts.length > 10) console.log('    … 只列前 10 条');
   }
-  for (const s of (Array.isArray(d?.sample) ? d.sample : []).slice(0, 10)) console.log(`    · [${s.type}] ${s.title}`);
+  const sample = Array.isArray(d?.sample) ? d.sample : [];
+  if (sample.length) {
+    // 撞名那段有标题、有截断话，样例这段原先两样都没有：服务端把 sample 截到 20
+    // （src/share-import.js 的 DELETE_SAMPLE_MAX），CLI 再截到 10，而 deleted 才是全集。
+    // 一个 500 行的包就这样留下 10 条无名要点，人会当成「要收走的就是这些」。
+    // 全集那一格只报服务端的数，不报「还剩几条」——两次截断混在一起就没人能对得上账。
+    console.log('  样例：下面只是这一批里的几条，不是全部清单');
+    const shown = sample.slice(0, 10);
+    for (const s of shown) console.log(`    · [${s.type}] ${s.title}`);
+    const total = typeof d?.deleted === 'number' ? d.deleted : (d?.created ?? 0);
+    if (shown.length < total) console.log(`    … 只列前 ${shown.length} 条；整批共 ${total} 条（这个数来自服务端计数）`);
+  }
 }
 
 /* ---------------------------------- 入口 ---------------------------------- */
