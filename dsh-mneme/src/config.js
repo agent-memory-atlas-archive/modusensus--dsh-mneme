@@ -849,6 +849,19 @@ export const Config = z.object({
   disableMemorySearch: z.boolean().default(false),
   disableMemoryArchive: z.boolean().default(false),
 
+  // Issue #231 第二批：agent 主动整理接口（src/organize.js）的**暴露**闸。引擎在
+  // PR #267 就造好了，当时刻意不进工具列表、不加开关（模块头注释：「与 #249 同批
+  // 暴露时只差『注册工具 + 注入指引』一步」），配置面留到这一批再定——就是这里。
+  // 与上面两个 disable* 是**反向**语义：那两个把默认在场的工具藏起来，本键把默认
+  // 不在场的能力开出来。因为 dryRun→apply 是一套两步协议（apply 必须引用真实报告
+  // 的 run_id），让 agent 未经用户同意就能整理记忆，不是「少一次往返」的成本问题，
+  // 而是「谁在改库」的授权问题。
+  // 进 LIGHT_MODE_OFF：两步协议在弱模型上最容易走歪（漏 run_id、或跳过报告直接
+  // apply——那一拒绝就是一次失败的工具调用），而一次 dryRun 的代价是一回嵌入调用
+  // 加按 type 有界扫库。这是预设给的默认值、不是强制：用户显式勾选仍然赢（合并顺序
+  // 「用户开关 > 轻量预设 > bundle」，同 continuityRescueEnabled / distillRecords.enabled）。
+  organizeEnabled: z.boolean().default(false),
+
   // --- scope: v0.8.0 A1 存储层（issue #17）--------------------------------
   // 总开关默认关：关闭时写入不标注 scope、去重维持 (type, title) 现状，行为
   // 逐字节不变。开启后**两条写入路径都自动盖章**（*_scope_source='auto'）：
@@ -933,7 +946,27 @@ export const Config = z.object({
   // 人格段是用户自写的一小段轻量常驻文本，不引入任何重型后台路径，轻量档用户
   // 显式勾选仍然赢（同 actionPipelineEnabled 的定性）。
   // 也走 feature_flags（FEATURE_FLAG_BOOLEANS 白名单），面板可启停=线上回滚开关。
-  personaEnabled: z.boolean().default(false)
+  personaEnabled: z.boolean().default(false),
+
+  // 人格寻址的兜底口径（只在上一个键打开时才有意义）。关（默认，= 历史行为）：
+  // 会话身份没有卡、或有卡但卡被关掉时，一律落 default 卡——于是 default 成了
+  // 「所有没建卡的 agent 都能拿到某个人格」，宿主里跑的外部 bot（自带身份与设定）
+  // 会在同一帧里收到两句「你是谁」。开：这两种情况都不注入人格，default 退回它的
+  // 本意——只兜「这一帧解析不到会话身份」的无名会话（无身份时行为不变）。
+  // 默认关是因为这是一次口径变更：老用户升级后注入文本不许静默变化。
+  // 不进 LIGHT_MODE_OFF：它只是取卡时的一个分支，不引入常驻文本、也不引入后台路径，
+  // 且它本身只在 personaEnabled 打开时才起作用（同 scopeState 的定性）。
+  personaStrictAddressing: z.boolean().default(false),
+
+  // Issue #497：从活跃记忆反向提取「助手眼中的用户」画像**草稿**（POST
+  // /api/dsh-mneme/profile/extract）。默认关有三层理由：① 它每次点一次就是一次 LLM
+  // 调用并读上百行记忆，成本与 dream/summarize 同级，不该在没人要求时挂在面上；
+  // ② 产物会被用户当成「关于我的第一版画像」读，编造的代价不对称——所以空库直接报错、
+  // 解析失败也报错，绝不回空草稿；③ 它**不写** user_settings，采用草稿是面板里另一次
+  // 显式保存，画像正文必须是用户手写的原文，不给模型改写权。
+  // 进 LIGHT_MODE_OFF：一次调用要读上百行记忆 + 一轮模型生成，与低资源档互斥（同
+  // preInjectGate.enabled 的定性）；是预设不是强制，用户显式勾选仍然赢。
+  profileExtractEnabled: z.boolean().default(false)
 });
 
 // Fields forced to false by the light-mode preset. Everything not listed here
@@ -966,6 +999,10 @@ const LIGHT_MODE_OFF = [
   "dreamNarrativeEnabled",
   // 轻量模式不开 document 指针行（#230，opt-in：注册/注入/检索增强全随闸）。
   "documentMemoryEnabled",
+  // #231 第二批：轻量档不开 agent 主动整理。理由不是成本而是协议——dryRun→apply
+  // 要求 agent 拿住上一轮的 run_id 再回来，弱模型漏这一环就是一次被拒的调用；
+  // 预设关、不剥夺显式开启的权利（合并顺序同 continuityRescueEnabled）。
+  "organizeEnabled",
   // 轻量模式不开热计算（heat 属于重型增强；关掉后 sleep 降级也退回纯时间分层）。
   "heatEnabled",
   // 轻量模式不开注入前判定（#380：LLM-per-turn 附加路径，每帧注入多一次池级
@@ -985,6 +1022,10 @@ const LIGHT_MODE_OFF = [
   // 是「小模型 / 小上下文 / 少常驻路径」，这与一个每事件都过一遍的监听器相冲突。
   // 默认关，这里只是轻量预设再确认一次；用户显式勾选仍然赢（合并顺序同上面两条）。
   "actionRunEnabled",
+  // #497：轻量档不开画像提取——一次调用要读上百行记忆再生成一段画像，与低资源档
+  // 互斥（同 preInjectGate.enabled 的定性）。默认关，这里只是预设再确认一次；
+  // 用户显式勾选仍然赢（合并顺序同 continuityRescueEnabled）。
+  "profileExtractEnabled",
   // M.O. 自动沉淀：同样挂在 session/event 热路径上，而且解压会话日志是同步 I/O。
   // 轻量档的取向（小模型 / 小上下文 / 少常驻路径）与它直接冲突，预设里关掉；
   // 用户显式勾选仍然赢（合并顺序同上面几条）。

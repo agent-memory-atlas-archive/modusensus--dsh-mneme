@@ -2584,8 +2584,9 @@ export function createService({ store, mirror, config, onWrite, logger, document
     saveWithDedupe,
     registerDocument,
     // agent 主动整理接口（#231）：内聚块在 src/organize.js，这里只做依赖注入 +
-    // barrel 出口。刻意不加 opt-in 开关（维护者口径：功能本体不做开关，与 #249
-    // 同批暴露时再定配置面），也不进工具列表——工具注册在 #249 那批。
+    // barrel 出口。本体不带配置键（第一批口径），暴露闸住在工具层（#231 第二批的
+    // `organizeEnabled` → `tools.js` 的 `memory_organize`）：service 侧不认识开关，
+    // 所以直连 service 的调用方（测试、内部管线）不受面板那格影响。
     organize,
     recoverMirror,
     getMirrorHealth,

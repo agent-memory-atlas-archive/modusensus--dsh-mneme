@@ -39,6 +39,7 @@ const TOOL_NAMES = [
   "memory_archive",
   "memory_register_document",
   "memory_runtime",
+  "memory_organize",
   "set_scope_state"
 ];
 
@@ -117,13 +118,16 @@ function seedShapes(store) {
   return rows;
 }
 
+// 清单比对必须在**暴露闸全开**的配置下做：#230 的 document 与 #231 的 organize 都是
+// opt-in 工具，用默认配置跑会让「注册表里少一个工具」和「清单没更新」两件事互相
+// 抵消——这条护栏就此静默失效，而漏登记正是 #195 要防的那类事故。
 test("工具矩阵与 TOOL_NAMES 清单一致（新增工具必须补进矩阵）", () => {
-  const { byName } = setup();
+  const { byName } = setup({ documentMemoryEnabled: true, organizeEnabled: true });
   assert.deepEqual(Object.keys(byName).sort(), [...TOOL_NAMES].sort());
 });
 
-test("A 实跑：11 个工具每个可安全触达的分支，真实返回 ⊆ 声明的 output schema", async () => {
-  const { store, service, byName } = setup({ documentMemoryEnabled: true });
+test("A 实跑：12 个工具每个可安全触达的分支，真实返回 ⊆ 声明的 output schema", async () => {
+  const { store, service, byName } = setup({ documentMemoryEnabled: true, organizeEnabled: true });
   const shapes = seedShapes(store);
   const annotated = shapes[shapes.length - 1];
   const plain = shapes[0];
@@ -245,6 +249,43 @@ test("A 实跑：11 个工具每个可安全触达的分支，真实返回 ⊆ �
     rmSync(docDir, { recursive: true, force: true });
   }
 
+  // --- memory_organize（#231 第二批）：dryRun 与 apply 两个分支各驱动一次 ---
+  // 两条分支的返回键集不同（dryRun 有 counts/items/created_at，apply 有
+  // saved/merged/archived/memory_ids/dry_run_id/degraded）。只跑一边会让另一边
+  // 「声明了却没被真实返回值验过」，正是本矩阵要抓的空洞。自建种子行而不是复用
+  // plain：register_document 那一支会归档它吸收的 evidence，两支不该互相改状态。
+  const organizeSeed = store.save({ type: "project", title: "organize-target", content: "库内既有的一行。", source: "test" });
+  const organizeReport = await drive(byName, "memory_organize", {
+    mode: "dryRun",
+    candidates: [
+      { type: "project", title: "organize-target", content: "同标题的另一段表述 → 应当判成 exact" },
+      { type: "project", title: "organize-brand-new", content: "库里没有的新条目" },
+      { type: "project", title: "", content: "缺标题 → 进 skipped，报告如实记 degraded" }
+    ]
+  });
+  assert.equal(organizeReport.status, "degraded", "有候选被拒就不得报 ok（红线 4 的如实标记）");
+  assert.equal(organizeReport.items.length, 2);
+  assert.equal(organizeReport.items[0].verdict, "exact");
+  assert.equal(organizeReport.items[0].match.id, organizeSeed.id);
+  assert.equal(organizeReport.skipped.length, 1);
+  const organized = await drive(byName, "memory_organize", {
+    mode: "apply",
+    run_id: organizeReport.run_id,
+    decisions: [
+      { action: "archive", id: organizeSeed.id },
+      { action: "save", index: 1 },
+      // index 99 不在这份报告的快照里 → 逐条跳过、应用合法子集（红线 4）。
+      // 故意不用「非法 action」走这条路：枚举在宿主参数校验层就挡掉了，能到达
+      // skipped 的只有索引与可见性两类，测试必须挑真实可达的那条。
+      { action: "save", index: 99 }
+    ]
+  });
+  assert.equal(organized.archived, 1);
+  assert.equal(organized.saved, 1);
+  assert.equal(organized.skipped.length, 1, "报告没收下过的索引逐条跳过 + 应用合法子集，绝不整单拒绝");
+  assert.equal(organized.degraded, true);
+  note("memory_organize");
+
   assert.deepEqual([...driven].sort(), [...TOOL_NAMES].sort(), "每个工具都必须至少被驱动一次（矩阵不允许空缺）");
 });
 
@@ -294,8 +335,10 @@ test("B' search / list / get 三个消费方共用同一份 item schema（#184 �
   }
 });
 
-test("C 结构：全部 11 个工具的 output schema 闭合、required ⊆ properties、每项带 type", () => {
-  const { byName } = setup();
+// 同清单比对那条：opt-in 工具在默认配置下不在注册表里，C 层按 TOOL_NAMES 取
+// byName[name]，所以必须用暴露闸全开的配置，否则新工具的 schema 结构从未被检查。
+test("C 结构：全部 12 个工具的 output schema 闭合、required ⊆ properties、每项带 type", () => {
+  const { byName } = setup({ organizeEnabled: true });
   for (const name of TOOL_NAMES) {
     const schema = byName[name].output.schema;
     assert.ok(schema, `${name} 必须声明 output.schema`);

@@ -14,7 +14,7 @@ import { STR, langOf } from "./lang.js";
 // service.setArchived（dream/decisions.js），所以「不许改写外来行」这条契约要在
 // 每个池子各挡一遍。清单与静态锁见 share-imported-guard.test.js。
 import { isImportedRow } from "./memory-source.js";
-export { validateDecisions, applyDecisions, withEffortFallback, withMaxTokensFallback, parseMaxTokensCap, describeStreamFailure, resolveDreamEffort, resolveRoute };
+export { validateDecisions, applyDecisions, withEffortFallback, withMaxTokensFallback, parseMaxTokensCap, describeStreamFailure, resolveDreamEffort, resolveRoute, streamText, runAuditedLlm };
 
 // Extract the first JSON array from LLM output, tolerating markdown fences,
 // leading/trailing prose, and common wrapper noise. Returns an array or null.
