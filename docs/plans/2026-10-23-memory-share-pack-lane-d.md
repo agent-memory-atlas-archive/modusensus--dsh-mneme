@@ -462,7 +462,7 @@ en：在 `"memory.explorer.importNoFile": "Choose a file first",` 之后插入�
 ```js
         "memory.explorer.sharePack": "Share memories…",
         "memory.explorer.shareTitle": "Memory share pack",
-        "memory.explorer.shareHint": "Pack your active memories for someone else: rows holding secrets are dropped whole, home paths become ~, archived and forgotten rows stay in.",
+        "memory.explorer.shareHint": "Pack your active memories for someone else: rows holding secrets are dropped whole, home paths become ~, archived and forgotten rows stay out.",
         "memory.explorer.shareAlias": "Share alias",
         "memory.explorer.shareAliasBlank": "blank = from-shared",
         "memory.explorer.shareType": "Only this type",
