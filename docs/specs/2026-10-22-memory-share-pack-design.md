@@ -113,7 +113,7 @@ share_external_id  TEXT   -- UNIQUE 索引（WHERE share_external_id IS NOT NULL
 三处代码层的事实在这里落地，都是评审时对着 `src/store.js` 验过的，先记下来免得实现时当成能商量的：
 
 1. **`created_at` 拿不到「包里原值」**。`insertMemoryRow` 恒写 `nowIso()`（`src/store.js:1154`、`:1200-1201`），要保留原时刻得改那条 INSERT —— 而单调时间戳是 AGENTS.md 纪律 5 点名的防御段。v1 用导入时刻，包里的 `created_at` 只作给人看的时间感，不写列。
-2. **`content_hash` 传不进去**（`src/store.js:1160` 一律按本行 title/content 重算）。这是对的：包的哈希只用于分享侧自证，入库哈希必须由对面自己算，两份哈希不得混用。
+2. **`content_hash` 传不进去**（`src/store.js:1208` 一律按本行 title/content 重算）。这是对的：包的哈希只用于分享侧自证，入库哈希必须由对面自己算，两份哈希不得混用。
 3. **新列不进 INSERT 白名单就存不住**（列清单硬编码在 `src/store.js:1171-1172`），`toRow()`（`:522-555`）同样是硬编码白名单 —— 列加了、行读出来还是没有这两键，两处都要改。索引跟着 `addColumn` 之后一条 `db.exec("CREATE INDEX IF NOT EXISTS …")` 走，不放基础 SCHEMA 串（`:876-878` 的注释：存量库上 `CREATE TABLE` 是 no-op，schema 里的索引会因为列还不存在而失败）。
 
 **入口层**：`createApi` 手里没有 `store`（`src/api.js:185`，`src/service.js:2670` 明写「api 层不直接摸 store」）。所以导入与整包退出必须做成 **service 的两个新方法** `importSharePack()` / `deleteSharePack()`，由 service 去摸 store；两张皮各自只是薄壳。批删沿用 `remove()` 的 `runAtomically` + `incrementGeneration()` + 清 embedding 缓存的形状，仓里没有 memories 的批删先例，得新写一条。
