@@ -24,6 +24,7 @@ import { createStore } from "../src/store.js";
 import { createService } from "../src/service.js";
 import { createSettings } from "../src/settings.js";
 import { createApi } from "../src/api.js";
+import { createStandaloneApi } from "../src/api-standalone.js";
 import { deriveExternalId, SHARE_KIND, validateSharePack } from "../src/share.js";
 import {
   parseReceiveBody,
@@ -120,20 +121,37 @@ test("receive without confirm answers the dry-run shape, with confirm the same s
 });
 
 test("every import error code maps to exactly one status", () => {
-  // 码集不重抄一份清单，而是从闸门**跑出来**再比对：哪天 share.js 多一格，映射表漏登记
-  // 会当场转红，而不是让对面拿到一个说「你的包没问题、是我们坏了」的 500。
-  const REJECTED = [
-    ["invalid-kind", () => packOf([entry()], { kind: "nope" })],
-    ["invalid-pack-id", () => packOf([entry()], { pack_id: "nope" })],
-    ["invalid-memories", () => packOf([entry()], { memories: "x" })],
-    ["empty-pack", () => packOf([])],
-    ["invalid-type", () => packOf([entry({ type: "summary" })])],
-    ["invalid-entry", () => packOf([entry({ title: "  " })])],
-    ["external-id-mismatch", () => packOf([entry({ external_id: "0000000000000000" })])],
-    ["duplicate-external-id", () => packOf([entry(), entry()])]
-  ];
-  for (const [code, make] of REJECTED) {
-    assert.equal(validateSharePack(make()).error, code, `闸门该回 ${code}`);
+  // 码集不重抄一份清单。FIXTURES 的键**由两处推出来**：一张是映射表
+  // SHARE_IMPORT_ERRORS，另一处是把闸门（src/share.js 的 validateSharePack）源码里的
+  // error 字面量扫出来。为什么两处都要：只对着表写夹具，闸门哪天多一格而表忘了登记，
+  // 全套用例照样绿——那个新码从此静默落进「500 + 日志」，把发件人的坏包报成我们的故障
+  // （C5 评审点的名）。反过来只对着闸门扫、不看表，表里的死码又没人管。
+  const gate = src("share.js");
+  const at = gate.indexOf("export function validateSharePack(");
+  assert.ok(at > 0, "src/share.js 里应有 validateSharePack 这一段可扫");
+  const region = gate.slice(at);
+  assert.ok(region.includes("{ ok: true, pack"), "扫到的那一段确实止于 validateSharePack 的放行分支");
+  const gateCodes = [...new Set([...region.matchAll(/error:\s*"([a-z-]+)"/g)].map((m) => m[1]))];
+
+  // over 排在派生之后（见上面的 entry 注释）：要造 external-id-mismatch 就得让 external_id
+  // 这一格被换成别的值，而其余字段仍然合格。
+  const FIXTURES = {
+    "invalid-kind": () => packOf([entry()], { kind: "nope" }),
+    "invalid-pack-id": () => packOf([entry()], { pack_id: "nope" }),
+    "invalid-memories": () => packOf([entry()], { memories: "x" }),
+    "empty-pack": () => packOf([]),
+    "invalid-type": () => packOf([entry({ type: "summary" })]),
+    "invalid-entry": () => packOf([entry({ title: "  " })]),
+    "external-id-mismatch": () => packOf([entry({ external_id: "0000000000000000" })]),
+    "duplicate-external-id": () => packOf([entry(), entry()])
+  };
+  const required = [...new Set([...Object.keys(SHARE_IMPORT_ERRORS), ...gateCodes])].sort();
+  assert.deepEqual(Object.keys(FIXTURES).sort(), required,
+    "每一个码（表里的 + 闸门里抛的）都要有一条真夹具，一条都不许多；新码进来时先把这条改红，别绕过去");
+
+  for (const code of required) {
+    assert.equal(SHARE_IMPORT_ERRORS[code], 400, `${code} 必须在映射表里登记成 400：闸门能抛它而表里没有，它就落成 500`);
+    assert.equal(validateSharePack(FIXTURES[code]()).error, code, `闸门该回 ${code}`);
     const throwing = {
       importSharePack: () => {
         const e = new Error(`share import: ${code}`);
@@ -145,8 +163,6 @@ test("every import error code maps to exactly one status", () => {
     assert.equal(out.status, 400, `${code} must answer 400`);
     assert.deepEqual(out.body, { error: code }, `${code} 的答复只有一个码`);
   }
-  assert.deepEqual(Object.keys(SHARE_IMPORT_ERRORS).sort(), REJECTED.map(([code]) => code).sort(),
-    "映射表与闸门的码集必须一一对应：多一格是死码，少一格是把真故障报成坏包");
   assert.ok(Object.isFrozen(SHARE_IMPORT_ERRORS), "两张皮共用一张表，运行时谁都不许改它");
   // detail 是闸门给的那一格（哪个字段、哪个坏类型），只转发不加工；没有就不造这一格。
   const detailed = receiveReply({
@@ -287,6 +303,10 @@ class FakeRes extends EventEmitter {
     // 正常，为的是把「promise 链上的错误有没有人接住」这件事单独问出来——它不计数，那一次
     // 什么都没写出去。
     this.failFirstHead = failFirstHead;
+    // 数据面的 handler 是 `void readBody(...).then(...)`，它不返回 promise，测试没法
+    // await 到链尾——答复写完的这一声就是唯一的等待点（配一个超时竞速，缺 .catch 时
+    // 用例要红得干脆，而不是把整个文件挂死在无限超时上）。
+    this.settled = new Promise((resolve) => { this.settle = resolve; });
   }
   writeHead(code) {
     if (this.failFirstHead) {
@@ -300,6 +320,7 @@ class FakeRes extends EventEmitter {
   end(text) {
     this.body = text ?? "";
     this.emit("end");
+    this.settle?.("ended");
     return this;
   }
 }
@@ -567,4 +588,165 @@ test("undo through the panel counts before it deletes and needs confirm to delet
     assert.equal(again.status, 200);
     assert.equal(again.body.deleted, 0, "重跑说 0，不报错");
   } finally { s.close(); }
+});
+
+// --- Bearer 数据面（src/api-standalone.js）-----------------------------------
+//
+// 这一面没有 policy 名：除 GET /health 外每条路由都要自己的 Bearer token（面板那半的
+// token-write 在这里压根不存在）。真 HTTP 照 test/standalone-api.test.js:18 与车道 A 的
+// 起法（port 0 + ready + api.token + server.close），库仍要落文件——收侧吃的是
+// share_pack_id / external_id 那两列与部分 UNIQUE 索引，`:memory:` 摸不到真的行。
+// 偶发的 Windows EACCES（保留端口段）是环境性的，重跑即可，不改代码去迁就它。
+
+function standaloneSetup() {
+  const dir = mkdtempSync(join(tmpdir(), "dsh-mneme-receive-std-"));
+  const store = createStore(join(dir, "memory.db"));
+  const service = createService({ store, mirror: null, config: {} });
+  const settings = createSettings(store.db);
+  const api = createStandaloneApi({ service, store, config: {}, settings, logger: null, port: 0 });
+  return api.ready.then(() => {
+    const handlers = api.server.listeners("request");
+    assert.equal(handlers.length, 1, "这台面上只许挂着一个 request handler，否则下面那条锁问不出是谁");
+    return {
+      api, store, service,
+      base: `http://127.0.0.1:${api.port}`,
+      auth: { authorization: `Bearer ${api.token}` },
+      handler: handlers[0],
+      close() {
+        api.server.closeIdleConnections?.();
+        api.server.close();
+        try { store.close(); } catch { /* already closed */ }
+        rmSync(dir, { recursive: true, force: true });
+      }
+    };
+  });
+}
+
+/** 喂给 mounted handler 的假 req：与真 IncomingMessage 一样是 EventEmitter。 */
+function standaloneReq({ method = "POST", url = "/receive", body = "", auth = null }) {
+  const req = new EventEmitter();
+  req.method = method;
+  req.url = url;
+  req.headers = auth ? { authorization: auth } : {};
+  process.nextTick(() => {
+    req.emit("data", Buffer.from(body));
+    req.emit("end");
+  });
+  return req;
+}
+
+test("the data plane gates receive, lands a pack and undoes it", async () => {
+  const h = await standaloneSetup();
+  // 一条死线，不是装饰：路由整个没接上时（变异探针实测——把非 POST 的 405 那一支删掉）
+  // server 一个字都不答、连接一直悬着，用例要挂满 305 秒才红，那是在拖整条 CI 腿而不是
+  // 在报回归。超时之后断言「必须得到答复」这一句，比一个 TimeoutError 堆栈有用得多。
+  const viaHttp = async (p, init = {}) => {
+    const res = await fetch(`${h.base}${p}`, { ...init, signal: AbortSignal.timeout(3000) }).catch(() => null);
+    assert.ok(res, `${init.method ?? "GET"} ${p}：数据面必须在 3s 内给出答复（挂着不答 = 对面永远等不到）`);
+    return res;
+  };
+  try {
+    const packJson = JSON.stringify({ pack: goodPack() });
+    // 本面除 /health 外一律要 Bearer：没有 policy 名可绕，401 是唯一的前门。
+    for (const [path, body] of [["/receive", packJson], ["/receive/undo", JSON.stringify({ packId: PACK_ID })]]) {
+      const anon = await viaHttp(path, { method: "POST", body });
+      assert.equal(anon.status, 401, `POST ${path} 不带 token 一步都不许往下走`);
+      assert.deepEqual(await anon.json(), { error: "unauthorized" });
+    }
+
+    const dry = await viaHttp("/receive", { method: "POST", headers: h.auth, body: packJson });
+    assert.equal(dry.status, 200);
+    const dryBody = await dry.json();
+    assert.equal(dryBody.dry_run, true);
+    assert.equal(dryBody.created, 1);
+    assert.equal(rowsOf(h.store).length, 0, "没点确认就一个字都不许写");
+
+    const real = await viaHttp("/receive", { method: "POST", headers: h.auth, body: JSON.stringify({ pack: goodPack(), confirm: true }) });
+    assert.equal((await real.json()).created, 1);
+    assert.equal(rowsOf(h.store).length, 1);
+    assert.equal(rowsOf(h.store)[0].share_pack_id, PACK_ID, "落的必须是带包身份的外来行");
+
+    const again = await viaHttp("/receive", { method: "POST", headers: h.auth, body: JSON.stringify({ pack: goodPack(), confirm: true }) });
+    const againBody = await again.json();
+    assert.equal(againBody.created, 0, "幂等要穿过 HTTP 这一层，不只是 service 内部");
+    assert.equal(againBody.skipped_existing, 1);
+    assert.equal(rowsOf(h.store).length, 1, "重跑一行都不多");
+
+    // 非 POST 一律 405，与面板逐字同款（#411：两张皮只许差在鉴权、路径与面板独有的
+    // disposition/logger，状态码不许是第四处差别）。带着 token 走一遍，问的正是
+    // 「405 这一支不藏在 401 后面」。
+    for (const [path, method] of [["/receive", "GET"], ["/receive", "PUT"], ["/receive/undo", "GET"], ["/receive/undo", "DELETE"]]) {
+      const out = await viaHttp(path, { method, headers: h.auth });
+      assert.equal(out.status, 405, `${method} ${path} 必须回 405，got ${out.status}`);
+      assert.deepEqual(await out.json(), { error: "method-not-allowed" });
+    }
+
+    const badJson = await viaHttp("/receive", { method: "POST", headers: h.auth, body: "{oops" });
+    assert.equal(badJson.status, 400);
+    assert.equal((await badJson.json()).error, "invalid-json", "发坏了 ≠ 发错了形状 ≠ 没带包");
+    const badKind = await viaHttp("/receive", { method: "POST", headers: h.auth, body: JSON.stringify({ pack: { kind: "nope" } }) });
+    assert.equal(badKind.status, 400);
+    assert.equal((await badKind.json()).error, "invalid-kind", "闸门那半的码也要从这张脸上原样出来");
+    const badUndo = await viaHttp("/receive/undo", { method: "POST", headers: h.auth, body: "{}" });
+    assert.equal(badUndo.status, 400);
+    assert.equal((await badUndo.json()).error, "missing-pack-id");
+
+    const preview = await viaHttp("/receive/undo", { method: "POST", headers: h.auth, body: JSON.stringify({ packId: PACK_ID }) });
+    const previewBody = await preview.json();
+    assert.equal(previewBody.deleted, 1);
+    assert.equal(previewBody.dry_run, true);
+    assert.equal(rowsOf(h.store).length, 1, "预览那一次一行都没删");
+    const gone = await viaHttp("/receive/undo", { method: "POST", headers: h.auth, body: JSON.stringify({ packId: PACK_ID, confirm: true }) });
+    assert.equal((await gone.json()).deleted, 1);
+    assert.equal(rowsOf(h.store).length, 0, "退出是物删，不归档");
+
+    // 超限那一支：readBody 自己答 413 并把 text 解析成 null，handler 少那句 return 就会
+    // 在已经发出的响应上再写一次（真 socket 上第二次 writeHead 抛 ERR_HTTP_HEADERS_SENT）。
+    // 这里按状态码与答复体核对口径与面板一致（本面 sendJson 没有 headers 参数，也就
+    // 没有 Content-Disposition 可锁）。
+    const oversize = await viaHttp("/receive", { method: "POST", headers: h.auth, body: "x".repeat(MAX_BODY_BYTES + 1) });
+    assert.equal(oversize.status, 413);
+    assert.equal((await oversize.json()).error, "payload-too-large");
+    assert.equal(oversize.headers.get("content-disposition"), null, "本面不出附件头");
+  } finally { await h.close(); }
+});
+
+test("the data plane's own .catch answers when the sink fails mid-write", async () => {
+  // 共用层从不抛、日志也已被守卫吞掉，所以本面这条链还能被走到的只剩**面自己**写答复
+  // 那一步。真 socket 在这里帮不上忙（writeHead 一抛，头就已经发出去了，第二次写只会
+  // 再抛一次），所以直接驱动挂在这个 server 上的那个 handler，让假 sink 第一次抛、
+  // 第二次正常：能等到答复，就证明 .catch 在位。等不到（竞速输给超时）就是 #410 的
+  // 「一个字节都没回」——那正是这份文件历史上反复出现的那一类故障。
+  const h = await standaloneSetup();
+  try {
+    for (const [path, body] of [
+      ["/receive", JSON.stringify({ pack: goodPack() })],
+      ["/receive/undo", JSON.stringify({ packId: PACK_ID })]
+    ]) {
+      const res = new FakeRes({ failFirstHead: true });
+      h.handler(standaloneReq({ url: path, body, auth: `Bearer ${h.api.token}` }), res);
+      const settled = await Promise.race([res.settled, new Promise((r) => setTimeout(() => r("timeout"), 3000))]);
+      assert.equal(settled, "ended", `${path} 的 promise 链必须由 .catch 接住，否则永远等不到答复`);
+      assert.equal(res.statusCode, 500, `${path} sink 坏了也要把答复交出去`);
+      assert.deepEqual(res.body ? JSON.parse(res.body) : null, { error: "internal" });
+      assert.equal(res.heads, 1, "抛掉的那一次没写出去，成功的只许有一次");
+    }
+    assert.equal(rowsOf(h.store).length, 0);
+  } finally { await h.close(); }
+});
+
+// 两张皮都接上之后才补得了这一条（C5 时数据面还没有 /receive，锁无可锁）。车道 A 的
+// 同款先例在 test/share-http.test.js 末尾。它管的是**方向**：上一段静态锁说「口径字面量
+// 不许出现在面上」，这一条说反面——共用构造器必须真的被两侧各调一次。#411 那次的形状是
+// 面板侧修好了、数据面停在复制的旧形态，而复制出去的代码不会留下任何让静态检查发现的痕迹。
+test("both surfaces call the shared receive builders", () => {
+  for (const file of ["api.js", "api-standalone.js"]) {
+    const text = src(file);
+    for (const needle of ["receiveReply(", "undoReply(", "parseReceiveBody(", "parseUndoBody("]) {
+      assert.ok(text.includes(needle), `${file} must call ${needle}`);
+    }
+    assert.ok(!text.includes("share-import-unavailable"), `${file} must not re-implement the unavailable literal`);
+    assert.ok(!text.includes("invalid-kind"), `${file} must not re-implement an import code`);
+    assert.ok(!text.includes("missing-pack"), `${file} must not re-implement a parse code`);
+  }
 });

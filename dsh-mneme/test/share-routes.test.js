@@ -42,6 +42,9 @@ class FakeRes extends EventEmitter {
     // 正常，好把「promise 链上的错误到底有没有人接」单独问出来；抛掉的那一次不计数，
     // 因为它一个字节都没写出去。
     this.failFirstHead = failFirstHead;
+    // 数据面的 handler 不返回 promise（那条链是 `void readBody(...)`），所以等答复只能靠
+    // 这一声 end：配超时竞速，缺 .catch 时用例红得干脆，而不是把文件挂死在无限超时上。
+    this.settled = new Promise((resolve) => { this.settle = resolve; });
   }
   writeHead(code, headers) {
     if (this.failFirstHead) {
@@ -56,6 +59,7 @@ class FakeRes extends EventEmitter {
   end(text) {
     this.body = text ?? "";
     this.emit("end");
+    this.settle?.("ended");
     return this;
   }
 }
@@ -301,5 +305,33 @@ test("standalone GET /share answers 405, matching the panel", async () => {
     assert.equal(out.status, 405);
     const body = await out.json();
     assert.ok(!("memories" in body), "GET 不许把包交出去");
+  } finally { await h.close(); }
+});
+
+test("the standalone /share chain answers once when the sink fails mid-write", async () => {
+  // 本面这条链一直带着 .catch，但**从来没有任何用例走到得过它**：共用层从不抛、日志也
+  // 被守卫吞掉之后，剩下的入口只有面自己写答复这一步（真 socket 上「一个响应两写」的
+  // 第二次 writeHead 就是这里的形状）。与上面面板那条同名用例是一对——两张皮的 .catch
+  // 各锁各的，少一边就只有一边会红（#411）。假 sink 第一次抛、第二次正常；等得到答复
+  // 就说明链上有主，等不到（输给超时）就是 #410 的「一个字节都没回」。
+  const h = await standaloneSetup();
+  try {
+    h.store.save({ type: "decision", title: "选 SQLite", content: "正文 here", tags: [] });
+    const handlers = h.api.server.listeners("request");
+    assert.equal(handlers.length, 1, "这台面上只许挂着一个 request handler，否则不知道在驱动谁");
+    const req = new EventEmitter();
+    req.method = "POST";
+    req.url = "/share";
+    req.headers = { authorization: `Bearer ${h.api.token}` };
+    const res = new FakeRes({ failFirstHead: true });
+    handlers[0](req, res);
+    process.nextTick(() => {
+      req.emit("data", Buffer.from("{}"));
+      req.emit("end");
+    });
+    const settled = await Promise.race([res.settled, new Promise((r) => setTimeout(() => r("timeout"), 3000))]);
+    assert.equal(settled, "ended", "缺了 .catch 就永远等不到答复");
+    assert.equal(res.statusCode, 500);
+    assert.equal(res.heads, 1, "抛掉的那一次没写出去，成功的只许有一次");
   } finally { await h.close(); }
 });
