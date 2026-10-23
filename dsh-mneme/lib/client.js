@@ -753,6 +753,22 @@ window.__ModuleLoader__.load({
         "memory.explorer.shareTooLarge": "包体 {bytes} 字节，超过 {limit} 字节水位",
         "memory.explorer.shareEmpty": "没有够格外发的条目，包是空的",
         "memory.explorer.shareDownload": "下载包文件",
+        "memory.explorer.receivePack": "导入分享包…",
+        "memory.explorer.receiveTitle": "导入分享包",
+        "memory.explorer.receiveHint": "选她发来的包文件。先干跑预览，点确认才写库；导入的行进外来区，不参与本机的巩固、降级或整理。",
+        "memory.explorer.receivePick": "选择包文件…",
+        "memory.explorer.receiveNotJson": "这个文件不是 JSON",
+        "memory.explorer.receivePreview": "先干跑预览",
+        "memory.explorer.receiveConfirm": "确认导入",
+        "memory.explorer.receiveFailed": "导入失败",
+        "memory.explorer.receiveFrom": "来自 {alias}",
+        "memory.explorer.receiveAnonymous": "未署名",
+        "memory.explorer.receiveWouldCreate": "将新建 {n} 条",
+        "memory.explorer.receiveDidCreate": "已新建 {n} 条",
+        "memory.explorer.receiveExisting": "{n} 条已在库中",
+        "memory.explorer.receiveUnchanged": "{n} 条正文相同",
+        "memory.explorer.receiveConflicts": "撞名 {n} 条（不合并，请自己看）",
+        "memory.explorer.receiveStillDry": "没有写库：这一枪仍是干跑",
         "memory.explorer.newMemory": "新增记忆…",
         "memory.explorer.newTitle": "新增记忆",
         "memory.explorer.newHint": "手动写一条记忆。同类型同标题会并入既有条目，而不是长出第二行。",
@@ -1450,6 +1466,22 @@ window.__ModuleLoader__.load({
         "memory.explorer.shareTooLarge": "Pack is {bytes} bytes, over the {limit}-byte water mark",
         "memory.explorer.shareEmpty": "Nothing qualified - the pack is empty",
         "memory.explorer.shareDownload": "Download pack file",
+        "memory.explorer.receivePack": "Import a share pack…",
+        "memory.explorer.receiveTitle": "Import a share pack",
+        "memory.explorer.receiveHint": "Pick the file she sent. The first pass is a dry run; nothing is written until Confirm. Imported rows join the foreign area and never take part in this machine's consolidation, demotion or tidying.",
+        "memory.explorer.receivePick": "Choose pack file…",
+        "memory.explorer.receiveNotJson": "That file is not JSON",
+        "memory.explorer.receivePreview": "Preview (dry run)",
+        "memory.explorer.receiveConfirm": "Confirm import",
+        "memory.explorer.receiveFailed": "Import failed",
+        "memory.explorer.receiveFrom": "From {alias}",
+        "memory.explorer.receiveAnonymous": "unnamed",
+        "memory.explorer.receiveWouldCreate": "Would create {n}",
+        "memory.explorer.receiveDidCreate": "Created {n}",
+        "memory.explorer.receiveExisting": "{n} already in the store",
+        "memory.explorer.receiveUnchanged": "{n} identical already",
+        "memory.explorer.receiveConflicts": "{n} title clashes (not merged - check them yourself)",
+        "memory.explorer.receiveStillDry": "Nothing was written: that call stayed dry",
         "memory.explorer.newMemory": "New memory…",
         "memory.explorer.newTitle": "New memory",
         "memory.explorer.newHint": "Write one memory by hand. Same type + same title merges into the existing entry instead of minting a second row.",
@@ -6407,6 +6439,134 @@ window.__ModuleLoader__.load({
       );
     }
 
+    // 干跑与真导入**共用这一份读数**：两者的键完全相同，区别只有 dry_run 那一格。
+    // 拆成两个组件就会各写一套文案，而「将新建」与「已新建」的唯一真凭是 dry_run。
+    function ReceiveSummary({ t, d }) {
+      const conflicts = Array.isArray(d.title_conflicts) ? d.title_conflicts : [];
+      const alias = d.alias || t("memory.explorer.receiveAnonymous");
+      return h("div", { className: "mneme-sharebody" },
+        h("div", { className: "mneme-featsubhint" },
+          `${t("memory.explorer.receiveFrom").replace("{alias}", alias)} · ${d.pack_id || ""}`),
+        // dry_run 缺格（旧服务端）时按「没写」处理：宁可少报一次写入，不可虚报。
+        h("div", { className: "mneme-saved" },
+          t(d.dry_run === false ? "memory.explorer.receiveDidCreate" : "memory.explorer.receiveWouldCreate")
+            .replace("{n}", String(d.created ?? 0))),
+        (d.skipped_existing || 0) > 0 && h("div", { className: "mneme-featsubhint" },
+          t("memory.explorer.receiveExisting").replace("{n}", String(d.skipped_existing))),
+        (d.unchanged || 0) > 0 && h("div", { className: "mneme-featsubhint" },
+          t("memory.explorer.receiveUnchanged").replace("{n}", String(d.unchanged))),
+        // 撞名是 advisory 读数：只对「本轮真正会新建的那些」判过，重吃同一个包时恒空，
+        // 所以这里说「这一批里没有新的要报」而不是「没有冲突」（docs/SHARE.md 那笔账三）。
+        conflicts.length > 0 && h("div", { className: "mneme-featsubhint", style: { color: "var(--mneme-warn)" } },
+          t("memory.explorer.receiveConflicts").replace("{n}", String(conflicts.length))),
+        conflicts.length > 0 && h("div", { className: "mneme-sharelist" },
+          conflicts.map((c, i) => h("div", { key: `${c.type}-${i}`, className: "mneme-sharow" },
+            h("span", { className: "mneme-sharowtitle" }, c.title || ""),
+            h("span", { className: "mneme-sharowreason" }, typeLabel(t, c.type)))))
+      );
+    }
+
+    function ReceiveDialog({ t, onClose, onImported }) {
+      const [file, setFile] = useState(null);
+      const [pack, setPack] = useState(null);
+      const [preview, setPreview] = useState(null);
+      const [result, setResult] = useState(null);
+      const [busy, setBusy] = useState(false);
+      const [err, setErr] = useState("");
+      const fileRef = useRef(null);
+
+      // 一发 POST 两种用法（干跑 / 确认）都从这走，失败文案只有一份。返回 null 表示
+      // 已经把 err 摆上屏，调用方什么都不必再判。
+      const post = (body) => apiFetch("/api/dsh-mneme/receive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      })
+        .then(async (res) => {
+          const d = await res.json().catch(() => null);
+          setBusy(false);
+          if (!res.ok) {
+            // 闸门只回一个码（invalid-kind / external-id-mismatch / …），detail 有就带上：
+            // 那是「哪一格不合格」的唯一读数，面板不自己编第二套文案。
+            setErr(`${t("memory.explorer.receiveFailed")}（${(d && d.error) || res.status}）`
+              + (d && d.detail ? `：${d.detail}` : ""));
+            return null;
+          }
+          return d;
+        })
+        .catch(() => { setErr(t("memory.explorer.receiveFailed")); setBusy(false); return null; });
+
+      const pick = (f) => {
+        setFile(f || null);
+        setErr("");
+        setPreview(null);
+        setResult(null);
+        setPack(null);
+        if (!f) return;
+        f.text().then((text) => {
+          // 坏 JSON 在本地就拦。「这个文件根本不是 JSON」与「这个包不合格」是两件事，
+          // 后者由服务端的码说（invalid-kind / invalid-entry / …）。
+          try { setPack(JSON.parse(text)); } catch { setErr(t("memory.explorer.receiveNotJson")); }
+        }).catch(() => setErr(t("memory.explorer.receiveFailed")));
+      };
+
+      const runPreview = () => {
+        setBusy(true);
+        setErr("");
+        setResult(null);
+        // 不带 confirm = 干跑（服务端缺省即预览，spec §5 沿用 reclaim 的脾气）。
+        post({ pack }).then((d) => { if (d) setPreview(d); });
+      };
+
+      const runApply = () => {
+        setBusy(true);
+        setErr("");
+        post({ pack, confirm: true }).then((d) => {
+          if (!d) return;
+          setResult(d);
+          // 写完才刷新列表；答复说没写就不刷（dry_run 那一格是唯一凭据）。
+          if (d.dry_run === false) onImported();
+        });
+      };
+
+      return h("div", { className: "mneme-impdialog mneme-sharedialog", role: "region", "aria-label": t("memory.explorer.receiveTitle") },
+        h("div", { className: "mneme-set-title" }, t("memory.explorer.receiveTitle")),
+        h("div", { className: "mneme-featsubhint", style: { marginTop: 4 } }, t("memory.explorer.receiveHint")),
+        h("div", { className: "mneme-improw" },
+          h("button", { type: "button", className: "mneme-btn", onClick: () => fileRef.current?.click() },
+            file ? file.name : t("memory.explorer.receivePick")),
+          h("input", {
+            ref: fileRef,
+            type: "file",
+            accept: ".json,application/json",
+            style: { display: "none" },
+            onChange: (e) => pick((e.target.files && e.target.files[0]) || null)
+          })
+        ),
+        err && h("div", { className: "mneme-featsubhint", style: { color: "var(--mneme-danger)", marginTop: 8 } }, err),
+        // 入库是逐条先查 + 逐条 INSERT + 排队嵌入：实测 494 µs/条，单批一千多条要跑一秒开外，
+        // 整库量级近 3 秒。busy 必须挂在预览与确认两发上，不然按钮看起来像没反应。
+        busy && h("div", { className: "mneme-featsubhint", style: { marginTop: 8 } }, t("memory.explorer.importing")),
+        preview && h(ReceiveSummary, { t, d: preview }),
+        result && h(ReceiveSummary, { t, d: result }),
+        // 按了确认却回个「仍是干跑」（服务端只认 confirm 的真值 true，缺省、字符串
+        // "true"、别的旋钮一律不写）——这一句是唯一出声的地方：沉默会让人以为已经写进去了。
+        // 它挂在 result 那一支而不是 ReceiveSummary 里：预览本来就该是干跑，那里再说一遍
+        // 只是噪声。
+        result && result.dry_run !== false && h("div", {
+          className: "mneme-featsubhint", style: { color: "var(--mneme-warn)" }
+        }, t("memory.explorer.receiveStillDry")),
+        h("div", { className: "mneme-improw", style: { justifyContent: "flex-end" } },
+          h("button", { type: "button", className: "mneme-btn", disabled: busy, onClick: onClose },
+            t("memory.explorer.importCancel")),
+          h("button", { type: "button", className: "mneme-btn", disabled: busy || !pack, onClick: runPreview },
+            t("memory.explorer.receivePreview")),
+          h("button", { type: "button", className: "mneme-btn", disabled: busy || !preview, onClick: runApply },
+            t("memory.explorer.receiveConfirm"))
+        )
+      );
+    }
+
     // #386 第 5 条：面板手动新增一条记忆。字段与 memory_save 工具对齐
     //（type/title/content/importance/tags），但**不放 scope/sensitivity**：归属的
     // 显式声明走详情抽屉那条路，它带「放宽可见性」二次确认；在新建表单里顺手盖
@@ -6555,6 +6715,7 @@ window.__ModuleLoader__.load({
       const [importOpen, setImportOpen] = useState(false);
       const [createOpen, setCreateOpen] = useState(false);
       const [shareOpen, setShareOpen] = useState(false);
+      const [receiveOpen, setReceiveOpen] = useState(false);
       const itemRefs = useRef(new Map());
       const moreRef = useRef(null);
 
@@ -6904,7 +7065,7 @@ window.__ModuleLoader__.load({
                 "aria-label": t("memory.explorer.more"),
                 "aria-expanded": String(menuOpen),
                 title: t("memory.explorer.more"),
-                onClick: () => { setMenuOpen(!menuOpen); setImportOpen(false); setCreateOpen(false); setShareOpen(false); }
+                onClick: () => { setMenuOpen(!menuOpen); setImportOpen(false); setCreateOpen(false); setShareOpen(false); setReceiveOpen(false); }
               }, "⋯"),
               menuOpen && h("div", { className: "mneme-menu", role: "menu" },
                 h("button", { type: "button", role: "menuitem", onClick: () => { setCreateOpen(true); setMenuOpen(false); } },
@@ -6917,6 +7078,8 @@ window.__ModuleLoader__.load({
                   t("memory.explorer.importMd")),
                 h("button", { type: "button", role: "menuitem", onClick: () => { setShareOpen(true); setMenuOpen(false); } },
                   t("memory.explorer.sharePack")),
+                h("button", { type: "button", role: "menuitem", onClick: () => { setReceiveOpen(true); setMenuOpen(false); } },
+                  t("memory.explorer.receivePack")),
               ),
               importOpen && h(ImportDialog, {
                 t,
@@ -6924,6 +7087,11 @@ window.__ModuleLoader__.load({
                 onImported: () => setReloadKey((k) => k + 1)
               }),
               shareOpen && h(ShareDialog, { t, onClose: () => setShareOpen(false) }),
+              receiveOpen && h(ReceiveDialog, {
+                t,
+                onClose: () => setReceiveOpen(false),
+                onImported: () => setReloadKey((k) => k + 1)
+              }),
               createOpen && h(CreateDialog, {
                 t,
                 onClose: () => setCreateOpen(false),

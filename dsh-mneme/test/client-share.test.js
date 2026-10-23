@@ -76,3 +76,42 @@ test("the pack filename comes from the response header, with a pack_id fallback"
   assert.equal(/pack_id[^;\n]{0,48}slice\(\s*0\s*,\s*8\s*\)/.test(clientSource), false,
     "不许在 pack_id 后面截 8 位——那是 src/share-http.js 的 shareFilename 唯一的拼法");
 });
+
+// docs/SHARE.md「车道 D 三笔账」之二：干跑与真导入的答复同形状，区别只有
+// withDryRun 加的 dry_run 那一格。防的回归形态：界面按「我有没有发 confirm」推断写了
+// 没有——同一件事写两处，改一处就出现「其实没写、却说写了」。
+test("the receive dialog reads dry_run instead of inferring from its own button", () => {
+  assert.ok(clientSource.includes('apiFetch("/api/dsh-mneme/receive"'),
+    "入库只许走这一枪（apiFetch 带 token 注入）");
+  assert.ok(clientSource.includes("post({ pack })"), "预览那一发不带 confirm——缺省即干跑");
+  assert.ok(clientSource.includes("post({ pack, confirm: true })"),
+    "真写的那一发必须带 confirm 这个真值，其他形状服务端都不认");
+  assert.ok(clientSource.includes("d.dry_run === false"),
+    "「写进去了」这句只能由答复自己说");
+  assert.ok(clientSource.includes("result.dry_run !== false"),
+    "确认之后仍回干跑时要单独说「没有写库」，不许沉默，也不许挂在预览那一支上");
+  assert.ok(clientSource.includes('"memory.explorer.receiveStillDry"'),
+    "那一格要有自己的文案");
+  // 第二个旋钮一概不认：收侧只认 confirm（spec §5——reclaim 的 body 里就带 dryRun，
+  // 手熟的人会顺手发来，把它读成「要写」等于替她点头）。
+  // **切片而不是全文**：lib/client.js:4762 的 VACUUM 那一条合法地发 dryRun:false，
+  // 那是 reclaim 的形状不是 receive 的。全文反锁会在 D3 之前就是红的；谁把它「修」成
+  // 全文锁，就等于给 reclaim 那颗键定罪。切片锚点变了时下面那条长度断言先红。
+  const receiveStart = clientSource.indexOf("function ReceiveDialog(");
+  const receiveRegion = clientSource.slice(receiveStart, clientSource.indexOf("// #386 第 5 条", receiveStart));
+  assert.ok(receiveRegion.length > 800, "ReceiveDialog 的切片锚点变了，先修锚再谈锁");
+  assert.equal(receiveRegion.includes("dryRun"), false,
+    "收侧不许发 dryRun——唯一的入口是 confirm");
+});
+
+// 三笔账之三：title_conflicts 是 advisory 读数，只对「本轮真正会新建的那些」判过，
+// 重吃同一个包时恒空。防的回归：文案写成「现在没有冲突」。
+test("the receive preview keeps the advisory reading honest", () => {
+  assert.ok(clientSource.includes("d.title_conflicts"), "撞名清单要显示");
+  assert.ok(clientSource.includes('"memory.explorer.receiveConflicts"'));
+  assert.equal(/现在没有冲突|no conflicts right now/.test(clientSource), false,
+    "不许出现「没有冲突」这类绝对断言");
+  // 先预览才允许确认：干跑是必经的一站，不是可选装饰。
+  assert.ok(clientSource.includes("disabled: busy || !preview"),
+    "确认按钮在拿到预览之前必须 disabled");
+});
