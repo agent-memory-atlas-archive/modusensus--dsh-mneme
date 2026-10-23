@@ -241,8 +241,21 @@ window.__ModuleLoader__.load({
     };
 
     /**
-     * 外来行的来源徽标（车道 D，spec §6 的「行上显示 from-<别名>」）。
-     * 别名不单独存列：`importedTagFor` 打的那条 `from-<别名>` 标签就是唯一读数，
+     * 「标题 + 类型」两列的小清单。抽屉的整包退出清单与接收弹层的撞名清单是同一个形状
+     * （`{type,title}`），第三份手写 `.map` 就是第三处会各自漂移的地方——所以这里只有一份。
+     * 分享弹层的跳过清单**不走它**：那一列的第二格是 reason 标签，不是类型。
+     */
+    function TypeRowList({ t, rows }) {
+      const list = Array.isArray(rows) ? rows : [];
+      if (!list.length) return null;
+      return h("div", { className: "mneme-sharelist" },
+        list.map((row, i) => h("div", { key: `${row.type}-${i}`, className: "mneme-sharow" },
+          h("span", { className: "mneme-sharowtitle" }, row.title || ""),
+          h("span", { className: "mneme-sharowreason" }, typeLabel(t, row.type)))));
+    }
+
+    /**
+     * 外来行的来源徽标。别名不单独存列：`importedTagFor` 打的那条 `from-<别名>` 标签就是唯一读数，
      * 所以这里只认标签，不猜别的来源。先判 `source === "imported"` 再判标签——
      * 一个人手工给自己的一条打了 from-x 不算外来行，徽标会把它误报成别人的。
      * 搜索态不出现这个徽标，且这是对的：那张 DTO 的 source 是召回渠道（src/service.js:939），
@@ -251,6 +264,9 @@ window.__ModuleLoader__.load({
      * from-shared 是空别名的中性值，照原样显示，不兜成「未知来源」。
      */
     const ForeignBadge = ({ m, t }) => {
+      // 判据先于标签：`isImported` 就是 src/memory-source.js 那条契约的读数，
+      // 手工打了 from-x 标签的本机行不算外来行。正向字面量也要留着——test/client-share.test.js
+      // 的锁按 `m.source === "imported"` 钉这条契约，写成反向判断会让那条锁无处可钉。
       const isImported = !!m && m.source === "imported";
       if (!isImported) return null;
       const tags = Array.isArray(m.tags) ? m.tags : [];
@@ -801,6 +817,8 @@ window.__ModuleLoader__.load({
         "memory.explorer.undoPackConfirm": "确认删除 {n} 条",
         "memory.explorer.undoPackDone": "已收起 {n} 条",
         "memory.explorer.undoPackFailed": "收起失败",
+        "memory.explorer.undoPackStillDry": "没有删除：这一枪仍是干跑",
+        "memory.explorer.undoPackGone": "这个包在本库里已经没有行了",
         "memory.explorer.newMemory": "新增记忆…",
         "memory.explorer.newTitle": "新增记忆",
         "memory.explorer.newHint": "手动写一条记忆。同类型同标题会并入既有条目，而不是长出第二行。",
@@ -1526,6 +1544,8 @@ window.__ModuleLoader__.load({
         "memory.explorer.undoPackConfirm": "Delete {n} rows",
         "memory.explorer.undoPackDone": "Withdrew {n} rows",
         "memory.explorer.undoPackFailed": "Withdrawal failed",
+        "memory.explorer.undoPackStillDry": "Nothing was deleted: that call stayed dry",
+        "memory.explorer.undoPackGone": "That pack has no rows left in this store",
         "memory.explorer.newMemory": "New memory…",
         "memory.explorer.newTitle": "New memory",
         "memory.explorer.newHint": "Write one memory by hand. Same type + same title merges into the existing entry instead of minting a second row.",
@@ -2195,7 +2215,7 @@ window.__ModuleLoader__.load({
       // 背景**合成的：`--mneme-ok` 在画布上是 4.62，铺上 12% 绿晕就掉到 4.17（<4.5）。
       // 与其为它造一个新语义令牌或改用别的色，不如让这一颗走无晕的形状——来源读数本来就在
       // 文字里（`from-<别名>`），不靠底色说话。
-      ".mneme-badge--foreign{color:var(--mneme-ok);border:1px solid color-mix(in srgb,var(--dsw-static-green-500,#22c55e) 32%,transparent)}",
+      ".mneme-badge--foreign{color:var(--mneme-ok);border:1px solid color-mix(in srgb,var(--mneme-ok) 34%,transparent)}",
       // 瞬时操作提示（删除/归档）：挂在浏览层底部居中，不被抽屉卸载吞掉
       ".mneme-x{position:relative}",
       ".mneme-toast{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-1);font-size:12.5px;line-height:18px;padding:7px 16px;border-radius:10px;z-index:30;box-shadow:0 8px 24px color-mix(in srgb,var(--dsw-alias-label-primary) 25%,transparent);animation:mneme-fadein .15s ease-out}",
@@ -6051,6 +6071,8 @@ window.__ModuleLoader__.load({
       const [undoPreview, setUndoPreview] = useState(null);
       const [undoBusy, setUndoBusy] = useState(false);
       const [undoError, setUndoError] = useState(false);
+      // 确认那一发却回干跑时唯一出声的一格（见 undoPack 的注释）。
+      const [undoStillDry, setUndoStillDry] = useState(false);
 
       useEffect(() => {
         let cancelled = false;
@@ -6084,19 +6106,26 @@ window.__ModuleLoader__.load({
       const undoPack = (confirm) => {
         setUndoBusy(true);
         setUndoError(false);
+        setUndoStillDry(false);
         apiFetch("/api/dsh-mneme/receive/undo", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           // 不带 confirm 就是干跑：第一发只清点，第二发才删。packId 只从行上取
-          // （D1 的 share_pack_id），面板不自己拼也不猜。
+          // （面板行带这个字段是因为「收起这个包」按 pack_id 整批删），面板不自己拼也不猜。
           body: JSON.stringify(confirm
             ? { packId: memory.share_pack_id, confirm: true }
             : { packId: memory.share_pack_id })
         })
           .then(async (res) => { if (!res.ok) throw new Error("http"); return res.json(); })
           .then((d) => {
-            if (confirm && d.dry_run === false) onUndone(d.deleted ?? 0);
-            else setUndoPreview(d);
+            // 只认答复的 dry_run，**不按「我点的是哪一颗」推断**：确认那一发如果回 dry_run:true
+            // （服务端与面板版本不一致的形态），悄悄把预览重画一遍就等于「按了删除却没删也不说」
+            // ——接收弹层那一侧修过同一个形状，这里不许退回去。
+            if (d.dry_run === false) onUndone(d.deleted ?? 0);
+            else {
+              setUndoPreview(d);
+              if (confirm) setUndoStillDry(true);
+            }
           })
           .catch(() => setUndoError(true))
           .finally(() => setUndoBusy(false));
@@ -6299,18 +6328,21 @@ window.__ModuleLoader__.load({
                   t("memory.explorer.deleteFailed")),
                 memory.share_pack_id && h(react.Fragment, null,
                   undoPreview
-                    ? h(react.Fragment, null,
+                    ? (undoPreview.deleted ?? 0) === 0
+                      // 「这个包已经不在本库里了」是她真正需要的那一句，而不是
+                      // 「将删除 0 条 + 一颗确认删除 0 条的键」——后者真实但没用。
+                      ? h("span", { style: { fontSize: 12, color: "var(--mneme-warn)" } },
+                          t("memory.explorer.undoPackGone"))
+                      : h(react.Fragment, null,
                         h("span", { style: { fontSize: 12, color: "var(--mneme-warn)" } },
                           t("memory.explorer.undoPackPreview").replace("{n}", String(undoPreview.deleted ?? 0))),
                         // sample 是**清点时**的前 20 条（{type,title}，序为 updated_at DESC），
                         // deleted 是这一笔真带走几行。两个数并发下可以差一条，谁也不是对方的
                         // 依据（src/share-import.js 的 deleteSharePack 那段），所以这里只把
                         // sample 当「我要收起的到底是哪一批」的核对清单，不参与条数。
-                        Array.isArray(undoPreview.sample) && undoPreview.sample.length > 0 &&
-                          h("div", { className: "mneme-sharelist" },
-                            undoPreview.sample.map((s, i) => h("div", { key: `${s.type}-${i}`, className: "mneme-sharow" },
-                              h("span", { className: "mneme-sharowtitle" }, s.title || ""),
-                              h("span", { className: "mneme-sharowreason" }, typeLabel(t, s.type))))),
+                        // 清单形状走 TypeRowList：接收弹层的撞名清单与它是同一个形状，
+                        // 第三份手写 .map 就是第三处会各自漂移的地方。
+                        TypeRowList({ t, rows: undoPreview.sample }),
                         h("button", { type: "button", className: "mneme-btn mneme-btndangerconfirm", disabled: undoBusy, onClick: () => undoPack(true) },
                           t("memory.explorer.undoPackConfirm").replace("{n}", String(undoPreview.deleted ?? 0))),
                         h("button", { type: "button", className: "mneme-btn", disabled: undoBusy, onClick: () => setUndoPreview(null) },
@@ -6318,6 +6350,11 @@ window.__ModuleLoader__.load({
                       )
                     : h("button", { type: "button", className: "mneme-btn mneme-btndanger", disabled: undoBusy, onClick: () => undoPack(false) },
                         t("memory.explorer.undoPack"))),
+                // 撤销同样是往返一秒量级的枪（清点那一发与接收侧的干跑走的是同一档耗时）：
+                // 只把键按灰而不说在忙，看起来就像没反应。
+                undoBusy && h("span", { style: { fontSize: 12 } }, t("memory.explorer.importing")),
+                undoStillDry && h("span", { style: { fontSize: 12, color: "var(--mneme-danger)" } },
+                  t("memory.explorer.undoPackStillDry")),
                 undoError && h("span", { style: { fontSize: 12, color: "var(--mneme-danger)" } },
                   t("memory.explorer.undoPackFailed"))
               )
@@ -6565,10 +6602,7 @@ window.__ModuleLoader__.load({
         // 屏上没有这一行不等于没有撞名，等于「本轮没有新的要报」。
         conflicts.length > 0 && h("div", { className: "mneme-featsubhint", style: { color: "var(--mneme-warn)" } },
           t("memory.explorer.receiveConflicts").replace("{n}", String(conflicts.length))),
-        conflicts.length > 0 && h("div", { className: "mneme-sharelist" },
-          conflicts.map((c, i) => h("div", { key: `${c.type}-${i}`, className: "mneme-sharow" },
-            h("span", { className: "mneme-sharowtitle" }, c.title || ""),
-            h("span", { className: "mneme-sharowreason" }, typeLabel(t, c.type))))),
+        TypeRowList({ t, rows: conflicts }),
         // `conflicts_checked` 是服务端给的**包内条数**，不是「比过了几条」（同一处注释写明：
         // 第二次吃同一个包时 title_conflicts 恒空，而这一格仍是全量）。所以文案只说
         // 「包内 N 条」：它是上一行为什么可能沉默的尺，不许读成「比对了 N 条都没撞」。
@@ -7319,6 +7353,12 @@ window.__ModuleLoader__.load({
                   "aria-pressed": String(foreignOnly),
                   onClick: () => setForeignOnly(!foreignOnly)
                 }, t("memory.explorer.filterForeign")),
+                // 「为什么这一档在搜索时不按」不能只挂在 title 上：disabled 的按钮不发 focus，
+                // 触屏与键盘用户拿不到提示，而她看到的是一个**亮着**的筛选压在一堆没筛过的
+                // 结果上。所以开着外来档又在搜索时，屏上多一行看得见的说明。
+                foreignOnly && !!query.trim() && h("div", {
+                  className: "mneme-featsubhint", style: { marginTop: 4 }
+                }, t("memory.explorer.filterForeignSearchHint")),
                 heatAvailable && h("button", {
                   className: heatSort ? "mneme-chip mneme-active" : "mneme-chip",
                   title: t("memory.explorer.heatSortHint"),

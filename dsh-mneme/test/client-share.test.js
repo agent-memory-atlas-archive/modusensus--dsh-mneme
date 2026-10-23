@@ -157,7 +157,7 @@ test("the foreign filter is a browse-state server filter and stays inert while s
   // 外来的」在这张 DTO 上压根读不出来。宁可让 chip 在搜索态明确失效并说清原因，也不要按一个
   // 假信号筛——test/share-foreign-rows.test.js 的第三条用例锁着这个事实。
   assert.ok(clientSource.includes("disabled: !!query.trim() && !foreignOnly"),
-    "有搜索词时不许**开启**外来筛选（按下无效），但任何时候都许关掉——只给 disabled 会把她锁在一个她解不开的状态里");
+    "有搜索词时不许**开启**外来筛选，但任何时候都许关掉——只给 disabled 会把她锁在一个她解不开的状态里");
   assert.ok(clientSource.includes('"memory.explorer.filterForeignSearchHint"'),
     "失效要有自己的文案，不能只靠 disabled 让人猜");
   assert.equal(clientSource.includes('(!foreignOnly || m.source'), false,
@@ -188,4 +188,18 @@ test("the foreign badge and the withdraw action gate on server truth, not on gue
   // 撤是**物删**（docs/SHARE.md：归档行会占住 UNIQUE 位，撤了导不回来），文案不许写「归档」。
   assert.equal(/memory\.explorer\.undoPack[A-Za-z]*"\s*:\s*"[^"]*(归档|archive)/i.test(clientSource), false,
     "撤销的文案不许出现「归档」——它是物理删除");
+  // 删除那一发的成功判据**只能是答复的 dry_run**。`confirm && d.dry_run === false` 那种合取
+  // 读的是「我刚才点的是哪一颗」：确认回来一个 dry_run:true 时会把预览重画一遍当作没发生——
+  // 接收弹层那一侧修过同一个形状，撤销这条更硬的路不许退回去。
+  assert.ok(clientSource.includes("if (d.dry_run === false) onUndone(d.deleted ?? 0)"),
+    "撤销的成功判据只看答复");
+  assert.equal(clientSource.includes("confirm && d.dry_run === false"), false,
+    "不许再出现按按钮形状推断的那种合取");
+  assert.ok(clientSource.includes('t("memory.explorer.undoPackGone")'),
+    "包已不在本库时要说那一句，而不是给一颗「确认删除 0 条」的键");
+  // 同一形状只许有一份：抽屉的退出清单与接收弹层的撞名清单都是 {type,title} 两列。
+  assert.ok(clientSource.includes("TypeRowList({ t, rows: undoPreview.sample })"),
+    "清单形状走公共组件，不许第三份手写 .map");
+  assert.ok(clientSource.includes('foreignOnly && !!query.trim() && h("div"'),
+    "「搜索时不按」要有一行看得见的说明，不能只挂在 disabled 的 title 上");
 });
