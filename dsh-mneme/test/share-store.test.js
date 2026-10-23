@@ -94,7 +94,9 @@ test("deleteBySharePackId removes the whole pack, cleans provenance, and bumps g
     // 1（实测：新库上 `PRAGMA foreign_keys` 返回 1）。FK 开着时删记忆由级联代劳，本用例
     // 断言的「批删自己清链接」就永远测不到那行代码——变异检验证实：摘掉 deleteBySharePackId
     // 里那条 DELETE FROM memory_provenance，五条用例照绿。关掉之后级联不再代劳，
-    // 断言测的才是显式清理本身（store.js 的 remove() 注释也是按「级联惰性」这个口径写的）。
+    // 断言测的才是显式清理本身。（`src/store.js` 的 `remove()` 注释在 C1 修复轮已经改成
+    // 真口径：node:sqlite 默认就把外键开着、级联是活的，显式清理是为了不把清理押在一份没人
+    // 钉过的驱动默认上——本用例反过来**临时关掉**它，恰恰就是为了让那句「不押注」可测。）
     store.db.exec("PRAGMA foreign_keys = OFF");
     store.saveMemoryProvenance({ memoryId: a.id, sessionId: "s-1", seqStart: 1, seqEnd: 3, createdAt: "2026-01-01T00:00:00.000Z" });
     assert.equal(store.provenanceFor(a.id).length, 1, "the link must exist before the delete or the assertion below is empty");
