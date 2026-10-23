@@ -34,8 +34,8 @@ test("the share dialog gates the download on the report", () => {
 test("the report separates what shipped from what qualified", () => {
   assert.ok(clientSource.includes("report.included + report.deduped"),
     "折叠掉的那几条必须加回去，两个数同屏");
-  assert.ok(clientSource.includes('"memory.explorer.shareDeduped"'),
-    "deduped 有自己的一行文案，不是并进 included 那句");
+  assert.ok(clientSource.includes('t("memory.explorer.shareDeduped")'),
+    "deduped 那一行要真的有渲染点，不是只在字典里躺着");
 });
 
 // 跨文件锁：面板的六个跳过原因与八个可分享类型都只许是服务端那份的投影。
@@ -73,6 +73,6 @@ test("the pack filename comes from the response header, with a pack_id fallback"
   // 回落那一格只许出现一次前缀串，且不带日期拼法。
   assert.equal(clientSource.split("dsh-mneme-share-").length - 1, 1,
     "面板只许有一份包名前缀串（回落用），不许再拼第二套日期命名");
-  assert.equal(clientSource.includes("slice(0, 8)"), false,
-    "pack_id 截 8 位是服务端的拼法，面板不许复制");
+  assert.equal(/pack_id[^;\n]{0,48}slice\(\s*0\s*,\s*8\s*\)/.test(clientSource), false,
+    "不许在 pack_id 后面截 8 位——那是 src/share-http.js 的 shareFilename 唯一的拼法");
 });

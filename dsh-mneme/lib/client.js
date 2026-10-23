@@ -1428,7 +1428,7 @@ window.__ModuleLoader__.load({
         "memory.explorer.importNoFile": "Choose a file first",
         "memory.explorer.sharePack": "Share memories…",
         "memory.explorer.shareTitle": "Memory share pack",
-        "memory.explorer.shareHint": "Pack your active memories for someone else: rows holding secrets are dropped whole, home paths become ~, archived and forgotten rows stay in.",
+        "memory.explorer.shareHint": "Pack your active memories for someone else: rows holding secrets are dropped whole, home paths become ~, archived and forgotten rows stay out.",
         "memory.explorer.shareAlias": "Share alias",
         "memory.explorer.shareAliasBlank": "blank = from-shared",
         "memory.explorer.shareType": "Only this type",
@@ -6400,8 +6400,10 @@ window.__ModuleLoader__.load({
         canDownload && h("div", { className: "mneme-improw", style: { justifyContent: "flex-end" } },
           h("button", { type: "button", className: "mneme-btn", onClick: download },
             t("memory.explorer.shareDownload"))),
-        rep && rep.included === 0 && h("div", { className: "mneme-featsubhint", style: { marginTop: 8 } },
-          t("memory.explorer.shareEmpty"))
+        // 没有可下载的东西就一定给一句原因：`included` 为 0 与「这答复没有条数」是两种失败，
+        // 但对她的界面是同一种——数字后面没有键。canDownload 是唯一的门，这里就只认它。
+        rep && !canDownload && h("div", { className: "mneme-featsubhint", style: { marginTop: 8 } },
+          t("memory.explorer.shareEmpty")),
       );
     }
 
