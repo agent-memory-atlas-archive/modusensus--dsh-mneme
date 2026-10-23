@@ -740,20 +740,26 @@ test("the receive dialog reads dry_run instead of inferring from its own button"
   assert.ok(clientSource.includes("post({ pack })"), "预览那一发不带 confirm——缺省即干跑");
   assert.ok(clientSource.includes("post({ pack, confirm: true })"),
     "真写的那一发必须带 confirm 这个真值，其他形状服务端都不认");
-  assert.ok(clientSource.includes("d.dry_run === false"),
-    "「写进去了」这句只能由答复自己说");
+  assert.ok(clientSource.includes('d.dry_run === false ? "memory.explorer.receiveDidCreate"'),
+    "「写进去了」这句只能由答复自己说——钉的是那个三元式本身，不是六个字面量都在");
   assert.ok(clientSource.includes("result.dry_run !== false"),
     "确认之后仍回干跑时要单独说「没有写库」，不许沉默，也不许挂在预览那一支上");
   assert.ok(clientSource.includes('"memory.explorer.receiveStillDry"'),
     "那一格要有自己的文案");
   // 第二个旋钮一概不认：收侧只认 confirm（spec §5——reclaim 的 body 里就带 dryRun，
   // 手熟的人会顺手发来，把它读成「要写」等于替她点头）。
-  // **切片而不是全文**：lib/client.js:4762 的 VACUUM 那一条合法地发 dryRun:false，
-  // 那是 reclaim 的形状不是 receive 的。全文反锁会在 D3 之前就是红的；谁把它「修」成
-  // 全文锁，就等于给 reclaim 那颗键定罪。切片锚点变了时下面那条长度断言先红。
+  // **切片而不是全文**：本文件里 reclaim/VACUUM 那一发合法地发 `dryRun: false, confirm: true`，
+  // 那是 reclaim 的形状不是 receive 的。全文反锁会一上来就红；谁把它「修」成全文锁，
+  // 就等于给 reclaim 那颗键定罪。所以按函数名切区段，并且**两个锚点都要验**：
+  // 结束锚点丢了的时候 indexOf 返回 -1，切片会一路长到文件尾而不是塌成空——
+  // 那时候这条锁看似更严，实际悄悄开始管整个文件（而 ReceiveDialog 之后今天没有 dryRun，
+  // 它会空过）。两头都钉住，锚点漂移只会红得明白。
   const receiveStart = clientSource.indexOf("function ReceiveDialog(");
-  const receiveRegion = clientSource.slice(receiveStart, clientSource.indexOf("// #386 第 5 条", receiveStart));
-  assert.ok(receiveRegion.length > 800, "ReceiveDialog 的切片锚点变了，先修锚再谈锁");
+  const receiveEnd = clientSource.indexOf("// #386 第 5 条", receiveStart);
+  assert.ok(receiveStart > 0 && receiveEnd > receiveStart,
+    "ReceiveDialog 的起止锚点都要在，且顺序对——否则这条锁在管的东西和它说的不是一件");
+  const receiveRegion = clientSource.slice(receiveStart, receiveEnd);
+  assert.ok(receiveRegion.length > 800, "ReceiveDialog 的区段短得不像话，先修锚再谈锁");
   assert.equal(receiveRegion.includes("dryRun"), false,
     "收侧不许发 dryRun——唯一的入口是 confirm");
 });
@@ -763,18 +769,39 @@ test("the receive dialog reads dry_run instead of inferring from its own button"
 test("the receive preview keeps the advisory reading honest", () => {
   assert.ok(clientSource.includes("d.title_conflicts"), "撞名清单要显示");
   assert.ok(clientSource.includes('"memory.explorer.receiveConflicts"'));
-  assert.equal(/现在没有冲突|no conflicts right now/.test(clientSource), false,
-    "不许出现「没有冲突」这类绝对断言");
+  assert.equal(/现在没有冲突|没有撞名|无冲突|no conflicts|no title clashes/i.test(clientSource), false,
+    "不许出现「没有冲突」这类绝对断言（清单为空只说明本轮没有新的要报）");
   // 先预览才允许确认：干跑是必经的一站，不是可选装饰。
   assert.ok(clientSource.includes("disabled: busy || !preview"),
     "确认按钮在拿到预览之前必须 disabled");
+  // advisory 读数的分母要说出来，否则「清单为空」与「什么也没比」在屏上长一个样。
+  // 注意它是**包内条数**而不是「比过了几条」，所以文案只许说「包内 N 条」。
+  assert.ok(clientSource.includes("d.conflicts_checked"),
+    "要把服务端给的包内条数显示出来");
+  assert.ok(clientSource.includes('t("memory.explorer.receivePackCount")'),
+    "那一行要有自己的渲染点，不是只在字典里躺着");
+});
+
+// D3 评审裁定补的锁：两种「按了没反应」的形态。
+//   a) 200 但正文读不出——曾经一路 return null，调用方把它读成「屏上已有提示」，
+//      于是确认那一发悄悄没走完，而上一块的「将新建 N 条」还留在屏上；
+//   b) 预览还在飞的时候又能选一个文件——飞回来的数字说的是前一个包，确认写的却是后一个。
+test("the receive dialog never goes silent, and never lets a superseded preview drive the write", () => {
+  assert.ok(clientSource.includes('if (!d || typeof d !== "object") {'),
+    "200 但没有可读正文也要 setErr，不许 return null 装成「已经处理过了」");
+  assert.ok(clientSource.includes("disabled: busy, onClick: () => fileRef.current?.click()"),
+    "预览/确认在飞的时候不许再选文件（那一块数字属于上一个包）");
+  assert.ok(clientSource.includes('typeof parsed !== "object"'),
+    "解得出 JSON 但不是对象，是另一种失败，得有它自己的一句话");
+  assert.ok(clientSource.includes('e.target.value = ""'),
+    "选完清空控件值：否则改过的同一个文件再选一次不发 change，面板拿着旧包预览");
 });
 ```
 
 - [ ] **Step 2: 跑测试确认全红**
 
 Run: `node --test test/client-share.test.js`
-Expected: 新增两条 FAIL——`the receive dialog reads dry_run…` 红在第一句（`apiFetch("/api/dsh-mneme/receive"` 还不存在），`the receive preview…` 红在 `d.title_conflicts`。原 5 条保持绿。实装之后如果那条**切片长度断言**红，说明 `ReceiveDialog` 插到了 `// #386 第 5 条`（现 `lib/client.js:6191`）那个锚点**之后**，Step 4 的位置错了，先修位置再谈锁。
+Expected: 新增三条 FAIL——`the receive dialog reads dry_run…` 红在第一句（`apiFetch("/api/dsh-mneme/receive"` 还不存在），`the receive preview…` 红在 `d.title_conflicts`，`the receive dialog never goes silent…` 红在 `if (!d || typeof d !== "object")`。原 5 条保持绿。实装之后如果那条**起止锚点**断言红，说明 `ReceiveDialog` 插到了 `// #386 第 5 条` 那个锚点**之后**，Step 4 的位置错了，先修位置再谈锁。
 
 - [ ] **Step 3: 加两份字典的新键**
 
@@ -786,6 +813,7 @@ zh，紧跟 D2 插入的 `"memory.explorer.shareDownload": "下载包文件",` �
         "memory.explorer.receiveHint": "选她发来的包文件。先干跑预览，点确认才写库；导入的行进外来区，不参与本机的巩固、降级或整理。",
         "memory.explorer.receivePick": "选择包文件…",
         "memory.explorer.receiveNotJson": "这个文件不是 JSON",
+        "memory.explorer.receiveNotPack": "这个文件不是分享包（顶层应该是一个 JSON 对象）",
         "memory.explorer.receivePreview": "先干跑预览",
         "memory.explorer.receiveConfirm": "确认导入",
         "memory.explorer.receiveFailed": "导入失败",
@@ -796,6 +824,7 @@ zh，紧跟 D2 插入的 `"memory.explorer.shareDownload": "下载包文件",` �
         "memory.explorer.receiveExisting": "{n} 条已在库中",
         "memory.explorer.receiveUnchanged": "{n} 条正文相同",
         "memory.explorer.receiveConflicts": "撞名 {n} 条（不合并，请自己看）",
+        "memory.explorer.receivePackCount": "包内 {n} 条",
         "memory.explorer.receiveStillDry": "没有写库：这一枪仍是干跑",
 ```
 
@@ -807,6 +836,7 @@ en，紧跟 D2 插入的 `"memory.explorer.shareDownload": "Download pack file",
         "memory.explorer.receiveHint": "Pick the file she sent. The first pass is a dry run; nothing is written until Confirm. Imported rows join the foreign area and never take part in this machine's consolidation, demotion or tidying.",
         "memory.explorer.receivePick": "Choose pack file…",
         "memory.explorer.receiveNotJson": "That file is not JSON",
+        "memory.explorer.receiveNotPack": "That file is not a share pack (the top level should be one JSON object)",
         "memory.explorer.receivePreview": "Preview (dry run)",
         "memory.explorer.receiveConfirm": "Confirm import",
         "memory.explorer.receiveFailed": "Import failed",
@@ -817,6 +847,7 @@ en，紧跟 D2 插入的 `"memory.explorer.shareDownload": "Download pack file",
         "memory.explorer.receiveExisting": "{n} already in the store",
         "memory.explorer.receiveUnchanged": "{n} identical already",
         "memory.explorer.receiveConflicts": "{n} title clashes (not merged - check them yourself)",
+        "memory.explorer.receivePackCount": "{n} rows in the pack",
         "memory.explorer.receiveStillDry": "Nothing was written: that call stayed dry",
 ```
 
@@ -841,14 +872,20 @@ en，紧跟 D2 插入的 `"memory.explorer.shareDownload": "Download pack file",
           t("memory.explorer.receiveExisting").replace("{n}", String(d.skipped_existing))),
         (d.unchanged || 0) > 0 && h("div", { className: "mneme-featsubhint" },
           t("memory.explorer.receiveUnchanged").replace("{n}", String(d.unchanged))),
-        // 撞名是 advisory 读数：只对「本轮真正会新建的那些」判过，重吃同一个包时恒空，
-        // 所以这里说「这一批里没有新的要报」而不是「没有冲突」（docs/SHARE.md 那笔账三）。
+        // 撞名是 advisory 读数：只对「本轮真正会新建的那些」判过，重吃同一个包时恒空
+        //（src/share-import.js:181-186）。所以这里**只有非空才出声**，绝不写「没有冲突」；
+        // 屏上没有这一行不等于没有撞名，等于「本轮没有新的要报」。
         conflicts.length > 0 && h("div", { className: "mneme-featsubhint", style: { color: "var(--mneme-warn)" } },
           t("memory.explorer.receiveConflicts").replace("{n}", String(conflicts.length))),
         conflicts.length > 0 && h("div", { className: "mneme-sharelist" },
           conflicts.map((c, i) => h("div", { key: `${c.type}-${i}`, className: "mneme-sharow" },
             h("span", { className: "mneme-sharowtitle" }, c.title || ""),
-            h("span", { className: "mneme-sharowreason" }, typeLabel(t, c.type)))))
+            h("span", { className: "mneme-sharowreason" }, typeLabel(t, c.type)))),
+        // `conflicts_checked` 是服务端给的**包内条数**，不是「比过了几条」（同一处注释写明：
+        // 第二次吃同一个包时 title_conflicts 恒空，而这一格仍是全量）。所以文案只说
+        // 「包内 N 条」：它是上一行为什么可能沉默的尺，不许读成「比对了 N 条都没撞」。
+        h("div", { className: "mneme-featsubhint" },
+          t("memory.explorer.receivePackCount").replace("{n}", String(d.conflicts_checked ?? 0)))
       );
     }
 
@@ -862,7 +899,8 @@ en，紧跟 D2 插入的 `"memory.explorer.shareDownload": "Download pack file",
       const fileRef = useRef(null);
 
       // 一发 POST 两种用法（干跑 / 确认）都从这走，失败文案只有一份。返回 null 表示
-      // 已经把 err 摆上屏，调用方什么都不必再判。
+      // 「已经有一句话摆上屏了」——所以每一条不回 null 的路径都必须自己先 setErr，
+      // 否则调用方读到 null 就是什么都不做，现场变成「按了没反应」。
       const post = (body) => apiFetch("/api/dsh-mneme/receive", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -876,6 +914,13 @@ en，紧跟 D2 插入的 `"memory.explorer.shareDownload": "Download pack file",
             // 那是「哪一格不合格」的唯一读数，面板不自己编第二套文案。
             setErr(`${t("memory.explorer.receiveFailed")}（${(d && d.error) || res.status}）`
               + (d && d.detail ? `：${d.detail}` : ""));
+            return null;
+          }
+          // 200 但正文读不出（前置的 HTML 拦截页、空 body 的代理、被截断的响应）
+          // **不是成功**：这里曾经直接把 null 交回调用方，于是确认那一发悄悄没走完，
+          // 而屏上上一块的「将新建 N 条」还留着——看起来就像她没点确认。
+          if (!d || typeof d !== "object") {
+            setErr(t("memory.explorer.receiveFailed"));
             return null;
           }
           return d;
@@ -892,7 +937,20 @@ en，紧跟 D2 插入的 `"memory.explorer.shareDownload": "Download pack file",
         f.text().then((text) => {
           // 坏 JSON 在本地就拦。「这个文件根本不是 JSON」与「这个包不合格」是两件事，
           // 后者由服务端的码说（invalid-kind / invalid-entry / …）。
-          try { setPack(JSON.parse(text)); } catch { setErr(t("memory.explorer.receiveNotJson")); }
+          // 顶层不是对象的也一样在这里说清：`null`、`0`、`[]` 会让预览键永远灰着且不解释，
+          // 那种「按不动也没话说」的界面比一句错话更坏。
+          let parsed;
+          try {
+            parsed = JSON.parse(text);
+          } catch {
+            setErr(t("memory.explorer.receiveNotJson"));
+            return;
+          }
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            setErr(t("memory.explorer.receiveNotPack"));
+            return;
+          }
+          setPack(parsed);
         }).catch(() => setErr(t("memory.explorer.receiveFailed")));
       };
 
@@ -919,14 +977,19 @@ en，紧跟 D2 插入的 `"memory.explorer.shareDownload": "Download pack file",
         h("div", { className: "mneme-set-title" }, t("memory.explorer.receiveTitle")),
         h("div", { className: "mneme-featsubhint", style: { marginTop: 4 } }, t("memory.explorer.receiveHint")),
         h("div", { className: "mneme-improw" },
-          h("button", { type: "button", className: "mneme-btn", onClick: () => fileRef.current?.click() },
+          // 忙的时候不许再选一个文件：预览那一发还在飞，选第二个会清掉 pack/preview，
+          // 而飞回来的那一块数字说的是**前一个**包——确认键亮着、写的却是后一个文件。
+          // 这条窗口按实测是 0.5–3 秒量级，不是理论风险。
+          h("button", { type: "button", className: "mneme-btn", disabled: busy, onClick: () => fileRef.current?.click() },
             file ? file.name : t("memory.explorer.receivePick")),
           h("input", {
             ref: fileRef,
             type: "file",
             accept: ".json,application/json",
             style: { display: "none" },
-            onChange: (e) => pick((e.target.files && e.target.files[0]) || null)
+            // 选完就清空控件的值：否则她改完同一个文件再选一次，浏览器不发 change，
+            // 面板会拿着上一版的包继续预览——同一颗键，两个事实。
+            onChange: (e) => { pick((e.target.files && e.target.files[0]) || null); e.target.value = ""; }
           })
         ),
         err && h("div", { className: "mneme-featsubhint", style: { color: "var(--mneme-danger)", marginTop: 8 } }, err),
@@ -992,7 +1055,7 @@ cd dsh-mneme
 node --test test/client-share.test.js test/client.test.js test/contrast.test.js
 npm test
 ```
-Expected: `client-share` 7/7 绿（本任务 +2）。注意 `dryRun` 那条反锁只切 `ReceiveDialog` 的区段——全文反锁会撞上 `lib/client.js:4762` 那条合法的 VACUUM 请求，那条不是本车道的债；双语全局锁绿；全套只增本任务 2 条。
+Expected: `client-share` 8/8 绿（本任务 +3）。注意 `dryRun` 那条反锁只切 `ReceiveDialog` 的区段——全文反锁会撞上本文件里 reclaim/VACUUM 那一发合法的 `dryRun: false`，那条不是本车道的债；双语全局锁绿；全套只增本任务 3 条。
 
 - [ ] **Step 7: 提交**
 
@@ -1067,7 +1130,7 @@ test("the foreign badge and the withdraw action gate on server truth, not on gue
 - [ ] **Step 2: 跑测试确认新的两条红**
 
 Run: `node --test test/client-share.test.js`
-Expected: 新增两条 FAIL（找不到 `foreignOnly` 那几处串），前面 7 条保持绿。
+Expected: 新增两条 FAIL（找不到 `foreignOnly` 那几处串），前面 8 条保持绿。
 
 - [ ] **Step 3: 加两份字典的新键**
 
@@ -1313,7 +1376,7 @@ node --test test/client-share.test.js test/client.test.js test/contrast.test.js
 node --check lib/client.js
 npm test
 ```
-Expected: `client-share` 9/9 绿；`client.test.js` 双语全局锁绿（新键 zh/en 各一次）；`contrast.test.js` 绿（`.mneme-badge--foreign` 的 `color:var(--mneme-ok)` 与 `.mneme-saved` 同令牌，两主题都已在既有快照下合规）；`node --check` 无输出（括号层级没坏）。
+Expected: `client-share` 10/10 绿；`client.test.js` 双语全局锁绿（新键 zh/en 各一次）；`contrast.test.js` 绿（`.mneme-badge--foreign` 的 `color:var(--mneme-ok)` 与 `.mneme-saved` 同令牌，两主题都已在既有快照下合规）；`node --check` 无输出（括号层级没坏）。
 
 - [ ] **Step 11: 提交**
 
@@ -1444,7 +1507,7 @@ git commit -m "docs(share): the panel path is live, with the two known costs"
 
 ## 收尾（车道 owner 自己做，不派 subagent）
 
-1. **基线核对**：`cd dsh-mneme && npm test` → 期望 `tests 2410 / pass 2409 / fail 0 / skipped 1`（即相对车道 D 之前的 `2398/2397` 增 **12** 条：D1 3 + D2 5 + D3 2 + D4 2，D5 零代码）。数字对不上时先数新增用例，别调断言。
+1. **基线核对**：`cd dsh-mneme && npm test` → 期望 `tests 2411 / pass 2410 / fail 0 / skipped 1`（即相对车道 D 之前的 `2398/2397` 增 **13** 条：D1 3 + D2 5 + D3 3 + D4 2，D5 零代码）。数字对不上时先数新增用例，别调断言。
 2. **src↔lib 平价**：只有 D1 动了 `src/`。`node scripts/check-sync.js` 必须通过；`git log --stat` 里 D1 那一提交必须同时含 `src/api.js` 与 `lib/api.js`。
 3. **提交卫生**：`for c in $(git log --format=%H e9889bc..HEAD); do git log -1 --format=%B $c | grep -i -e "co-authored" -e "generated" && echo "BAD $c"; done` 应无输出。
 4. **台账**：`.superpowers/sdd/2026-10-23-memory-share-pack-lane-d/progress.md` 里逐条记下——本车道的三条线（§「车道 D 的三条线」）、两格已知代价（D5 写进 `docs/SHARE.md` 的那两条）、以及「面板没能在浏览器里验，锁的全是源码形状」。
