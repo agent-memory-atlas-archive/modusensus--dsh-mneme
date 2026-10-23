@@ -25,8 +25,8 @@ test("the share dialog gates the download on the report", () => {
   // 413 与 200 是两份形状：413 没有 memories，只有 report + 字节数 + hint。
   assert.ok(clientSource.includes("if (res.status === 413)"),
     "超水位要走 tooLarge 那一支，不能落到通用失败");
-  assert.ok(clientSource.includes("JSON.stringify(pack, null, 2)"),
-    "落盘的必须是服务端给的那份包，不能在面板里重拼字段（重拼一次就是一份第二口径）");
+  assert.ok(clientSource.includes("new Blob([JSON.stringify(pack)]"),
+    "落盘的必须是服务端给的那一份字节：重拼字段或 pretty-print 都会让「量过的包」与「发出去的包」不是同一坨");
 });
 
 // docs/SHARE.md「车道 D 三笔账」之一：included 只数实际发出的条数，够格进包的是
@@ -181,6 +181,12 @@ test("the foreign badge and the withdraw action gate on server truth, not on gue
     "整包退出只许走这一枪");
   assert.ok(clientSource.includes("{ packId: memory.share_pack_id, confirm: true }"),
     "删除那一发要带 confirm 真值，且 packId 只从行上取");
+  // 两段式的**第一段**也要有锁：只钉 confirm 那一发等于没钉——把三元式删掉、每次都带
+  // confirm:true，十把锁一把都不会红，而「整包物删」变成一次点击就发生。
+  assert.ok(clientSource.includes(": { packId: memory.share_pack_id })"),
+    "清点那一发必须是不带 confirm 的形状");
+  assert.ok(clientSource.includes("onClick: () => undoPack(false)"),
+    "第一颗键走的是干跑那一支");
   assert.ok(clientSource.includes("d.dry_run === false"),
     "撤成功的读数同样只由答复的 dry_run 说");
   assert.ok(clientSource.includes("undoPreview.sample"),
@@ -202,4 +208,18 @@ test("the foreign badge and the withdraw action gate on server truth, not on gue
     "清单形状走公共组件，不许第三份手写 .map");
   assert.ok(clientSource.includes('foreignOnly && !!query.trim() && h("div"'),
     "「搜索时不按」要有一行看得见的说明，不能只挂在 disabled 的 title 上");
+});
+
+// 外来判据是这条车道唯一一处「面板自己写的字面量」：lib/client.js 是独立 bundle，
+// 不能 import src/memory-source.js，所以用静态镜像把它钉回服务端那一份。
+// 服务端改了那个值而这里没跟，面板的徽标与筛选会安静地筛不到东西——正是最难发现的一种坏。
+test("the panel's foreign-ness literal mirrors the server's single definition", () => {
+  const sourceModule = readFileSync(join(here, "..", "src/memory-source.js"), "utf8");
+  const imported = /IMPORTED_SOURCE = "([^"]+)"/.exec(sourceModule);
+  assert.ok(imported, "src/memory-source.js 的导出形状变了，先修这条锁的锚");
+  const value = imported[1];
+  assert.ok(clientSource.includes(`m.source === "${value}"`),
+    "徽标读的行来源必须与服务端定义的那个值同字面");
+  assert.ok(clientSource.includes(`&source=${value}`),
+    "浏览态那条 URL 拼的来源值必须是同一个");
 });

@@ -817,6 +817,7 @@ window.__ModuleLoader__.load({
         "memory.explorer.undoPackConfirm": "确认删除 {n} 条",
         "memory.explorer.undoPackDone": "已收起 {n} 条",
         "memory.explorer.undoPackFailed": "收起失败",
+        "memory.explorer.undoPackBusy": "收起中…",
         "memory.explorer.undoPackStillDry": "没有删除：这一枪仍是干跑",
         "memory.explorer.undoPackGone": "这个包在本库里已经没有行了",
         "memory.explorer.newMemory": "新增记忆…",
@@ -1544,6 +1545,7 @@ window.__ModuleLoader__.load({
         "memory.explorer.undoPackConfirm": "Delete {n} rows",
         "memory.explorer.undoPackDone": "Withdrew {n} rows",
         "memory.explorer.undoPackFailed": "Withdrawal failed",
+        "memory.explorer.undoPackBusy": "Withdrawing…",
         "memory.explorer.undoPackStillDry": "Nothing was deleted: that call stayed dry",
         "memory.explorer.undoPackGone": "That pack has no rows left in this store",
         "memory.explorer.newMemory": "New memory…",
@@ -6345,14 +6347,17 @@ window.__ModuleLoader__.load({
                         TypeRowList({ t, rows: undoPreview.sample }),
                         h("button", { type: "button", className: "mneme-btn mneme-btndangerconfirm", disabled: undoBusy, onClick: () => undoPack(true) },
                           t("memory.explorer.undoPackConfirm").replace("{n}", String(undoPreview.deleted ?? 0))),
-                        h("button", { type: "button", className: "mneme-btn", disabled: undoBusy, onClick: () => setUndoPreview(null) },
+                        // 取消回到「一颗干净的收起键」：清点结果与那句「仍是干跑」是同一轮的
+                        // 两样东西，只清一样会让旧判词挂在空按钮旁边。
+                        h("button", { type: "button", className: "mneme-btn", disabled: undoBusy, onClick: () => { setUndoPreview(null); setUndoStillDry(false); } },
                           t("memory.explorer.cancel"))
                       )
                     : h("button", { type: "button", className: "mneme-btn mneme-btndanger", disabled: undoBusy, onClick: () => undoPack(false) },
                         t("memory.explorer.undoPack"))),
                 // 撤销同样是往返一秒量级的枪（清点那一发与接收侧的干跑走的是同一档耗时）：
-                // 只把键按灰而不说在忙，看起来就像没反应。
-                undoBusy && h("span", { style: { fontSize: 12 } }, t("memory.explorer.importing")),
+                // 只把键按灰而不说在忙，看起来就像没反应。这一句说的是**收起**，不是导入——
+                // 物删在飞的时候写成「导入中」是把两件相反的事挂在同一行字上。
+                undoBusy && h("span", { style: { fontSize: 12 } }, t("memory.explorer.undoPackBusy")),
                 undoStillDry && h("span", { style: { fontSize: 12, color: "var(--mneme-danger)" } },
                   t("memory.explorer.undoPackStillDry")),
                 undoError && h("span", { style: { fontSize: 12, color: "var(--mneme-danger)" } },
@@ -6508,7 +6513,17 @@ window.__ModuleLoader__.load({
             // 413 的答复不是包：{error, bytes, limitBytes, hint, report}。报告要给，
             // 包体一个字节都不许在内存里留着——服务端正是因为它太大才拒的。
             if (res.status === 413) { setTooLarge(d || {}); setBusy(false); return; }
-            if (!res.ok || !d || !d.report) { setErr(t("memory.explorer.shareFailed")); setBusy(false); return; }
+            if (!res.ok) {
+              // 与接收弹层同一份形状：服务端只回一个码（empty-pack / invalid-alias / …），
+              // detail 有就带上——那是「哪一格不合格」的唯一读数，面板不自己编第二套文案。
+              // 不这么做的话，日后 shareReply 新增的码在这里全是「生成失败」六个字。
+              setErr(`${t("memory.explorer.shareFailed")}（${(d && d.error) || res.status}）`
+                + (d && d.detail ? `：${d.detail}` : ""));
+              setBusy(false);
+              return;
+            }
+            // 200 但读不出报告**不是成功**：这一支不给码（没有码可给），只说失败。
+            if (!d || !d.report) { setErr(t("memory.explorer.shareFailed")); setBusy(false); return; }
             setPack(d);
             setFileName(dispositionName(res.headers.get("content-disposition")));
             setBusy(false);
@@ -6522,7 +6537,9 @@ window.__ModuleLoader__.load({
       const canDownload = !!rep && rep.included > 0;
 
       const download = () => {
-        const blob = new Blob([JSON.stringify(pack, null, 2)], { type: "application/json" });
+        // 面板写的字节必须与 `src/share.js` 量水位的、`bin/cli.mjs` 落盘的**同一份形状**
+        // （pretty-print 只属于 `/export` 那个备份面：人读的档，不是要重投的包）。
+        const blob = new Blob([JSON.stringify(pack)], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -6691,7 +6708,9 @@ window.__ModuleLoader__.load({
           if (!d) return;
           setResult(d);
           // 写完才刷新列表；答复说没写就不刷（dry_run 那一格是唯一凭据）。
-          if (d.dry_run === false) onImported();
+          // 同一支里顺手撤掉预览：写成功之后「将新建 40 条」与「已新建 40 条」是同屏的两种时态，
+          // 上面那一句此时不是信息。回干跑时**保留**预览——那一发确实没写，屏上还该留着清点。
+          if (d.dry_run === false) { setPreview(null); onImported(); }
         });
       };
 
