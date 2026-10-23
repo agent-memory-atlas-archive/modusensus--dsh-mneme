@@ -110,7 +110,12 @@ const USAGE = `${CLI_NAME} —— DSH 记忆插件（@modusensus/dsh-mneme）外
   ${CLI_NAME} get 42
   ${CLI_NAME} delete 42
   ${CLI_NAME} reclaim                       （先看：会清几行、库多大）
-  ${CLI_NAME} reclaim --apply --vacuum      （确认后执行，并把空间真的收回来）`;
+  ${CLI_NAME} reclaim --apply --vacuum      （确认后执行，并把空间真的收回来）
+  ${CLI_NAME} share --dry-run               （先看：会进几条、为什么跳过那些，不落盘）
+  ${CLI_NAME} share --out pack.json         （写包；~/… 由 CLI 自己展开，PowerShell/cmd 不会）
+  ${CLI_NAME} receive pack.json             （吃包：默认干跑，只报账，一个字都不写）
+  ${CLI_NAME} receive pack.json --apply     （确认数字后真的吃进自己的库；重跑同一个包 created=0）
+  ${CLI_NAME} undo-share pack.json --apply  （按包里那个 pack_id 整包收回：物删，之后还能重新导入）`;
 
 /* ---------------------------------- 参数解析 ---------------------------------- */
 
@@ -266,6 +271,12 @@ function failHttp(cfg, status, pathname, data, text) {
   // 多少」与「用 --type/--tag 分批」那两句留在体里没人看得见（措辞只许有一份，就在
   // 拒发的那侧，同 RECLAIM_CONFIRM_HINT 的口径）。完整 report（含 skip_list）走
   // --json：下面 rawJson 把整个响应体原样交给 stderr，这里不复制第二份打印器。
+  //
+  // 已知取舍（C10 记档，见 docs/SHARE.md「已知还没做」）：这里只转 hint / bytes /
+  // limitBytes 三样，所以 receive 那侧 400 的 `detail`（闸门指到哪一格）与数据面 413 的
+  // `limit` 到不了人类可读的输出。刻意不补：补一格就得在这里多一条按路由分支的判断，
+  // 而「错误文案只许有一份」是 #411 那条纪律的另一半。要逐格看就加 --json——rawJson
+  // 那行给的正是原样响应体，一格都不丢。
   if (data && typeof data === 'object') {
     if (typeof data.hint === 'string' && data.hint.trim()) hint += `\n${data.hint.trim()}`;
     if (Number.isFinite(data.bytes) && Number.isFinite(data.limitBytes)) {
