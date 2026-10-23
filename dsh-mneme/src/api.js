@@ -389,11 +389,13 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
           archived: rows[i].archived === true || rows[i].archived === 1,
           quality_score: rows[i].quality_score ?? null,
           // 外来区的包号：抽屉里的「收起这个包」按 pack_id 整批删，寻址键必须由行自己带上。
-          // 与 heat 同一个做法——**缺省就不带键**，面板的撤销按钮因此天然自门控：
-          // /search 的 DTO 没有这一格（向量召回那一路行集不同），搜索态按不了撤销，
-          // 那条代价写在 docs/SHARE.md 的车道 D 一节。扩展点留在 HTTP 层而不是
-          // toApiList：模型工具严格复用后者（src/service.js:2094 与 MEMORY_ITEM_SCHEMA），
-          // 给它们加一格没有第二个消费者，却要多改一处 schema 声明。
+          // 与 heat 同一个做法——**缺省就不带键**，面板的撤销按钮因此天然自门控。
+          // /search 那一面为什么没有这一格，别说错原因：召回侧的候选行内存里带着
+          // share_pack_id（searchMemories 只是把 source 盖成渠道名），toApiList 也从不透出这一列；
+          // 真正的事实是这层扩展只长在 /list 的答复上，搜索面没有一处代码去补它。所以搜索态
+          // 按不了撤销，那条代价写在 docs/SHARE.md 的车道 D 一节。
+          // 扩展点留在 HTTP 层而不是 toApiList：模型工具严格复用后者（src/service.js:2094 与
+          // MEMORY_ITEM_SCHEMA），给它们加一格没有第二个消费者，却要多改一处 schema 声明。
           ...(rows[i].share_pack_id ? { share_pack_id: rows[i].share_pack_id } : {}),
           ...(heatOn ? { heat: computeHeat(rows[i], Date.now(), config ?? {}) } : {})
         }));

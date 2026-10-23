@@ -115,8 +115,11 @@ test("list puts share_pack_id on foreign panel rows and omits the key on own row
     const own = h.service.saveWithDedupe({ type: "preference", title: "语言", content: "中文", tags: [] });
     foreignRow(h.store, "外来决定");
     const out = await call(h.route("/api/dsh-mneme/list"), "/api/dsh-mneme/list");
+    assert.equal(out.status, 200);
     const foreign = out.data.items.find((m) => m.source === IMPORTED_SOURCE);
     const ownRow = out.data.items.find((m) => m.id === own.memory.id);
+    assert.ok(foreign, "筛选结果里要有那条外来行");
+    assert.ok(ownRow, "筛选结果里要有那条本机行");
     assert.equal(foreign.share_pack_id, PACK_ID);
     // 键**不存在**而不是 null：面板的按钮按 `memory.share_pack_id` 真值门控，
     // 一个 null 与一个 undefined 在 JSON 里是两种形状，锁死成一种。
@@ -135,7 +138,7 @@ test("search DTO carries neither the pack id nor the row's own source", async ()
     // 召回渠道把行的 provenance 盖掉了（src/service.js:939/966/974）：这一格在搜索态**不是**
     // 行来源，所以「这条是不是外来的」在这张 DTO 上读不出来。D4 的外来 chip 因此只管浏览态。
     // 别把这条断言当 bug 去「修」——它是那条裁定的凭据，真要修的是召回侧的字段命名。
-    assert.notEqual(out.data.items[0].source, IMPORTED_SOURCE,
-      "search 的 source 是召回渠道（keyword/vector/bm25），不是行来源");
+    assert.match(String(out.data.items[0].source), /^(keyword|vector|bm25)$/,
+      "search 的 source 是召回渠道，不是行来源——正因为它有值且是渠道名，provenance 才读不出来");
   } finally { h.close(); }
 });
