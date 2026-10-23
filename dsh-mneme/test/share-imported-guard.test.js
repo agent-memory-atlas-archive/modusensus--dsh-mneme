@@ -8,7 +8,7 @@
 // 执行那一半不经汇流口，所以必须在报告那一半就把外来行挡在可点名集之外。
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
@@ -203,6 +203,36 @@ test("organize never names an imported row as an archive target", async () => {
     assert.match(outcome.skipped[0].error, /not flagged as a match/);
     assert.ok(!store.getById(foreign.id).archived, "the foreign row's archive bit stays where the owner left it");
     assert.ok(!store.getById(lonely.id).archived, "same for the lone one");
+  } finally {
+    try { store.close(); } catch { /* closed */ }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// 车道 C8（spec §15 一）：registerDocument 的 evidence 吸收是九池静态锁看不见的那条旁路——
+// 它不走任何 service.all() 行池，证据 id 直接来自调用方，循环里的 store.setArchived 是
+// 机器发起的批量归档，正是决策 2 要禁的动作。两条断言方向相反、缺一不可：
+//   ① 外来引用行不归档——摘掉谓词时这一条转红（RED 的本体）；
+//   ② 本方引用行照旧归档——防「把整条吸收关掉」冒充守卫通过；
+//   ③ skipped 计数可见——静默跳过等于报告里看不出这条文档替别人撤过哪几行。
+test("registerDocument's evidence absorb never archives a foreign row", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "dsh-mneme-doc-absorb-"));
+  const store = createStore(join(dir, "memory.db"));
+  try {
+    const service = createService({ store, mirror: null, config: { documentMemoryEnabled: true } });
+    const docFile = join(dir, "x.md");
+    writeFileSync(docFile, "# Doc\n\n正文正文", "utf8");
+    const foreign = store.save({ type: "pattern", title: "别人的模式", content: "正文正文正文", tags: [], source: IMPORTED_SOURCE });
+    const own = store.save({ type: "pattern", title: "我的模式", content: "正文正文正文", tags: [] });
+    const out = await service.registerDocument({
+      path: docFile, title: "文档", summary: "摘要句子。", evidence: [foreign.id, own.id]
+    });
+    assert.equal(out.action, "created");
+    assert.equal(store.getById(foreign.id).archived, false, "a machine-driven absorb must not archive someone else's memory");
+    assert.equal(store.getById(own.id).archived, true, "own evidence still absorbs");
+    assert.equal(out.evidence_kept, 2, "the citation itself stays honest: the foreign id remains cited by the document");
+    assert.equal(out.evidence_skipped, 1, "the skipped count must be visible, not silently dropped");
+    assert.equal(out.evidence_archived, 1, "exactly the one own row got absorbed");
   } finally {
     try { store.close(); } catch { /* closed */ }
     rmSync(dir, { recursive: true, force: true });
