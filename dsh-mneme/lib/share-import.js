@@ -112,8 +112,8 @@ export function createShareImport({ store, transaction, scheduleEmbed }) {
     // 会多报，漏报才是「收件人看不见这条」那种要命的形状。读的时候按「这里报的都是真同名
     // 行」，别按「dedupe 会吃的就是这些行」。
     // 标题两侧 trim，与去重那侧的 title.trim() 同一把尺。最后还有一处对照根本不成立，记下
-    // 免得日后又被拼回等价：dream summary 那一支的键是 source 而不是 title，那种行的
-    // 「假如允许并入」目标跟这里的「同名第一条」不是同一格东西。
+    // 免得日后又被拼回等价：dream summary 那一支的键是 source、narrative 那一支（src/service.js:1405-1410）
+    // 的键是 tags[0]，两种行的「假如允许并入」目标跟这里的「同名第一条」不是同一格东西。
     const ownByKey = new Map();
     for (const m of store.list({ limit: null })) {
       if (m.archived || isImportedRow(m)) continue;
