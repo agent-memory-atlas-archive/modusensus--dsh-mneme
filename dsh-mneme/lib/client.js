@@ -2200,7 +2200,7 @@ window.__ModuleLoader__.load({
       ".mneme-menu button:hover{background:var(--dsw-alias-interactive-bg-hover)}",
       ".mneme-impdialog{position:absolute;right:0;top:calc(100% + 6px);width:300px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 12px 32px color-mix(in srgb,var(--dsw-alias-label-primary) 16%,transparent);padding:14px;z-index:20;animation:mneme-fadein .1s ease-out}",
       ".mneme-improw{display:flex;align-items:center;gap:8px;margin-top:10px}",
-      // 车道 D 的分享/接收弹层：宽度与滚动共用 impdialog 的锚，正文一律 --mneme-* 语义层
+      // 分享/接收弹层：宽度与滚动共用 impdialog 的锚，正文一律 --mneme-* 语义层
       // （纪律 10：宿主 label-tertiary/label-dimmed 是分隔线层，不是正文色）。
       ".mneme-sharedialog{width:340px;max-height:min(72vh,560px);overflow-y:auto}",
       ".mneme-sharebody{margin-top:10px;display:flex;flex-direction:column;gap:2px}",
@@ -6420,7 +6420,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    // --- 分享包弹层（车道 D，spec §6）---
+    // --- 分享包弹层 ---
     // 这一面的支点只有一句：**看见 report 之前不给下载**。服务端一次 POST 就把包和报告
     // 一起交回，所以这一格拦不住靠协议、只能靠界面自己：CLI 那侧没人拦得住，面板至少要让
     // 「随手把整库外发」停一步。八个类型下拉、六个跳过原因都只许是 src/share.js 的投影，
@@ -6565,7 +6565,7 @@ window.__ModuleLoader__.load({
         err && h("div", { className: "mneme-featsubhint", style: { color: "var(--mneme-danger)", marginTop: 8 } }, err),
         tooLarge && h("div", { className: "mneme-featsubhint", style: { color: "var(--mneme-warn)", marginTop: 8 } },
           // 提示语服务端给（SHARE_ERROR_HINT 只许有一份），面板只补自己那句字节数。
-          // 它写着 --type/--tag 的 CLI 口吻，这一格已知：docs/SHARE.md 车道 D 那节记着。
+          // 它写着 --type/--tag 的 CLI 口吻，这一格已知：docs/SHARE.md 的『面板』那一节记着。
           `${t("memory.explorer.shareTooLarge")
             .replace("{bytes}", String(tooLarge.bytes ?? "?"))
             .replace("{limit}", String(tooLarge.limitBytes ?? "?"))} ${tooLarge.hint || ""}`),

@@ -4,9 +4,10 @@
 
 把本机记忆打成一个可外发的 JSON 包，发给同样装着 dsh-mneme 的人。包只含活跃行，
 `agent_scope` / `workspace_scope` 与本机 home 前缀一律不进包，命中密钥/PII 的行
-**整条不进**（不打码）。出包与收包两张脸现在都在：`share` 打、`receive` 吃、
-`undo-share` 按 `pack_id` 整包收回（车道 C）。缺的只剩面板按钮（车道 D）——今天这三步
-全部走 CLI 或两张 HTTP 面。
+**整条不进**（不打码）。出包与收包两张脸都在：`share` 打、`receive` 吃、
+`undo-share` 按 `pack_id` 整包收回（车道 C），面板上有同一批三件事的按钮（车道 D，见下面
+「面板」那一节）。两条路做的是同一批三件事——出包 / 入库 / 整包退出——吃的是同一套服务端判据：
+判序、水位、入包闸门与 `dry_run` 口径一条都不在界面里复述，界面只投影服务端给的读数。
 
 ## 用法
 
@@ -43,7 +44,8 @@ body 送上去——服务端永远看不到路径，也就不需要任何文件
 
 同一个动作有两张皮：宿主内面板面是 `POST /api/dsh-mneme/share`（`policy: token`，与 `/export` 同门；
 成功时多带一个 `Content-Disposition`——那是**挂在 POST 响应上的下载答复**，落盘要有一个客户端真的去发
-这一枪；面板上那个按钮还没做，见下面「已知还没做」），数据面是 `POST /share`（Bearer）。
+这一枪；发这一枪的就是面板「分享记忆包…」弹层里那颗「下载包文件」，它只在报告摆上屏之后出现（见下面
+「面板」那一节），文件名以这一格为准、面板不自己拼第二套日期命名），数据面是 `POST /share`（Bearer）。
 解析与答复只有一份（`src/share-http.js`）。#411 那条「两张皮只许剩鉴权与路径不同」在这里要按字面补一句：
 **实际允许的差异是三处**——鉴权、路径，加上宿主内侧那一个 `Content-Disposition`（两侧 `sendJson` 签名不同，
 只有面板侧有 headers 第四参，所以文件名在它那里拼，共用层只回 `{status, body}`）。除这三处之外不许再长出
@@ -62,6 +64,43 @@ body 送上去——服务端永远看不到路径，也就不需要任何文件
 两面各自还留一道 `.catch`（#410 的形状——链上没人返回 promise，输不掉就一个字节都不回）。
 错误码 → 状态码的映射也只有一份（`SHARE_IMPORT_ERRORS`），码集从 `validateSharePack` 的源码
 静态锁出来，新增码没登记会当场转红而不是静默回 500。
+
+### 面板（车道 D）
+
+不想开命令行的人在记忆面板的「⋯」菜单里做同样三步：**分享记忆包…** / **导入分享包…** / 外来区筛选。
+判据一律住在服务端——出包在 `src/share.js`、入包闸门在 `src/share-import.js`、协议层在
+`src/share-http.js`——界面只投影读数，一条都不复述（#411 口径）。三面都在 `lib/client.js`，
+锁是**静态源锁**（`test/client-share.test.js` / `test/share-foreign-rows.test.js`），
+本仓库没有可跑的宿主壳，所以下面写的是代码形状 + 服务端读数，不是「浏览器里看过」。
+
+- **分享**：填别名（可空）、可选「只发这一类」，点「生成」。**报告先于下载**——进包条数、
+  同键折叠数、六个跳过原因的计数、可展开的跳过清单都摆上屏之后，才出现「下载包文件」那颗键。
+  `included` 是**实际发出**的条数，够格进包的是 `included + deduped` 两个数同屏（包内折叠，
+  见下面「`report` 只有四个键」那段）。超 3 MiB 水位时服务端回 413，面板显示同样的报告 +
+  字节数 + 那句提示；那句提示是 `--type`/`--tag` 的 CLI 口吻（`src/share-http.js` 的
+  `SHARE_ERROR_HINT` 只许有一份，面板不改写），按 tag 分批仍只能在命令行做（见文末
+  「车道 D 留下的两格已知代价」第二条）。`included` 为 0 时不给下载——那种包对面吃的是
+  `empty-pack`（400），屏上换成那句「没有够格外发的条目，包是空的」。
+- **接收**：选包文件 → 先干跑（body 不带 `confirm`）→ 看「将新建 N 条 / 已在库中 M 条 /
+  正文相同 U 条 / 撞名 K 条」→ 点「确认导入」才写库。**确认那颗键在拿到预览之前是灰的**。
+  「写进去了」这句只由答复的 `dry_run` 说，不按按钮状态推；确认那一发如果仍回干跑，屏上是
+  「没有写库：这一枪仍是干跑」那句自己的话，而不是把预览重画一遍当作没发生。撞名是 advisory 读数
+  （只对「本轮真正会新建的那些」判过），所以清单为空不等于「没有冲突」——同一屏下面那行
+  「包内 N 条」是服务端给的 `conflicts_checked`，它是**包里的条数**而不是「比过的条数」，
+  上一行为什么可能沉默，读的就是这个数。
+- **外来区**：工具条「外来」chip 走服务端的 `source=imported` 精确筛选，**只管浏览态**：
+  有搜索词时这颗键不许被开启（已经开着的话永远许关掉，不把她锁在一个解不开的状态里），
+  并且带一行看得见的说明，不只挂在 `title` 上——搜索结果里没有可用的来源读数，理由见文末
+  已知代价第一条。行上是 `from-<别名>` 徽标（读数就是 `importedTagFor` 打的那条标签，库里没有
+  单独的别名列；本机行手工打的 `from-x` 不算外来行，判据先认 `source`）。抽屉里显示所属
+  `pack_id` 并给「收起这个包」，**两段**：先干跑清点条数（并列出 `sample` 里前 20 条样例标题，
+  让人核对「要收起的到底是哪一批」；`deleted` 才是全量，两个数并发下可以差一条，谁也不是对方的
+  依据），再确认**物删**（不归档的理由见下面「整包退出」那段）。清点回 `deleted = 0` 时说的是
+  「这个包在本库里已经没有行了」，不给一颗「确认删除 0 条」的键；确认那一发同样只认答复的
+  `dry_run`，回干跑时说「没有删除：这一枪仍是干跑」。已知不对称：搜索态的行不带 `pack_id`
+  （`/search` 的 DTO 不含这一格），所以搜索态按不了撤销、徽标也不出现，绕法是清掉搜索词回浏览态。
+  入库是逐条查 + 逐条写（实测 494 µs/条，单批 1,315 条真导入 734 ms），所以预览与确认两发都挂
+  `busy`；抽屉那两发（清点与确认）挂的是自己的 `undoBusy`，只把键按灰而不说在忙，看起来就像没反应。
 
 ## 装什么、不装什么
 
@@ -161,9 +200,9 @@ embedder 时错误被 fire-and-forget 自己吞掉；两种情况下这批行都
 文档而不是改代码。
 
 **怎么查、怎么补**（读数住在向量那一面，不在收侧答复里）：查 `service.embeddedCount()`
-（`src/service.js:2691`）或宿主状态面 `GET /api/dsh-mneme/semantic`（`src/api.js:1076`：
+（`src/service.js:2691`）或宿主状态面 `GET /api/dsh-mneme/semantic`（`src/api.js:1085`：
 `coverage.embedded / total`、`reason: "no-embedder"`、`degraded`）；补的入口是
-`POST /api/dsh-mneme/vector-reindex`（`src/api.js:1044`，`policy: token`，缺向量的行重嵌；
+`POST /api/dsh-mneme/vector-reindex`（`src/api.js:1053`，`policy: token`，缺向量的行重嵌；
 没配 embedder 时它回 `error: "vector-unavailable"` 而不是静默 0）。这两格都在**宿主内侧**，
 CLI 走的那条 Bearer 数据面上没有对应路由（`src/api-standalone.js` 无 `/semantic`、无
 `/vector-reindex`，`dsh-mneme status` 也不报覆盖度）——只会用命令行的收件人要确认向量，
@@ -172,9 +211,10 @@ CLI 走的那条 Bearer 数据面上没有对应路由（`src/api-standalone.js`
 **信任边界（今天仍然成立的一句）**：接收侧**不跑 `scanSensitive`**，进库内容的敏感判定只由发件人
 那一次扫描决定；`writeAdmission` 的第 1 级确定性判据同样不跑——它挂在 `saveWithDedupe` 的汇流口
 （`src/service.js:1487`），而这条路走的是 `store.save`。这不是漏，是这一刀的口径：出包侧的判据管
-「这份东西该不该离开我」，收侧替对面重扫一遍等于替收件人决定他愿意吃进什么，而那件事面板按钮
-（车道 D）与 `undo-share` 都已经留了人类的位置。实践含义只有一句：**只吃你信任的人发来的包**，
-吃进去之后唯一的整包退路是 `undo-share`。
+「这份东西该不该离开我」，收侧替对面重扫一遍等于替收件人决定他愿意吃进什么，而那件事面板的
+「收起这个包」与 `undo-share` 都留了人类的位置。实践含义只有一句：**只吃你信任的人发来的包**，
+吃进去之后唯一的整包退路是 `undo-share` 那条路（面板的「收起这个包」按下的就是同一发
+`POST /api/dsh-mneme/receive/undo`，见上面「面板」那一节，不是第二条退路）。
 
 **同一条边界上有一处残留，没人消掉它，这里如实登记：`content_hash` 是遮之前的锚**。上面那句管的是
 「内容本身敏不敏感」，这一格管的是**已经遮掉的那几个字能不能被验证**。包里每行的 `content_hash` 是
@@ -295,7 +335,7 @@ spec §12 等的三个数，读出来都是「口径成立」：
 - **每条耗时在大包与单批之间基本持平**（494 对 558 µs/条），没看出平方项：整库规模的 receive
   落在秒级，分批不会更快，分批只解决水位。
 - **幂等重跑不是免费的**：`created = 0` 那一遍仍要 763 ms。给人按的按钮旁边要有 loading，
-  这条是给车道 D 的账。
+  车道 D 的预览与确认两发都挂 `busy`，见上面「面板」那一节。
 - **分批是发件侧的事，不是收件侧的**：4.34 MiB 的整库包在源头就被 3 MiB 水位拒了，
   上面那格导入耗时是把 `buildSharePack` 直接产出的包喂给 `importSharePack` 的**进程内**读数，
   它比任何一次真实网络传输都大——真实场景一次吃进来的是单 type 那一格（1,315 条 ≈ 0.7 s）。
@@ -370,7 +410,7 @@ spec §12 等的三个数，读出来都是「口径成立」：
 （`src/document.js:250`：`payload?.source ?? "tool"`），所以「document 行不可能是外来行」靠的是
 **没有哪条路把 `imported` 喂进 `saveDocument`**——今天确实没有（外来身份只由收侧那一处 `store.save` 铸造），
 但它是纪律加出口形状，不是结构锁，与下面那节 `source` 列「在 SET 白名单里、靠纪律」的口径同一类。
-面板与数据面的 `PATCH`（`src/api.js:811-812`：`service.update` 在 `:811`、`setArchived` 在 `:812`）
+面板与数据面的 `PATCH`（`src/api.js:820-821`：`service.update` 在 `:820`、`setArchived` 在 `:821`）
 则**刻意不在**本契约之内：改正文与翻归档位
 都是人按下的一次动作，人在自己的库里看得见这行就动得它——契约管的是自动动作，
 不是「任何人都不许碰」。
@@ -416,22 +456,52 @@ spec §12 等的三个数，读出来都是「口径成立」：
 
 ## 已知还没做
 
-**面板（车道 D）三件**：分享弹层、接收弹层（含干跑预览）、外来区筛选与「收起这个包」。
-今天这三步都没有面板按钮，入口只有 CLI 与两张 HTTP 面。**出包侧已经备好的是「下载答复」而不是
-「下载入口」**：面板路由 `/share` 在 200 时带上 `Content-Disposition`（`src/api.js:1498-1501`，文件名
-由 `pack_id` 拼），这一格今天就在路由层——但它挂在**一条 POST 的响应**上，而没有任何按钮去发这一枪。
-所以这句话不许读成「已经有一条能点的下载路径」：客户端要先自己 POST 到那条路由，才轮得到浏览器落盘；
-按得动的那颗键属于车道 D。收与撤连这一条都没有：两面都不出 `Content-Disposition`，浏览器形态的
-客户端在它们那里只能拿到 JSON。车道 D 落地时要一起清的三笔账：
+**面板已落地（车道 D）**：分享弹层（报告先于下载）、接收弹层（干跑先于确认）、外来区筛选 + 来源徽标 +
+抽屉「收起这个包」都在 `lib/client.js`，用法与形状见上面「面板」那一节；本段只记收口——三笔账怎么闭的、
+这一车道留下哪两格代价。旧话里「只有下载答复、没有下载入口」那一半现在反过来了：`Content-Disposition`
+仍然只长在宿主内侧那一条 POST 的响应上（`src/api.js:1507-1510`，文件名由 `src/share-http.js` 的
+`shareFilename` 拼），而**发这一枪的客户端已经存在**——分享弹层那颗「下载包文件」按 `included > 0`
+自门控，报告没摆上屏就没有那颗键。收与撤两面照旧不出 `Content-Disposition`：没有要浏览器落盘的东西。
 
-1. **`included` 不等于「够格进包的条数」**：`included` 是实际发出的条数，`included + deduped`
-   才是够格的行数（包内同键折叠，见上面「`report` 只有四个键」那段）。把前一个数标成「合格条数」
-   就是误读；两个数都已经在答复里，不需要新加字段。
-2. **读 `dry_run` 那一格，不要按按钮状态推**：干跑与真导入的答复同形状，区别只有
-   `withDryRun` 加的 `dry_run`。界面按「我有没有发 confirm」推断等于把「默认干跑」写进两处；
-   而 `confirm` 只认真值 `true`——缺省、`"true"`、`dryRun:false`、对象一律干跑。
-3. **`title_conflicts` 是 advisory 读数**：只对本轮真正会新建的条目判，重吃同一个包时恒空，
-   `conflicts_checked` 也不是「比过的条数」。文案不许写「现在没有冲突」。
+**落地时要一起清的三笔账——三条都闭了，各有一把锁**（都在 `test/client-share.test.js`，是静态源锁，
+不是浏览器里看过）：
+
+1. **`included` 不等于「够格进包的条数」——闭**：`included` 是实际发出的条数，`included + deduped`
+   才是够格的行数（包内同键折叠，见上面「`report` 只有四个键」那段），两个数同屏、不需要新加字段。
+   锁：`the report separates what shipped from what qualified`——钉的是源码里那个
+   `report.included + report.deduped` 与 `shareDeduped` 那一行真实的渲染点，把「合格条数」的标签
+   挪回 `included` 当场转红。
+2. **读 `dry_run` 那一格，不要按按钮状态推——闭**：干跑与真导入的答复同形状，区别只有 `withDryRun`
+   加的 `dry_run`；`confirm` 只认真值 `true`（缺省、`"true"`、`dryRun:false`、对象一律干跑）。
+   接收弹层与抽屉的撤销走同一个判据：确认那一发若仍回干跑，屏上说它自己那句（「没有写库：这一枪仍是
+   干跑」/「没有删除：这一枪仍是干跑」），不把预览重画一遍当作没发生。锁：
+   `the receive dialog reads dry_run instead of inferring from its own button`（钉那个三元式本身，
+   并反锁收侧那一发不许出现 `dryRun` 这个旋钮——`reclaim` 带它是合法形状，收侧只认 `confirm`）+
+   `the foreign badge and the withdraw action gate on server truth, not on guesswork`（撤的成功判据
+   只许是 `d.dry_run === false`，`confirm && d.dry_run === false` 那种「读我刚才点了哪颗键」的合取被
+   反锁掉；`deleted = 0` 那一格说的是「这个包在本库里已经没有行了」，不给一颗「确认删除 0 条」的键）。
+3. **`title_conflicts` 是 advisory 读数——闭**：只对本轮真正会新建的条目判，重吃同一个包时恒空，
+   `conflicts_checked` 是**包内条数**而不是「比过的条数」。屏上因此三件一起给：撞名清单（非空才出声）、
+   清单本身、下面那行「包内 N 条」当分母。锁：`the receive preview keeps the advisory reading honest`
+   ——它扫的是**非注释行**：警告允许写在注释里，绝对断言不允许出现在屏上（「现在没有冲突 / 没有撞名 /
+   无冲突」这类文案当场转红），同一条锁还钉着「确认那颗键在拿到预览之前 `disabled`」。
+
+**车道 D 留下的两格已知代价**（都是刻意的，不是漏做）：
+
+1. **搜索态三件都做不了（筛选、徽标、撤销）**：`pack_id` 只从 `/api/dsh-mneme/list` 的面板行下发
+   （`src/api.js` 那个 items 的 map），而 `/search` 的 DTO 里 `source` 是**召回渠道**
+   （`keyword`/`vector`/`bm25`，`src/service.js:939`）而不是行来源——`searchMemories` 给每条候选
+   盖上渠道时把 provenance 覆盖了，所以「这条是不是外来的」在那张 DTO 上读不出来。于是：外来 chip
+   有搜索词时不许被开启（已开着时永远许关掉，不把她锁在一个解不开的状态里；带一行看得见的说明，
+   不只挂在 `title` 上，不假装筛过）、`from-<别名>` 徽标在搜索态不出现、抽屉里也没有「收起这个包」。
+   绕法一律是**清掉搜索词回浏览态**。这两个事实——DTO 不带包号、`source` 是渠道名——由
+   `test/share-foreign-rows.test.js` 的第三条用例 `search DTO carries neither the pack id nor the
+   row's own source` 钉着。要真修的是召回侧那个字段的命名（它同时让搜索结果那张卡片脚上显示
+   `keyword` 而不是行来源——既存症状，本车道不动），那一刀牵动 `recall_runs` 的回执形状，
+   届时长出来的是第四个车道。
+2. **面板只做 `type` 分批，不做 `tag` 分批**：`tag` 是自由文本，错一个字母就静默发 0 条，而 413 的
+   提示语是服务端那一份（`SHARE_ERROR_HINT`），写着 `--type`/`--tag` 的 CLI 口吻。面板不改写它
+   （同一份错误文案只许有一份），所以那句话在面板里读起来像在指命令行。
 
 **CLI 人类可读答复里有两格到不了人眼前**：`bin/cli.mjs` 的 `failHttp` 只转 `hint` / `bytes` /
 `limitBytes`，所以 400 的 `detail`（闸门指到哪一格）与数据面 413 的 `limit`（入站 body 上限）
@@ -442,7 +512,11 @@ C10 刻意不改 `failHttp`：同一份错误文案只许有一份，补字段�
 **活体端到端还没跑过**：当前在跑的宿主实例加载的是比车道 A/B/C 更早的构建，`/share`、
 `/receive`、`/receive/undo` 在它那里都回 404。要等插件 relink 之后，在一次真实往返上把
 `share --dry-run` → 发文件给第二台机器 → `receive` → `undo-share` 走一遍；在此之前本文所有
-数字都是**进程内**读数，网络与鉴权那一档没有实测数。
+数字都是**进程内**读数，网络与鉴权那一档没有实测数。车道 D 的面板三件在这条账上**没有豁免**：
+它们发的是同一批宿主内路由（`/api/dsh-mneme/share`、`/api/dsh-mneme/receive`、
+`/api/dsh-mneme/receive/undo`），relink 之前按下去同样不通——本车道的锁全是**静态源锁**
+（`test/client-share.test.js` / `test/share-foreign-rows.test.js` 读的是 `lib/client.js` 的源码形状），
+没有任何一条是在浏览器里看过。
 
 ### 三条已申报并被接受的缺口（车道 C 收口时判为「不是缺陷，是边界」）
 
