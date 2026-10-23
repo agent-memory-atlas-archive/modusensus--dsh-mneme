@@ -83,6 +83,12 @@ const USAGE = `${CLI_NAME} —— DSH 记忆插件（@modusensus/dsh-mneme）外
                                --type/--tag     收窄到某几类/某个标签（超限分批用这两个）
                                --out <文件>     写出包文件；--dry-run 只报数不落盘
                                跳过归档/已遗忘/只读指针行/summary，密钥 PII 整条不进包
+  receive <包文件> [--apply]
+                               把对方 share 出来的包吃进自己的库（默认干跑，一个字都不写）
+                               外来行标 source=imported，不参与本机的巩固/降级，也不并入你的条目
+                               --apply 才真的写；重复吃同一个包不会多出第二份
+  undo-share <包文件> [--apply]
+                               按 pack_id 收起整包（物删：包还能重新导入，归档位会占住 UNIQUE）
 
 选项：
   --url <url>                  覆盖服务地址
@@ -741,7 +747,7 @@ function printShare(pack, { dryRun }) {
   // 的六个计数走全量——不写这句她会以为全场只跳了 50 条。
   if ((r.skip_list ?? []).length >= 50) console.log('    … 跳过清单已截断，计数仍为全量');
   if (dryRun) console.log(`  没写文件：加 --out <路径> 才会落盘`);
-  else console.log(`  发给对方即可，她用自己的 ${CLI_NAME} receive 吃进去（车道 C）`);
+  else console.log(`  发给对方即可，她用自己的 ${CLI_NAME} receive 吃进去`);
 }
 
 async function cmdShare(cfg, flags) {
@@ -779,6 +785,84 @@ async function cmdShare(cfg, flags) {
   // position 536（jq 同理）。落盘路径已在上面的 payload 里（file 键），这行只对
   // 人有用，就只给人看（同 cmdReclaim：json 模式打印完就结束）。
   if (!cfg.jsonMode) console.log(`  已写出: ${out}`);
+}
+
+// 入库面（车道 C）。包文件在**本地**读、把包内容整个送上去：服务端永远看不到路径，
+// 也就不需要任何文件系统权限——这是 receive 协议选「传包不传路径」的全部理由。
+// confirm 的脾气照 reclaim：缺省即干跑，写收件人的库（或物删整包）要 --apply 显式确认。
+async function cmdReceive(cfg, rest, flags) {
+  requireToken(cfg);
+  const file = rest[0];
+  if (!file) {
+    fail(cfg, `receive 需要包文件：${CLI_NAME} receive <包文件>（不带 --apply 只干跑，一个字都不写）`);
+  }
+  let pack;
+  try {
+    pack = JSON.parse(fs.readFileSync(expandHome(file), 'utf8'));
+  } catch (e) {
+    // 读坏/读不到都在发请求之前拒掉：半读出来的包发过去只会换回一个闸门错，
+    // 而那一格现场已经说不清是「文件本来就这样」还是「传输坏了」。
+    fail(cfg, `读不到包文件 ${file}：${String(e?.message ?? e)}\n包文件是对方 ${CLI_NAME} share --out 出来的那个 .json。`);
+  }
+  const applied = flagBool(flags, 'apply');
+  const body = { pack };
+  if (applied) body.confirm = true;
+  const data = await apiRequest(cfg, 'POST', '/receive', { body });
+  if (cfg.jsonMode) {
+    console.log(stringify(data));
+    return;
+  }
+  printReceive(data, { applied });
+  if (!applied) console.log('  没写库：确认数字之后加 --apply 真的导入');
+}
+
+// 撤销收的是**包文件**而不是裸 pack_id：让人抄 16 位十六进制去删自己库里的行，
+// 抄错一位就是「删了个没删成的包还自以为收掉了」。pack_id 就写在包文件第一层。
+async function cmdUndoShare(cfg, rest, flags) {
+  requireToken(cfg);
+  const file = rest[0];
+  if (!file) {
+    fail(cfg, `undo-share 需要当初那个包文件（pack_id 从文件里取）：${CLI_NAME} undo-share <包文件> [--apply]`);
+  }
+  let pack;
+  try {
+    pack = JSON.parse(fs.readFileSync(expandHome(file), 'utf8'));
+  } catch (e) {
+    fail(cfg, `读不到包文件 ${file}：${String(e?.message ?? e)}\n要的是当初 ${CLI_NAME} share --out 出来、发给对面那个 .json。`);
+  }
+  const packId = typeof pack?.pack_id === 'string' ? pack.pack_id : '';
+  if (!packId) {
+    fail(cfg, `这个文件里没有 pack_id，收起不了：${file}\nundo-share 收的是整包，编号就写在包文件的第一层，不用也不该手抄 16 位十六进制。`);
+  }
+  const applied = flagBool(flags, 'apply');
+  const body = { packId };
+  if (applied) body.confirm = true;
+  const data = await apiRequest(cfg, 'POST', '/receive/undo', { body });
+  if (cfg.jsonMode) {
+    console.log(stringify(data));
+    return;
+  }
+  printReceive({ ...data, created: data?.deleted, alias: '' }, { applied, undo: true });
+  if (!applied) console.log('  没删：确认条数之后加 --apply 真的收起这个包');
+}
+
+function printReceive(d, { applied, undo = false }) {
+  const conflicts = Array.isArray(d?.title_conflicts) ? d.title_conflicts : [];
+  console.log(`${undo ? (applied ? '已收起' : '将收起') : applied ? '已导入' : '干跑'}: ${d?.created ?? 0} 条` +
+    (d?.alias ? `  来自 ${d.alias}` : '') + (d?.skipped_existing ? `  已存在 ${d.skipped_existing}` : ''));
+  if (undo) {
+    // 服务端是物删不是归档（src/share-import.js 的 deleteSharePack）：这句话是 --apply
+    // 与人之间唯一的说明书，不许软化成「移除」。
+    console.log('  物删：这些行直接从库里带走，不是归档；包文件还在，重新 receive 一遍即可再来');
+  }
+  if (conflicts.length) {
+    // 撞名是 advisory 读数（src/share-import.js：只对本轮真正会新建的条目判），
+    // 所以这里只说「这几条要你看一眼」，永远不许说「除此之外没有别的撞名」。
+    console.log(`  撞名提醒：和你自己的条目同名 ${conflicts.length} 条（同类型同标题，不会被并入，需要你处置）：`);
+    for (const c of conflicts.slice(0, 10)) console.log(`    - [${c.type}] ${c.title}`);
+    if (conflicts.length > 10) console.log('    … 只列前 10 条');
+  }
+  for (const s of (Array.isArray(d?.sample) ? d.sample : []).slice(0, 10)) console.log(`    · [${s.type}] ${s.title}`);
 }
 
 /* ---------------------------------- 入口 ---------------------------------- */
@@ -820,6 +904,10 @@ async function main(argv) {
       return cmdReclaim(cfg, flags);
     case 'share':
       return cmdShare(cfg, flags);
+    case 'receive':
+      return cmdReceive(cfg, rest, flags);
+    case 'undo-share':
+      return cmdUndoShare(cfg, rest, flags);
     default:
       fail(cfg, `未知命令: ${cmd}\n运行 \`${CLI_NAME} --help\` 查看帮助。`);
   }
