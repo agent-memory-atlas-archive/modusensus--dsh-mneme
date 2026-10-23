@@ -1502,7 +1502,12 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
             return;
           }
           sendJson(res, out.status, out.body);
-        });
+        }).catch(() => sendJson(res, 500, { error: "internal" }));
+        // .catch 与下面的外层 try 各挡一类：外层那个只包得住同步那半，而 readBody 的回调
+        // 抛出时它早已退栈。共用层从不抛（连 warn 自己坏都被守卫吞掉），所以这条链现在能被
+        // 走到的只剩**面自己**写答复那一步——sendJson 的 writeHead 在真 socket 上会因
+        // 「一个响应两写」抛 ERR_HTTP_HEADERS_SENT。少这一声就是 unhandled rejection +
+        // 一个字节都没回（#410），而下面 /receive 两条一直带着它。
       } catch {
         sendJson(res, 500, { error: "internal" });
       }

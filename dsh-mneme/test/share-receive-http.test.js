@@ -204,6 +204,41 @@ test("an unexpected throw is logged and answered as internal", () => {
   assert.equal(undoReply({ service: boom("x"), packId: PACK_ID }).status, 500);
 });
 
+test("a warn that throws is the layer's problem, not the surface's", () => {
+  // 「这一层从不抛」必须是**层的契约**，不是每个调用面的运气（C5 评审裁定）：日志那一环
+  // 自己坏时，已经算好的 500 不许跟着一起漏出去——从 catch 块里再抛出去就是没人接的
+  // rejection，对面拿到的不是 500 而是「一个字节都没回」（#410 的原始形态）。
+  // 出包那侧的 shareReply 过去是裸调，本条同时把三个构造器钉成同一种脾气：不对称的地方
+  // 就是下一个读者会照抄的那一处。
+  const boom = (message) => ({
+    importSharePack: () => { throw new Error(message); },
+    deleteSharePack: () => { throw new Error(message); }
+  });
+  const screaming = () => { throw new Error("log sink on fire"); };
+  assert.deepEqual(receiveReply({ service: boom("database is locked"), pack: goodPack(), dryRun: false, warn: screaming }),
+    { status: 500, body: { error: "internal" } }, "日志环坏了也要把 500 交出去");
+  assert.deepEqual(undoReply({ service: boom("disk i/o error"), packId: PACK_ID, dryRun: false, warn: screaming }),
+    { status: 500, body: { error: "internal" } });
+  // 认得出的码那一支也要走同一把守卫：它不记日志，但「构造器从不抛」不分工况。
+  const coded = () => {
+    const e = new Error("x");
+    e.code = "invalid-kind";
+    throw e;
+  };
+  assert.deepEqual(receiveReply({ service: { importSharePack: coded }, pack: goodPack(), dryRun: false, warn: screaming }),
+    { status: 400, body: { error: "invalid-kind" } });
+});
+
+test("the shared layer guards warn exactly once, for all three builders", () => {
+  // 静态锁，盯的是**对称**而不是某一处实现：本层只许出现一次裸的 warn 调用（就在守卫
+  // 函数体里），三个构造器各自都必须经守卫调用它。将来谁加第四个构造器时裸写 warn，
+  // 或者把某一侧的守卫「优化」掉，这条会红——而 behavioural 的用例只会告诉它「反正
+  // 面板有 .catch 兜着」，那是把层的契约推给面。
+  const layer = src("share-http.js");
+  assert.equal((layer.match(/warn\?\.\(/g) ?? []).length, 1, "裸的 warn?.( 只许住在守卫里");
+  assert.equal((layer.match(/warnSafely\(/g) ?? []).length, 4, "一处定义 + shareReply / receiveReply / undoReply 三处调用");
+});
+
 test("undo takes a pack_id and answers the same shape", () => {
   // 顶层形状与「有没有 id」是两个错，与 receive 侧同一口径（invalid-json /
   // invalid-body / 缺字段），三个码让对面分得清是自己发坏了还是没填。
@@ -240,15 +275,24 @@ test("undo takes a pack_id and answers the same shape", () => {
 // --- 面板路由层 ---------------------------------------------------------------
 
 class FakeRes extends EventEmitter {
-  constructor() {
+  constructor({ failFirstHead = false } = {}) {
     super();
     this.statusCode = 0;
     this.body = "";
     // writeHead 计数：双写响应的故障形态是「第二次 writeHead 盖掉第一次的状态码」，
     // 只看最终 statusCode 抓不住（413 之后又被 400 盖掉时 body 也换了），要数次数。
     this.heads = 0;
+    // 一次性坏掉的 sink：真 socket 上「一个响应两写」的现场形态就是第二次 writeHead 抛
+    // ERR_HTTP_HEADERS_SENT（Node 在 writeHead 里就把头发出去了）。这里让第一次抛、第二次
+    // 正常，为的是把「promise 链上的错误有没有人接住」这件事单独问出来——它不计数，那一次
+    // 什么都没写出去。
+    this.failFirstHead = failFirstHead;
   }
   writeHead(code) {
+    if (this.failFirstHead) {
+      this.failFirstHead = false;
+      throw new Error("sink on fire");
+    }
     this.statusCode = code;
     this.heads += 1;
     return this;
@@ -298,12 +342,23 @@ function receiveReq({ method = "POST", url = RECEIVE_PATH, body = "", authorized
 }
 
 async function call(route, opts = {}) {
-  const res = new FakeRes();
-  await route.handler(receiveReq(opts), res);
+  const { failFirstHead = false, ...request } = opts;
+  const res = new FakeRes({ failFirstHead });
+  // 把 rejection 收成读数而不是让它冒出去：面板 handler 的形状是
+  // `try { return readBody(...).then(...) } catch`，外层 try 在 .then 的回调里早已退栈，
+  // 回调里抛出（或哪天 .catch 被删）时这里拿到的是一条看不懂的原始错误。收成字段后断言
+  // 才说得出「回调里的错没人接 = 一个字节都没回」（#410）。
+  let rejection = null;
+  try {
+    await route.handler(receiveReq(request), res);
+  } catch (error) {
+    rejection = String(error);
+  }
   return {
     status: res.statusCode,
     body: res.body ? JSON.parse(res.body) : null,
-    heads: res.heads
+    heads: res.heads,
+    rejection
   };
 }
 
@@ -438,9 +493,10 @@ test("the receive routes answer the gate's code, a logged 500, and unavailable",
 });
 
 test("a logger that throws on the 500 path still gets exactly one reply", async () => {
-  // .catch 不是装饰：共用层兜住 service 的抛错之后还要调一次 warn，而宿主 logger 自己可能
-  // 就是坏的那一环。它抛出来时回调已经在外层 try 之外（那次 try 早退栈了），没接住就是
-  // unhandled rejection + 「一个字节都没回」（#410 的原始形态）。这一条锁的就是那一声 500。
+  // 这一条问的是**端到端**：日志那一环坏掉时，宿主这张脸仍须恰好回一次 500。
+  // C6 把守卫还回共用层（warnSafely）之后，它不再顺带证明面板的 .catch——回调里根本
+  // 不会再抛出来了。.catch 由下面那条「sink 自己坏」的用例单独咬（那是它唯一还能被
+  // 走到的路径），两层各挡一类，谁都不是装饰。
   const s = receiveSetup("secret-token", { logger: { warn: () => { throw new Error("log sink on fire"); } } });
   try {
     s.service.importSharePack = () => { throw new Error("database is locked"); };
@@ -453,6 +509,35 @@ test("a logger that throws on the 500 path still gets exactly one reply", async 
       assert.equal(out.heads, 1, `${path} 日志故障也只许写一次响应`);
       assert.equal(out.status, 500, `${path} 日志故障不许把答复一起带走`);
       assert.deepEqual(out.body, { error: "internal" });
+      assert.equal(out.rejection, null, `${path} 的 promise 链不该把错误漏给调用方`);
+    }
+    assert.equal(rowsOf(s.store).length, 0);
+  } finally { s.close(); }
+});
+
+test("a sink that fails mid-write is caught by the chain's own .catch", async () => {
+  // 共用层现在从不抛，日志也被守卫包住，所以 .catch 唯一还能被走到的路径是**面自己**
+  // 在写出答复时抛：sendJson 先 writeHead 再 end(JSON.stringify(...))，真 socket 上
+  // 「一个响应两写」的第二次 writeHead 就抛在这里（Node 的 writeHead 当场把头发出去，
+  // 所以第二次写会撞上 ERR_HTTP_HEADERS_SENT）。这类抛错发生在 .then 的回调里，外层那个
+  // 同步 try 早已退栈——没有 .catch 就是一个没人接的 rejection、客户端一个字节都收不到
+  // （#410）。C5 的第 13 条不再能咬它，这条是它独立的锁。
+  const s = receiveSetup();
+  try {
+    const receive = receiveRoute(s, RECEIVE_PATH);
+    const undo = receiveRoute(s, UNDO_PATH);
+    // 两条都走干跑：这条用例问的只有「答复阶段抛出的错谁接」，不想把「写已经落了、
+    // 回给对面却失败」这件事混进同一句断言里（那是 C7 CLI 重入时要面对的另一种形状）。
+    const cases = [
+      [receive, RECEIVE_PATH, JSON.stringify({ pack: goodPack() })],
+      [undo, UNDO_PATH, JSON.stringify({ packId: PACK_ID })]
+    ];
+    for (const [route, path, body] of cases) {
+      const out = await call(route, { url: path, body, failFirstHead: true });
+      assert.equal(out.rejection, null, `${path} 回调里抛出的错必须由 .catch 接住`);
+      assert.equal(out.status, 500, `${path} sink 坏了也要把答复交出去`);
+      assert.deepEqual(out.body, { error: "internal" });
+      assert.equal(out.heads, 1, "第一次 writeHead 抛的那一次什么都没写出去，成功的只许有一次");
     }
     assert.equal(rowsOf(s.store).length, 0);
   } finally { s.close(); }

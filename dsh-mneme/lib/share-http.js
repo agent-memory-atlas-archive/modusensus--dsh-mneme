@@ -11,6 +11,24 @@ import { buildSharePack } from "./share.js";
 const SHARE_ERROR_HINT = "包体超过分享水位：用 --type 或 --tag 分批，别整库外发。";
 
 /**
+ * 记日志这一手，只许经这里。
+ *
+ * 「这一层从不抛」是**层的契约**，不是每个调用面的运气（C5 评审裁定）：warn 裸调时，宿主
+ * logger 自己坏掉就会从 catch 块里再抛出去，而两侧 handler 那个外层 try 在 .then 的回调里
+ * 早已退栈——现场就是「一个字节都没回」（#410）。守卫住在面上一处一个，等于每接一张新脸
+ * 都要记得再兜一次；住在层里，两侧、以及后面的 CLI（C7）拿到的都是同一个脾气。
+ *
+ * 三个构造器（shareReply / receiveReply / undoReply）都走这里，**对称本身就是要点**：
+ * 只给新加的两个上守卫、出包那侧留一处裸调，下一个读者就会照那处裸的抄。
+ * 日志环坏掉时答复照旧送出——对面拿到的仍是那一个状态码，只是少了一条日志迹。
+ */
+function warnSafely(warn, message) {
+  try {
+    warn?.(message);
+  } catch { /* 记日志是自己的事，坏了的日志不许把已经算好的答复一起带走 */ }
+}
+
+/**
  * 解析 POST body（已由调用方读成文本）→ buildSharePack 的入参集合。
  *
  * 空 body 等价于 `{}`：分享的主用法就是「一个字节都不发，按整库口径打」。坏 JSON 与
@@ -97,7 +115,7 @@ export function shareReply({ service, packageVersion, homeDir, now = () => new D
     return { status: 200, body: out.pack };
   } catch (error) {
     // 日志里留住原始文本（现场最难下手的就是「只回了 internal」那一类），对外只有一个码。
-    warn?.(`[dsh-mneme] share pack failed: ${String(error)}`);
+    warnSafely(warn, `[dsh-mneme] share pack failed: ${String(error)}`);
     return { status: 500, body: { error: "internal" } };
   }
 }
@@ -232,7 +250,7 @@ export function receiveReply({ service, pack, dryRun, warn = null }) {
       const detail = typeof error.detail === "string" && error.detail ? { detail: error.detail } : {};
       return { status, body: { error: code, ...detail } };
     }
-    warn?.(`[dsh-mneme] share import failed: ${String(error)}`);
+    warnSafely(warn, `[dsh-mneme] share import failed: ${String(error)}`);
     return { status: 500, body: { error: "internal" } };
   }
 }
@@ -257,7 +275,7 @@ export function undoReply({ service, packId, dryRun, warn = null }) {
   try {
     return { status: 200, body: withDryRun(service.deleteSharePack(packId, { dryRun: dry }), dry) };
   } catch (error) {
-    warn?.(`[dsh-mneme] share undo failed: ${String(error)}`);
+    warnSafely(warn, `[dsh-mneme] share undo failed: ${String(error)}`);
     return { status: 500, body: { error: "internal" } };
   }
 }

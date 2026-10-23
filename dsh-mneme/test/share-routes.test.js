@@ -29,7 +29,7 @@ const SHARE_PATH = "/api/dsh-mneme/share";
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 class FakeRes extends EventEmitter {
-  constructor() {
+  constructor({ failFirstHead = false } = {}) {
     super();
     this.statusCode = 0;
     this.body = "";
@@ -37,8 +37,17 @@ class FakeRes extends EventEmitter {
     // writeHead 计数：双写响应的故障形态是「第二次 writeHead 覆盖掉第一次的状态码」，
     // 只看最终 statusCode 抓不住（413 之后又被 200 盖掉时 body 也换了），要数次数。
     this.heads = 0;
+    // 一次性坏掉的 sink：真 socket 上「一个响应两写」的现场形态就是第二次 writeHead 抛
+    // ERR_HTTP_HEADERS_SENT（Node 的 writeHead 当场把头发出去）。这里让第一次抛、第二次
+    // 正常，好把「promise 链上的错误到底有没有人接」单独问出来；抛掉的那一次不计数，
+    // 因为它一个字节都没写出去。
+    this.failFirstHead = failFirstHead;
   }
   writeHead(code, headers) {
+    if (this.failFirstHead) {
+      this.failFirstHead = false;
+      throw new Error("sink on fire");
+    }
     this.statusCode = code;
     this.headers = headers;
     this.heads += 1;
@@ -89,13 +98,21 @@ function shareReq({ method = "POST", url = SHARE_PATH, body = "", authorized = t
 }
 
 async function callShare(route, opts = {}) {
-  const res = new FakeRes();
-  await route.handler(shareReq(opts), res);
+  const res = new FakeRes({ failFirstHead: opts.failFirstHead === true });
+  let rejection = null;
+  try {
+    await route.handler(shareReq(opts), res);
+  } catch (error) {
+    // 把 rejection 收成读数而不是让它冒出去：少了 .catch 时这里就是 #410 的形状——
+    // 断言「rejection 必须为 null」比让用例以一个看不懂的异常挂掉说得清得多。
+    rejection = String(error);
+  }
   return {
     status: res.statusCode,
     body: res.body ? JSON.parse(res.body) : null,
     headers: res.headers,
-    heads: res.heads
+    heads: res.heads,
+    rejection
   };
 }
 
@@ -197,6 +214,25 @@ test("a throwing pack build answers 500 and leaves a log line", async () => {
     assert.deepEqual(out.body, { error: "internal" }, "对外只有一个码，不带原始错误文本");
     assert.match(warnings.join(" "), /share pack failed/);
     assert.match(warnings.join(" "), /database is locked/, "原始错误文本要留在日志里");
+  } finally { s.close(); }
+});
+
+test("the panel /share chain answers once when the sink fails mid-write", async () => {
+  // 车道 A 的这条路由只有外层 try，而外层 try 在 .then 的回调里早已退栈：回调里抛出的错
+  // （这里是 sendJson 的 writeHead 抛——真 socket 上「一个响应两写」的第二次就是这个形状）
+  // 没人接，就是一个 unhandled rejection 加「一个字节都没回」（#410）。数据面的同名路由
+  // （本文件末尾）一直带着那一声 .catch，两条皮在这里本该只差鉴权与路径（#411），
+  // 所以补的是面板这一侧。C6 之后 warn 已被共用层守卫包住，日志坏掉那条路走不到这里，
+  // 这个 sink 形状是 .catch 唯一还能被独立问到的入口。
+  const s = shareSetup();
+  try {
+    const route = shareRoute(s);
+    s.store.save({ type: "decision", title: "选 SQLite", content: "正文 here", tags: [] });
+    const out = await callShare(route, { body: "", failFirstHead: true });
+    assert.equal(out.rejection, null, "回调里抛出的错必须由链上的 .catch 接住");
+    assert.equal(out.status, 500, "sink 坏了也要把答复交出去");
+    assert.deepEqual(out.body, { error: "internal" });
+    assert.equal(out.heads, 1, "抛掉的那一次没写出去，成功的只许有一次");
   } finally { s.close(); }
 });
 

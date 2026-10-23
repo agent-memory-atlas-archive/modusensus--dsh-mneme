@@ -112,6 +112,13 @@ test("a throwing row read answers 500 with a log line instead of leaking out as 
   assert.match(warned.join(" "), /share pack failed/);
   assert.match(warned.join(" "), /database is locked/, "原始错误文本要留在日志里，否则现场无从下手");
   assert.equal(shareReply({ ...baseArgs, service: boom, options: {} }).status, 500, "没有 logger 也不许把异常漏出去");
+  // 日志那一环自己是坏的那一环时也一样：这一层的契约是「从不抛」，不是「看调用面有没有
+  // .catch」。C6 之前这里是裸调 warn，出包侧的面板路由（车道 A）恰好就少了那一声 .catch，
+  // 于是宿主 logger 一抛就成了没人接的 rejection（#410 的形态）。守卫还回层里之后，
+  // 三个构造器同一脾气——对称是要点，见 test/share-receive-http.test.js 的那条静态锁。
+  const screaming = () => { throw new Error("log sink on fire"); };
+  assert.deepEqual(shareReply({ ...baseArgs, service: boom, options: {}, warn: screaming }),
+    { status: 500, body: { error: "internal" } }, "warn 自己抛时仍须把已经算好的 500 交出去");
 });
 
 test("the share literals live in the share modules only", () => {
