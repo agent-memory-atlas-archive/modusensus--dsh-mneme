@@ -769,7 +769,11 @@ test("the receive dialog reads dry_run instead of inferring from its own button"
 test("the receive preview keeps the advisory reading honest", () => {
   assert.ok(clientSource.includes("d.title_conflicts"), "撞名清单要显示");
   assert.ok(clientSource.includes('"memory.explorer.receiveConflicts"'));
-  assert.equal(/现在没有冲突|没有撞名|无冲突|no conflicts|no title clashes/i.test(clientSource), false,
+  // 钉的是**文案**而不是注释：解释性的话必须能写「这不等于没有冲突」来提醒读者，连注释一起
+  // ban 等于把警告本身禁掉（本轮实装时撞上过：新注释里的「没有撞名」先红的是这条锁）。
+  // 真正会伤人的是屏上那一句，所以只扫非注释行。
+  const copyLines = clientSource.split("\n").filter((line) => !/^\s*\/\//.test(line)).join("\n");
+  assert.equal(/现在没有冲突|没有撞名|无冲突|no conflicts|no title clashes/i.test(copyLines), false,
     "不许出现「没有冲突」这类绝对断言（清单为空只说明本轮没有新的要报）");
   // 先预览才允许确认：干跑是必经的一站，不是可选装饰。
   assert.ok(clientSource.includes("disabled: busy || !preview"),
@@ -880,7 +884,7 @@ en，紧跟 D2 插入的 `"memory.explorer.shareDownload": "Download pack file",
         conflicts.length > 0 && h("div", { className: "mneme-sharelist" },
           conflicts.map((c, i) => h("div", { key: `${c.type}-${i}`, className: "mneme-sharow" },
             h("span", { className: "mneme-sharowtitle" }, c.title || ""),
-            h("span", { className: "mneme-sharowreason" }, typeLabel(t, c.type)))),
+            h("span", { className: "mneme-sharowreason" }, typeLabel(t, c.type))))),
         // `conflicts_checked` 是服务端给的**包内条数**，不是「比过了几条」（同一处注释写明：
         // 第二次吃同一个包时 title_conflicts 恒空，而这一格仍是全量）。所以文案只说
         // 「包内 N 条」：它是上一行为什么可能沉默的尺，不许读成「比对了 N 条都没撞」。
