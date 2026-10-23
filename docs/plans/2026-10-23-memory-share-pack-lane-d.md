@@ -39,10 +39,21 @@
    理由：超水位时最常用的切法是按类型（实测单 type 最大批 1.10 MiB，整库 4.34 MiB，见 `docs/SHARE.md` 的实测那节），`tag` 是自由文本、错填一个字母就「静默发 0 条」，值不值得为它做一套输入框另说。
    代价：按 tag 分批仍然只能用 `dsh-mneme share --tag …`。413 的提示文案（`SHARE_ERROR_HINT`，住在 `src/share-http.js:11`）**原样显示**——它写着 `--type`/`--tag`，是 CLI 口吻。不在面板里改写成第二套措辞，因为「同一份错误文案只许有一份」（`docs/SHARE.md:439` 已把这条纪律写明）。**这一格要在 `docs/SHARE.md` 里如实写清。**
 
-2. **「收起这个包」只在浏览态（含外来区筛选）按得动，搜索态按不了。**
-   理由：撤销按 `pack_id` 整批删，而 `pack_id` 只从 `/api/dsh-mneme/list` 的面板行下发（D1）；`/search` 的 DTO 走 `toApiList`，向量召回那一路的行集不带这一格。补它等于为了让按钮一致去改召回路径——代价与收益不成比例。
-   做法：抽屉里的撤销按钮**按 `memory.share_pack_id` 自门控**（与 `heat` 徽章、`doc_path` 入口同一做法：字段缺省 ⇒ 控件不出现）。D1 的测试把「search 不带这一格」也钉住，哪天有人补上，测试会红并逼他同改抽屉注释。
-   代价：她在搜索态看到一条外来记忆时，撤销要走「清掉搜索词 + 按『外来』筛选」那条路。写进 `docs/SHARE.md`。
+2. **外来区三件事都只在浏览态成立：筛选、徽标、整包退出。搜索态一样都做不了。**
+   理由（写计划时我以为只有第二条成立，D1 的实现者对着代码推翻了第一条——已核）：
+   `pack_id` 只从 `/api/dsh-mneme/list` 的面板行下发（D1）；而 `/search` 的 DTO 里
+   **`source` 根本不是行来源**——`service.searchMemories` 给每条候选盖上召回渠道
+   （`source: "keyword"|"vector"|"bm25"`，`src/service.js:939`、`:966`、`:974`），
+   `toApiList` 原样透出，于是「这条是不是外来的」在搜索结果里读不出来。
+   做法：筛选与撤销都挂在服务端真值上，读不出来就**明确不启用**——外来 chip 在有搜索词时
+   `disabled` 并给出自己的文案（不假装筛过），徽标按 `source === "imported"` 门控（搜索态自然
+   不出现），撤销按钮按 `memory.share_pack_id` 自门控（与 `heat` 徽章同一做法）。
+   D1 的第三条用例把这两个事实钉住：哪天有人把召回侧那个字段改名让开 `source`（那是另一刀，
+   牵动 `recall_runs` 的回执形状），那条会红，本条裁定届时要一起重看。
+   代价：她在搜索态看到一条外来记忆时，既筛不掉它也撤不掉它，得清掉搜索词回浏览态。
+   顺带记一笔**已知既存缺陷**（本车道不修）：搜索结果的卡片脚上那颗 `.mneme-cardsrc`
+   显示的是 `keyword`/`vector`/`bm25` 而不是行的来源——那是同一个覆盖形状的另一处症状。
+   代价写进 `docs/SHARE.md`，缺陷写进台账交给她判。
 
 3. **别名输入框 `maxLength: 27`，与服务端同一把尺。**
    理由：`importedTagFor`（`src/share.js`）把整串标签（含 `from-` 前缀）截到 `IMPORTED_TAG_MAX = 32`，不拦的话她打的第 28 个字起在**对面**被静默吃掉，而这条标签是外来行唯一的来源读数。
@@ -109,9 +120,12 @@
 //      面板的「外来」chip 直接吃这个参数，分页与计数不许各算一套；
 //   b) /list 的面板行在**有包号时**才带 share_pack_id，普通行不带这个键（不是 null）。
 //      这是抽屉「收起这个包」按钮的自门控依据，缺了它按钮就不该出现；
-//   c) /search 的 DTO **不带**这一格（向量召回那一路的行集不同）。这条看似多余，实际钉的
-//      是「搜索态按不了撤销」这个已知代价（docs/SHARE.md 的车道 D 那一节）。哪天有人给
-//      search 补上这一格，这条会红，逼他同改 lib/client.js 里 MemoryDrawer 的门控注释。
+//   c) /search 的 DTO **既不带** share_pack_id，它的 `source` 也**不是**行来源——
+//      service.searchMemories 给每条候选盖上召回渠道（`source: "keyword"|"vector"|"bm25"`，
+//      src/service.js:939/966/974），把行自己的 provenance 覆盖掉了，所以搜索态压根读不出
+//      「这条是不是外来的」。这一条锁住的是那个事实，不是待实现的功能，它同时是 D4 那条
+//      「外来 chip 只管浏览态」裁定的凭据。哪天有人把召回渠道改名让开 `source`（那是另一刀，
+//      牵动 recall_runs 的回执形状），这条会红，D4 的裁定届时要一起重看。
 // 扩展点住在 HTTP 层不是 toApiList：模型工具严格复用后者（src/service.js:2094），
 // archived/quality_score/heat 都在这同一处补，包号跟着走同一条路。
 import test from "node:test";
@@ -226,7 +240,7 @@ test("list puts share_pack_id on foreign panel rows and omits the key on own row
   } finally { h.close(); }
 });
 
-test("search DTO stays without share_pack_id（撤销按钮在搜索态自门控的前提）", async () => {
+test("search DTO carries neither the pack id nor the row's own source", async () => {
   const h = foreignSetup();
   try {
     foreignRow(h.store, "外来检索命中");
@@ -234,7 +248,11 @@ test("search DTO stays without share_pack_id（撤销按钮在搜索态自门控
     assert.equal(out.status, 200);
     assert.ok(out.data.items.length > 0, "关键词路径要能命中这条");
     assert.equal("share_pack_id" in out.data.items[0], false, "search 的 DTO 不带包号");
-    assert.equal(out.data.items[0].source, IMPORTED_SOURCE, "source 仍然在：搜索态的本地外来过滤靠它");
+    // 召回渠道把行的 provenance 盖掉了（src/service.js:939/966/974）：这一格在搜索态**不是**
+    // 行来源，所以「这条是不是外来的」在这张 DTO 上读不出来。D4 的外来 chip 因此只管浏览态。
+    // 别把这条断言当 bug 去「修」——它是那条裁定的凭据，真要修的是召回侧的字段命名。
+    assert.notEqual(out.data.items[0].source, IMPORTED_SOURCE,
+      "search 的 source 是召回渠道（keyword/vector/bm25），不是行来源");
   } finally { h.close(); }
 });
 ```
@@ -244,7 +262,7 @@ test("search DTO stays without share_pack_id（撤销按钮在搜索态自门控
 - [ ] **Step 2: 跑测试确认失败的原因正确**
 
 Run: `node --test test/share-foreign-rows.test.js`
-Expected: FAIL。前两条红在 `share_pack_id`（`undefined` 对 `0123456789abcdef` / `"share_pack_id" in ownRow` 为 `false` 但第一条已红），第三条**必须已经是绿的**（search 本来就不带这一格——它是「锁住现状」的守卫，不是待实现的功能）。若第三条也红，说明 `search` 的路径或 DTO 与本文件的假设不符，先读 `src/api.js` 的 search handler 再动手，不要改断言迁就。
+Expected: **只有第二条红**（`share_pack_id` 那个键还没有），第一条与第三条**本来就是绿的**——它们锁的是服务端已有的能力与既有的形状（`source=imported` 精确筛选、search 的 DTO 不带包号且 `source` 是召回渠道），是这条车道依赖的前提，不是待实现的功能。第一条若也红，先确认 `service.count` 是否真的吃了 `source`（`src/api.js:396`）；第三条若红，说明召回侧的字段形状变了，停下来报 NEEDS_CONTEXT，不要改断言迁就。
 
 - [ ] **Step 3: 实现——只改一处 map**
 
@@ -990,7 +1008,7 @@ git commit -m "feat(panel): receive dialog previews the pack before it writes th
 ### Task D4: 外来区（筛选 chip + 来源徽标 + 抽屉「收起这个包」）
 
 **Files:**
-- Modify: `lib/client.js`（字典两份 + `ForeignBadge` + CSS 一条 + `filterQS`/`visible`/chip + 卡片与时间线两处徽标 + `MemoryDrawer` 的 meta 行与动作区 + 父级 `onUndone`）
+- Modify: `lib/client.js`（字典两份 + `ForeignBadge` + CSS 一条 + `filterQS` + 外来 chip（只管浏览态，搜索态按下无效）+ 卡片与时间线两处徽标 + `MemoryDrawer` 的 meta 行与动作区 + 父级 `onUndone`。`visible` 那一行**不动**，理由在 Step 6）
 - Modify: `test/client-share.test.js`（追加两条锁）
 
 **Interfaces:**
@@ -1004,11 +1022,19 @@ git commit -m "feat(panel): receive dialog previews the pack before it writes th
 ```js
 // 外来区三件：筛选、来源徽标、整包退出。锁的是「每件事都挂在一个服务端真值上」，
 // 而不是挂在一个界面自己造出来的判断上。
-test("the foreign filter rides the server's exact source match in browse and the row's source in search", () => {
+test("the foreign filter is a browse-state server filter and stays inert while searching", () => {
   assert.ok(clientSource.includes('foreignOnly ? "&source=imported" : ""'),
     "浏览态交给服务端筛：分页与 total 同口径，本地筛会切掉尾巴");
-  assert.ok(clientSource.includes('(!foreignOnly || m.source === "imported")'),
-    "搜索态服务端不吃 source，只能本地过滤——搜索结果一次给全（不分页），本地过滤安全");
+  // **搜索态不做本地过滤**（本轮扫描改掉的裁定，不是漏做）：/search 那张 DTO 的 source 是
+  // 召回渠道（keyword/vector/bm25，src/service.js:939），行的 provenance 被盖掉，「这条是不是
+  // 外来的」在这张 DTO 上压根读不出来。宁可让 chip 在搜索态明确失效并说清原因，也不要按一个
+  // 假信号筛——test/share-foreign-rows.test.js 的第三条用例锁着这个事实。
+  assert.ok(clientSource.includes("disabled: !!query.trim()"),
+    "有搜索词时 chip 必须按下无效，而不是看起来生效却筛不动");
+  assert.ok(clientSource.includes('"memory.explorer.filterForeignSearchHint"'),
+    "失效要有自己的文案，不能只靠 disabled 让人猜");
+  assert.equal(clientSource.includes('(!foreignOnly || m.source'), false,
+    "不许退回「搜索态本地按 source 筛」那条假信号");
   // 服务端不吃 source 这件事，不许用「给 search 的 URL 也拼一个键」的方式绕过去：
   // 那条路由压根不读它（src/api.js 的 search handler 里没有 source 这一档），拼上去
   // 只会造出一个「看起来筛过了、其实没有」的形状。全文件只许有一处拼这个参数。
@@ -1050,6 +1076,7 @@ zh，紧跟 D3 的 `"memory.explorer.receiveStillDry": "没有写库：这一枪
 ```js
         "memory.explorer.filterForeign": "外来",
         "memory.explorer.filterForeignHint": "只看别人分享进来的记忆（source=imported）。这些行不参与本机的巩固、降级或整理。",
+        "memory.explorer.filterForeignSearchHint": "搜索时这一档不按：搜索结果里没有可用的来源读数。要看外来区请先清掉搜索词。",
         "memory.explorer.foreignBadge": "来自 {alias}",
         "memory.explorer.foreignPack": "所属分享包",
         "memory.explorer.undoPack": "收起这个包",
@@ -1064,6 +1091,7 @@ en，紧跟 D3 的 `"memory.explorer.receiveStillDry": "Nothing was written: tha
 ```js
         "memory.explorer.filterForeign": "Foreign",
         "memory.explorer.filterForeignHint": "Only rows shared in by someone else (source=imported). They never join this machine's consolidation, demotion or tidying.",
+        "memory.explorer.filterForeignSearchHint": "Not applied while searching: search results carry no usable provenance readout. Clear the query to browse the foreign area.",
         "memory.explorer.foreignBadge": "From {alias}",
         "memory.explorer.foreignPack": "Share pack",
         "memory.explorer.undoPack": "Withdraw this pack",
@@ -1091,6 +1119,9 @@ D2 那段 CSS 之后追加一行（`--mneme-ok` 与 `.mneme-saved` 同源，已�
      * 别名不单独存列：`importedTagFor` 打的那条 `from-<别名>` 标签就是唯一读数，
      * 所以这里只认标签，不猜别的来源。先判 `source === "imported"` 再判标签——
      * 一个人手工给自己的一条打了 from-x 不算外来行，徽标会把它误报成别人的。
+     * 搜索态不出现这个徽标，且这是对的：那张 DTO 的 source 是召回渠道（src/service.js:939），
+     * 判据在那一侧读不出来。不许为了让搜索结果显示徽标而改成「认标签就算」——那会把
+     * 手工标签误报成外来行，也是 memory-source.js 那条契约的反面。
      * from-shared 是空别名的中性值，照原样显示，不兜成「未知来源」。
      */
     const ForeignBadge = ({ m, t }) => {
@@ -1132,7 +1163,7 @@ D2 那段 CSS 之后追加一行（`--mneme-ok` 与 `.mneme-saved` 同源，已�
         + (foreignOnly ? "&source=imported" : "");
 ```
 
-`visible` 现在是（`:6489-6491`）
+`visible`（`:6489-6491`）**保持原样，一行都不改**：
 
 ```js
       const visible = remoteItems
@@ -1140,18 +1171,10 @@ D2 那段 CSS 之后追加一行（`--mneme-ok` 与 `.mneme-saved` 同源，已�
         : items;
 ```
 
-改成——
-
-```js
-      // 外来筛选在两种模式下走两条路：浏览态服务端已经过滤过（source=imported 是 /list
-      // 现成的精确匹配，与 total 同口径）；搜索态只能本地过滤——那条路由不吃 source，
-      // 而搜索结果一次给全、不分页，本地过滤不会切掉尾巴（test/client-share.test.js 钉着
-      // 「不许给 search 的 URL 拼 source」）。代价见 docs/SHARE.md：搜索态的行不带包号，
-      // 所以那里按不了「收起这个包」。
-      const visible = remoteItems
-        ? remoteItems.filter((m) => (type === "all" || m.type === type) && (!foreignOnly || m.source === "imported"))
-        : items;
-```
+理由（这条是本轮扫描改掉的裁定）：搜索态那张 DTO 的 `source` 是召回渠道而不是行来源
+（`src/service.js:939` 给每条候选盖 `source: "keyword"|"vector"|"bm25"`），按它筛等于按一个
+假信号筛——`m.source === "imported"` 在搜索结果里恒不成立，「外来 chip 亮着却筛空/筛不空」
+正是最难看的那种错。所以外来筛选只管**浏览态**，搜索态由那颗 chip 自己按下无效（Step 7）。
 
 - [ ] **Step 7: chip 与两处徽标**
 
@@ -1160,7 +1183,12 @@ D2 那段 CSS 之后追加一行（`--mneme-ok` 与 `.mneme-saved` 同源，已�
 ```js
                 h("button", {
                   className: foreignOnly ? "mneme-chip mneme-active" : "mneme-chip",
-                  title: t("memory.explorer.filterForeignHint"),
+                  // 搜索态按不动就明确让它按不动：/search 的 DTO 读不出行来源（理由见 Step 6
+                  // 与 test/share-foreign-rows.test.js 第三条），拿假信号筛比筛不了更坏。
+                  disabled: !!query.trim(),
+                  title: query.trim()
+                    ? t("memory.explorer.filterForeignSearchHint")
+                    : t("memory.explorer.filterForeignHint"),
                   "aria-pressed": String(foreignOnly),
                   onClick: () => setForeignOnly(!foreignOnly)
                 }, t("memory.explorer.filterForeign")),
@@ -1335,7 +1363,9 @@ Expected: `docs/SHARE.md` 五处（`:8`、`:176`、`:298`、`:419`、`:424-425`�
   正文相同 U 条 / 撞名 K 条」→ 点「确认导入」才写库。**确认那颗键在拿到预览之前是灰的**。
   「写进去了」这句只由答复的 `dry_run` 说，不按按钮状态推；撞名是 advisory 读数
   （只对「本轮真正会新建的那些」判过），所以清单为空不等于「没有冲突」。
-- **外来区**：工具条「外来」chip 走服务端的 `source=imported` 精确筛选；行上是
+- **外来区**：工具条「外来」chip 走服务端的 `source=imported` 精确筛选（**只管浏览态**：
+  有搜索词时这颗键按下无效，并说明为什么——搜索结果里没有可用的来源读数，见下面「已知代价」第一条）；
+  行上是
   `from-<别名>` 徽标（读数就是 `importedTagFor` 打的那条标签，库里没有单独的别名列）；
   抽屉里显示所属 `pack_id` 并给「收起这个包」，**两段**：先干跑清点条数（并列出 `sample`
   里前 20 条样例标题，让人核对「要收起的到底是哪一批」；`deleted` 才是全量，两个数并发下
@@ -1359,12 +1389,15 @@ Expected: `docs/SHARE.md` 五处（`:8`、`:176`、`:298`、`:419`、`:424-425`�
 ```markdown
 **车道 D 留下的两格已知代价**（都是刻意的，不是漏做）：
 
-1. **搜索态按不了撤销**：`pack_id` 只从 `/api/dsh-mneme/list` 的面板行下发（`src/api.js`
-   那个 items 的 map），`/search` 的 DTO 走 `toApiList`，向量召回那一路的行集不带这一格。
-   抽屉的「收起这个包」按 `memory.share_pack_id` 自门控（与 `heat` 徽章同一做法），所以
-   搜索命中的那一行看不到这颗键。绕法：清掉搜索词 + 按「外来」chip。
-   这条不对称由 `test/share-foreign-rows.test.js` 的第三条用例钉着——有人给 search 补上
-   这一格时那条会红，届时同改 `lib/client.js` 里 MemoryDrawer 的门控注释。
+1. **搜索态三件都做不了（筛选、徽标、撤销）**：`pack_id` 只从 `/api/dsh-mneme/list` 的面板行
+   下发（`src/api.js` 那个 items 的 map），而 `/search` 的 DTO 里 `source` 是**召回渠道**
+   （`keyword`/`vector`/`bm25`，`src/service.js:939`）而不是行来源——`searchMemories` 给每条候选
+   盖上渠道时把 provenance 覆盖了，所以「这条是不是外来的」在那张 DTO 上读不出来。
+   于是：外来 chip 有搜索词时按下无效（带自己的文案，不假装筛过）、`from-<别名>` 徽标在搜索态
+   不出现、抽屉里也没有「收起这个包」。绕法一律是**清掉搜索词回浏览态**。
+   这两个事实由 `test/share-foreign-rows.test.js` 的第三条用例钉着。要真修的是召回侧那个字段的
+   命名（它同时让搜索结果那张卡片脚上显示 `keyword` 而不是行来源——既存症状，本车道不动），
+   那一刀牵动 `recall_runs` 的回执形状，届时长出来的是第四个车道。
 2. **面板只做 `type` 分批，不做 `tag` 分批**：`tag` 是自由文本，错一个字母就静默发 0 条，
    而 413 的提示语是服务端那一份（`SHARE_ERROR_HINT`），写着 `--type`/`--tag` 的 CLI 口吻。
    面板不改写它（同一份错误文案只许有一份），所以那句话在面板里读起来像在指命令行。
