@@ -60,6 +60,12 @@
 
 - `external_id = sha256(pack_id \x00 type \x00 title \x00 content_hash)` 前 16 位：幂等键，不是主键。接收方自己铸 `id`。**内容锚必须在键里**：库的去重键是 `(type, content_hash, agent_scope, workspace_scope, sensitivity)`，同 type 同 title 不同正文的两条是合法的两行，旧三项派生会让它们共用一个 `external_id`，接收侧的幂等先查会跳掉第二条、`report.included` 从此谎报。（本条初稿只写 `pack_id/type/title`，A3 评审按代码推翻，代码为准。）
 - 不带 `id / embedding / content_history / _full_content / evidence / doc_path / agent_scope / workspace_scope / sensitivity`。前三样是体积大户，后三样是本机标识。
+- **`content_hash` 与上面 `skip_list` 那条是不对称的，这里是看见了才这么定的**：`skip_list` 为了不给离线
+  爆破 oracle 而把标题留空，`memories[].content_hash` 却是发件人**遮 home 之前**的归一化锚，随包外发——
+  对遮过前缀的那几行，它就是一个能对「候选用户名」离线核验的弱 oracle（核验，不是提取）。留着的理由是它是
+  `deriveExternalId` 的第四个入参：删掉它或换成遮后的字节，等于给每一个已发出去的包换一套幂等键，收件人
+  重跑同一文件会把同一批原文再建一遍全量行。代价、发件人该怎么做，如实写在
+  [docs/SHARE.md](../dsh-mneme/docs/SHARE.md) 的信任边界那一节；本车道不改代码、不加开关。
 - `deduped` 是**包内折叠**的计数，`included` 从此只数实际发出的条数。键的四个入参里没有 scope，而库里同 type、同标题、同内容锚、scope 不同的两条是合法的两行（`store.js:1233` 的去重键吃三维 scope），它们在包里必然共用一把 `external_id`。留在包里发给对面不是「多一行重复」：那第二条撞的是它自己的 `share_external_id` UNIQUE 索引，抛错穿出 `runAtomically` 的 ROLLBACK = 整包吃不进去，而「事务内先查」在包内两条之间查不出任何东西（那时一行都还没落），重跑也救不了——撞的是同一个死键。所以出包侧折成一条：标题与内容锚都相同的两条到对面那台**没有 scope** 的库里本来就是同一条记忆。由此得一条车道 C 可以依赖的前提：**`memories` 里的 `external_id` 恒不重复**；`included + deduped` 才是够格进包的行数，两个数都在报告里，没有静默吃掉的账。
 - `importance` 与 `epistemic_status` 保留 —— 它们决定对面怎么排序和怎么信这条，属于该带的内容。
 - 上面这个 `report` 是**分享侧**的导出报告；接收侧的答复另有一份形状（见 §5）。两份都叫 `report` 会让实现顺手把它们合并成一个对象，而它们的字段没有一样重合。
@@ -162,7 +168,15 @@ share_external_id  TEXT   -- UNIQUE 索引（WHERE share_external_id IS NOT NULL
 
 - 校验失败 / 体积超限：不动库，报告说清是哪一条。
 - 导入过程中的任何一步抛错：整笔事务回滚（沿用 store 的事务口径），不做部分入库。
-- `scheduleEmbed` 失败不阻断导入（现语义即 fire-and-forget 内部吞错）；接收答复里如实标「向量待补」。
+- `scheduleEmbed` 失败不阻断导入（现语义即 fire-and-forget 内部吞错）。
+  **原稿这一条后面的「接收答复里如实标『向量待补』」已被删掉，是刻意的偏差而不是漏做**：车道 C 落地的
+  答复只有 §5 那七个键（`src/share-import.js:173-187`），这一格从未上线，而答复形状已被两张皮的
+  deepEqual 跨面锁钉死。为什么不改代码补上：v1 不加新线上字段，理由与 §11「不加配置键」是同一条纪律
+  （新字段没有第二个消费者，却要多一处锁、一处 CLI 分支、一处「两张皮只许差在鉴权与路径」的例外）；
+  最后一次整枝评审裁定**按代码改口径**，于是把这件事从答复里搬进文档：接收答复说的是「建了几条」，
+  不说「有没有向量」，向量状态与补法见 [docs/SHARE.md](../dsh-mneme/docs/SHARE.md) 收侧那一节
+  （查：`service.embeddedCount()` / `GET /api/dsh-mneme/semantic`；补：`POST /api/dsh-mneme/vector-reindex`）。
+  代价如实写在那里：没挂 embedder、或挂了一个抛错的那两种情况下，这批行安静地没有向量。
 - 对面库里已有同 pack 全量行时：`created = 0`、`unchanged` 给数、不删任何东西，也不报成错误。
 
 ## 9. 测试矩阵（验收锚点）
