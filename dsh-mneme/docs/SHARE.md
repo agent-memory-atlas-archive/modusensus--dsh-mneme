@@ -196,6 +196,29 @@ spec §12 等的三个数，读出来都是「口径成立」：
 dream.js 行扫两条静态锁），车道 C 把别人的行放进来那天它已经在位，中间不存在「先开门、
 后立规矩」的空窗。看文档的人因此要注意：这一节讲的是**规矩已经在**，不是**门已经开**。
 
+### 手改外来行：允许，但身份不许变（spec §15 二）
+
+上面那句「人看得见就动得它」需要把另一半钉死，这一节就是那一半。接收方在
+`preferences.md` 里改一条别人发来的记忆：**正文会落地**，两条回填路线都照改——
+`mergeHumanEdits`（`src/service.js:1950`，启动回灌与 `/import` 走的显式合并）与
+`reconcileHumanEdits`（`src/service.js:2135`，每次 `syncMirror` 都跑，专收两次业务写之间的
+手改）。这里刻意**不加** `isImportedRow` 过滤：那是接收方自己磁盘上的字，把刚打进去的内容
+静默改回去是比「改写」更糟的失效——他会以为编辑生效了，而下一次同步悄悄把它抹平。
+
+不许动的是行的身份：`source` 仍为 `imported`、`agent_scope` / `workspace_scope` 仍为 NULL、
+`share_pack_id` / `share_external_id` 原样。车道 B 的九个行池与汇流口全按 `source` 认外来行，
+若「编辑一次正文」能顺手改归属，「改一下正文再摘掉守卫」就成了绕开整套契约的合法操作。
+今天防它靠的是两件事的叠加，而只有一件是结构性的：`share_pack_id` / `share_external_id`
+压根不在 `store.update` 的 UPDATE 语句里（身份两件套只由 `save` 铸造，物理上动不了）；
+`source` 与两个 scope 则**在** SET 白名单里（`src/store.js:1353`：patch 显式携带该键才改写）——
+两条回填路线今天只喂 title/content，靠的是纪律，而纪律的看守是
+`test/share-imported-identity.test.js`：两条行为锁各咬一条路线（①`mergeHumanEdits`、
+②`reconcileHumanEdits`），改正文之外任何一列挪了位当场转红。本组为回归锁：车道 B/C
+落地那天它就是绿的，它的价值在防将来有人给「人改回填」的 patch 加「按内容重归属」这类便利。
+
+代价照 spec 写清：手改之后那条记忆**不再是发件人的原文**——这是接收方自己的决定，本设计
+不拦。不变的是后半句：它仍然不会被本机的巩固、降级或整理并走。
+
 ## 已知：包还吃不进去
 
 车道 C（`POST /receive` + 幂等两列 + 整包退出）未到。现在收到包的人只能把它当
