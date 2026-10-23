@@ -758,6 +758,7 @@ window.__ModuleLoader__.load({
         "memory.explorer.receiveHint": "选她发来的包文件。先干跑预览，点确认才写库；导入的行进外来区，不参与本机的巩固、降级或整理。",
         "memory.explorer.receivePick": "选择包文件…",
         "memory.explorer.receiveNotJson": "这个文件不是 JSON",
+        "memory.explorer.receiveNotPack": "这个文件不是分享包（顶层应该是一个 JSON 对象）",
         "memory.explorer.receivePreview": "先干跑预览",
         "memory.explorer.receiveConfirm": "确认导入",
         "memory.explorer.receiveFailed": "导入失败",
@@ -768,6 +769,7 @@ window.__ModuleLoader__.load({
         "memory.explorer.receiveExisting": "{n} 条已在库中",
         "memory.explorer.receiveUnchanged": "{n} 条正文相同",
         "memory.explorer.receiveConflicts": "撞名 {n} 条（不合并，请自己看）",
+        "memory.explorer.receivePackCount": "包内 {n} 条",
         "memory.explorer.receiveStillDry": "没有写库：这一枪仍是干跑",
         "memory.explorer.newMemory": "新增记忆…",
         "memory.explorer.newTitle": "新增记忆",
@@ -1471,6 +1473,7 @@ window.__ModuleLoader__.load({
         "memory.explorer.receiveHint": "Pick the file she sent. The first pass is a dry run; nothing is written until Confirm. Imported rows join the foreign area and never take part in this machine's consolidation, demotion or tidying.",
         "memory.explorer.receivePick": "Choose pack file…",
         "memory.explorer.receiveNotJson": "That file is not JSON",
+        "memory.explorer.receiveNotPack": "That file is not a share pack (the top level should be one JSON object)",
         "memory.explorer.receivePreview": "Preview (dry run)",
         "memory.explorer.receiveConfirm": "Confirm import",
         "memory.explorer.receiveFailed": "Import failed",
@@ -1481,6 +1484,7 @@ window.__ModuleLoader__.load({
         "memory.explorer.receiveExisting": "{n} already in the store",
         "memory.explorer.receiveUnchanged": "{n} identical already",
         "memory.explorer.receiveConflicts": "{n} title clashes (not merged - check them yourself)",
+        "memory.explorer.receivePackCount": "{n} rows in the pack",
         "memory.explorer.receiveStillDry": "Nothing was written: that call stayed dry",
         "memory.explorer.newMemory": "New memory…",
         "memory.explorer.newTitle": "New memory",
@@ -6455,14 +6459,20 @@ window.__ModuleLoader__.load({
           t("memory.explorer.receiveExisting").replace("{n}", String(d.skipped_existing))),
         (d.unchanged || 0) > 0 && h("div", { className: "mneme-featsubhint" },
           t("memory.explorer.receiveUnchanged").replace("{n}", String(d.unchanged))),
-        // 撞名是 advisory 读数：只对「本轮真正会新建的那些」判过，重吃同一个包时恒空，
-        // 所以这里说「这一批里没有新的要报」而不是「没有冲突」（docs/SHARE.md 那笔账三）。
+        // 撞名是 advisory 读数：只对「本轮真正会新建的那些」判过，重吃同一个包时恒空
+        //（src/share-import.js:181-186）。所以这里**只有非空才出声**，绝不写「没有冲突」；
+        // 屏上没有这一行不等于没有撞名，等于「本轮没有新的要报」。
         conflicts.length > 0 && h("div", { className: "mneme-featsubhint", style: { color: "var(--mneme-warn)" } },
           t("memory.explorer.receiveConflicts").replace("{n}", String(conflicts.length))),
         conflicts.length > 0 && h("div", { className: "mneme-sharelist" },
           conflicts.map((c, i) => h("div", { key: `${c.type}-${i}`, className: "mneme-sharow" },
             h("span", { className: "mneme-sharowtitle" }, c.title || ""),
-            h("span", { className: "mneme-sharowreason" }, typeLabel(t, c.type)))))
+            h("span", { className: "mneme-sharowreason" }, typeLabel(t, c.type))))),
+        // `conflicts_checked` 是服务端给的**包内条数**，不是「比过了几条」（同一处注释写明：
+        // 第二次吃同一个包时 title_conflicts 恒空，而这一格仍是全量）。所以文案只说
+        // 「包内 N 条」：它是上一行为什么可能沉默的尺，不许读成「比对了 N 条都没撞」。
+        h("div", { className: "mneme-featsubhint" },
+          t("memory.explorer.receivePackCount").replace("{n}", String(d.conflicts_checked ?? 0)))
       );
     }
 
@@ -6476,7 +6486,8 @@ window.__ModuleLoader__.load({
       const fileRef = useRef(null);
 
       // 一发 POST 两种用法（干跑 / 确认）都从这走，失败文案只有一份。返回 null 表示
-      // 已经把 err 摆上屏，调用方什么都不必再判。
+      // 「已经有一句话摆上屏了」——所以每一条不回 null 的路径都必须自己先 setErr，
+      // 否则调用方读到 null 就是什么都不做，现场变成「按了没反应」。
       const post = (body) => apiFetch("/api/dsh-mneme/receive", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -6490,6 +6501,13 @@ window.__ModuleLoader__.load({
             // 那是「哪一格不合格」的唯一读数，面板不自己编第二套文案。
             setErr(`${t("memory.explorer.receiveFailed")}（${(d && d.error) || res.status}）`
               + (d && d.detail ? `：${d.detail}` : ""));
+            return null;
+          }
+          // 200 但正文读不出（前置的 HTML 拦截页、空 body 的代理、被截断的响应）
+          // **不是成功**：这里曾经直接把 null 交回调用方，于是确认那一发悄悄没走完，
+          // 而屏上上一块的「将新建 N 条」还留着——看起来就像她没点确认。
+          if (!d || typeof d !== "object") {
+            setErr(t("memory.explorer.receiveFailed"));
             return null;
           }
           return d;
@@ -6506,7 +6524,20 @@ window.__ModuleLoader__.load({
         f.text().then((text) => {
           // 坏 JSON 在本地就拦。「这个文件根本不是 JSON」与「这个包不合格」是两件事，
           // 后者由服务端的码说（invalid-kind / invalid-entry / …）。
-          try { setPack(JSON.parse(text)); } catch { setErr(t("memory.explorer.receiveNotJson")); }
+          // 顶层不是对象的也一样在这里说清：`null`、`0`、`[]` 会让预览键永远灰着且不解释，
+          // 那种「按不动也没话说」的界面比一句错话更坏。
+          let parsed;
+          try {
+            parsed = JSON.parse(text);
+          } catch {
+            setErr(t("memory.explorer.receiveNotJson"));
+            return;
+          }
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            setErr(t("memory.explorer.receiveNotPack"));
+            return;
+          }
+          setPack(parsed);
         }).catch(() => setErr(t("memory.explorer.receiveFailed")));
       };
 
@@ -6533,14 +6564,19 @@ window.__ModuleLoader__.load({
         h("div", { className: "mneme-set-title" }, t("memory.explorer.receiveTitle")),
         h("div", { className: "mneme-featsubhint", style: { marginTop: 4 } }, t("memory.explorer.receiveHint")),
         h("div", { className: "mneme-improw" },
-          h("button", { type: "button", className: "mneme-btn", onClick: () => fileRef.current?.click() },
+          // 忙的时候不许再选一个文件：预览那一发还在飞，选第二个会清掉 pack/preview，
+          // 而飞回来的那一块数字说的是**前一个**包——确认键亮着、写的却是后一个文件。
+          // 这条窗口按实测是 0.5–3 秒量级，不是理论风险。
+          h("button", { type: "button", className: "mneme-btn", disabled: busy, onClick: () => fileRef.current?.click() },
             file ? file.name : t("memory.explorer.receivePick")),
           h("input", {
             ref: fileRef,
             type: "file",
             accept: ".json,application/json",
             style: { display: "none" },
-            onChange: (e) => pick((e.target.files && e.target.files[0]) || null)
+            // 选完就清空控件的值：否则她改完同一个文件再选一次，浏览器不发 change，
+            // 面板会拿着上一版的包继续预览——同一颗键，两个事实。
+            onChange: (e) => { pick((e.target.files && e.target.files[0]) || null); e.target.value = ""; }
           })
         ),
         err && h("div", { className: "mneme-featsubhint", style: { color: "var(--mneme-danger)", marginTop: 8 } }, err),

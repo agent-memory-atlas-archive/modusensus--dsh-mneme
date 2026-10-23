@@ -86,20 +86,26 @@ test("the receive dialog reads dry_run instead of inferring from its own button"
   assert.ok(clientSource.includes("post({ pack })"), "预览那一发不带 confirm——缺省即干跑");
   assert.ok(clientSource.includes("post({ pack, confirm: true })"),
     "真写的那一发必须带 confirm 这个真值，其他形状服务端都不认");
-  assert.ok(clientSource.includes("d.dry_run === false"),
-    "「写进去了」这句只能由答复自己说");
+  assert.ok(clientSource.includes('d.dry_run === false ? "memory.explorer.receiveDidCreate"'),
+    "「写进去了」这句只能由答复自己说——钉的是那个三元式本身，不是六个字面量都在");
   assert.ok(clientSource.includes("result.dry_run !== false"),
     "确认之后仍回干跑时要单独说「没有写库」，不许沉默，也不许挂在预览那一支上");
   assert.ok(clientSource.includes('"memory.explorer.receiveStillDry"'),
     "那一格要有自己的文案");
   // 第二个旋钮一概不认：收侧只认 confirm（spec §5——reclaim 的 body 里就带 dryRun，
   // 手熟的人会顺手发来，把它读成「要写」等于替她点头）。
-  // **切片而不是全文**：lib/client.js:4762 的 VACUUM 那一条合法地发 dryRun:false，
-  // 那是 reclaim 的形状不是 receive 的。全文反锁会在 D3 之前就是红的；谁把它「修」成
-  // 全文锁，就等于给 reclaim 那颗键定罪。切片锚点变了时下面那条长度断言先红。
+  // **切片而不是全文**：本文件里 reclaim/VACUUM 那一发合法地发 `dryRun: false, confirm: true`，
+  // 那是 reclaim 的形状不是 receive 的。全文反锁会一上来就红；谁把它「修」成全文锁，
+  // 就等于给 reclaim 那颗键定罪。所以按函数名切区段，并且**两个锚点都要验**：
+  // 结束锚点丢了的时候 indexOf 返回 -1，切片会一路长到文件尾而不是塌成空——
+  // 那时候这条锁看似更严，实际悄悄开始管整个文件（而 ReceiveDialog 之后今天没有 dryRun，
+  // 它会空过）。两头都钉住，锚点漂移只会红得明白。
   const receiveStart = clientSource.indexOf("function ReceiveDialog(");
-  const receiveRegion = clientSource.slice(receiveStart, clientSource.indexOf("// #386 第 5 条", receiveStart));
-  assert.ok(receiveRegion.length > 800, "ReceiveDialog 的切片锚点变了，先修锚再谈锁");
+  const receiveEnd = clientSource.indexOf("// #386 第 5 条", receiveStart);
+  assert.ok(receiveStart > 0 && receiveEnd > receiveStart,
+    "ReceiveDialog 的起止锚点都要在，且顺序对——否则这条锁在管的东西和它说的不是一件");
+  const receiveRegion = clientSource.slice(receiveStart, receiveEnd);
+  assert.ok(receiveRegion.length > 800, "ReceiveDialog 的区段短得不像话，先修锚再谈锁");
   assert.equal(receiveRegion.includes("dryRun"), false,
     "收侧不许发 dryRun——唯一的入口是 confirm");
 });
@@ -109,9 +115,34 @@ test("the receive dialog reads dry_run instead of inferring from its own button"
 test("the receive preview keeps the advisory reading honest", () => {
   assert.ok(clientSource.includes("d.title_conflicts"), "撞名清单要显示");
   assert.ok(clientSource.includes('"memory.explorer.receiveConflicts"'));
-  assert.equal(/现在没有冲突|no conflicts right now/.test(clientSource), false,
-    "不许出现「没有冲突」这类绝对断言");
+  // 钉的是**文案**而不是注释：解释性的话必须能写「这不等于没有冲突」来提醒读者，
+  // 连注释一起 ban 等于把警告本身禁掉（这一轮就撞上了：新注释里的「没有撞名」先红的是这条锁）。
+  // 真正会伤人的是屏上那一句，所以只扫非注释行。
+  const copyLines = clientSource.split("\n").filter((line) => !/^\s*\/\//.test(line)).join("\n");
+  assert.equal(/现在没有冲突|没有撞名|无冲突|no conflicts|no title clashes/i.test(copyLines), false,
+    "不许出现「没有冲突」这类绝对断言（清单为空只说明本轮没有新的要报）");
   // 先预览才允许确认：干跑是必经的一站，不是可选装饰。
   assert.ok(clientSource.includes("disabled: busy || !preview"),
     "确认按钮在拿到预览之前必须 disabled");
+  // advisory 读数的分母要说出来，否则「清单为空」与「什么也没比」在屏上长一个样。
+  // 注意它是**包内条数**而不是「比过了几条」，所以文案只许说「包内 N 条」。
+  assert.ok(clientSource.includes("d.conflicts_checked"),
+    "要把服务端给的包内条数显示出来");
+  assert.ok(clientSource.includes('t("memory.explorer.receivePackCount")'),
+    "那一行要有自己的渲染点，不是只在字典里躺着");
+});
+
+// D3 评审裁定补的锁：两种「按了没反应」的形态。
+//   a) 200 但正文读不出——曾经一路 return null，调用方把它读成「屏上已有提示」，
+//      于是确认那一发悄悄没走完，而上一块的「将新建 N 条」还留在屏上；
+//   b) 预览还在飞的时候又能选一个文件——飞回来的数字说的是前一个包，确认写的却是后一个。
+test("the receive dialog never goes silent, and never lets a superseded preview drive the write", () => {
+  assert.ok(clientSource.includes('if (!d || typeof d !== "object") {'),
+    "200 但没有可读正文也要 setErr，不许 return null 装成「已经处理过了」");
+  assert.ok(clientSource.includes("disabled: busy, onClick: () => fileRef.current?.click()"),
+    "预览/确认在飞的时候不许再选文件（那一块数字属于上一个包）");
+  assert.ok(clientSource.includes('typeof parsed !== "object"'),
+    "解得出 JSON 但不是对象，是另一种失败，得有它自己的一句话");
+  assert.ok(clientSource.includes('e.target.value = ""'),
+    "选完清空控件值：否则改过的同一个文件再选一次不发 change，面板拿着旧包预览");
 });
