@@ -535,9 +535,25 @@ dsh plugin --profile web add "C:/path/to/modusensus-dsh-mneme-0.9.0.tgz"
 | `PUT` | `/memories/:id` | 局部更新 `{title?,content?,type?,importance?,tags?,reason?,agent_scope?,workspace_scope?}`；content 改写按 human_override 入档 |
 | `DELETE` | `/memories/:id` | 删除记忆 |
 | `GET` | `/search?q&mode=keyword\|vector\|hybrid\|auto&topK&occurred_from&occurred_to&agent_scope&workspace_scope` | 搜索（关键词 / 向量 / hybrid=向量领位关键词补位 / 自动）。scope 两参声明调用方身份（不传 = 不解析，行为与旧版一致；任一给出则 strictScope 硬过滤与 A2 软加权随之生效） |
-| `GET` | `/context?q&topK&threshold&agent_scope&workspace_scope` | 注入候选一站式聚合（issue #370，#363 承诺）：宿主注入管线 `injectCandidates` 全语义（优先级分层 / 编码门控 / heat / scope 软加权 / hybrid 语义路 / pin 前置）+ 画像 + 规则，返回 `{profile, rules, items, pinnedCount}` 结构化条目，不含渲染文本。`threshold` 是 **importance 阈值**（默认 3，与 `/search` 的相似度阈值同名不同义）；`topK` 默认 5（对齐宿主 `maxInjectedItems`）；scope 语义与 `/search` 同口径；跨轮轮换 / 热记忆 / 时间前缀不含（调用方自管）；recall_runs 注入分账与宿主注入同口径（#217 `mode='inject'`） |
+| `GET` | `/context?q&topK&threshold&agent_scope&workspace_scope` | 注入候选一站式聚合（issue #370，#363 承诺）：宿主注入管线 `injectCandidates` 全语义（优先级分层 / 编码门控 / heat / scope 软加权 / hybrid 语义路 / pin 前置）+ 画像 + 规则，返回 `{profile, rules, items, pinnedCount, tier}` 结构化条目，不含渲染文本。`threshold` 是 **importance 阈值**（默认 3，与 `/search` 的相似度阈值同名不同义）；`topK` 默认 5（对齐宿主 `maxInjectedItems`）；scope 语义与 `/search` 同口径；跨轮轮换 / 热记忆 / 时间前缀不含（调用方自管）；recall_runs 注入分账与宿主注入同口径（#217 `mode='inject'`） |
 | `POST` | `/bootstrap` | 冷启动（v0.8.4）：从仓库目录反向构建初始记忆，body `{dir}` 必填；幂等（(type,title,scope) 去重 + `_overwrite` 原地刷新），零 LLM、必有产出 |
 | `POST` | `/maintenance/reclaim` | 无损回收（#275 / #411，与面板同口径）：**只有 POST**（独立面没有 GET 预估分支）。字段只从 JSON body 读；`dryRun` 默认 `true`，只有 `dryRun:false` 且 `confirm:true` 才真删；`vacuum` 只允许显式指定 |
+
+#### `/context` 的 `tier` 档位信号（#383）
+
+`GET /context` 的响应多一个 `tier` 字段，回答「这次注入跑在哪一档」。嵌入降级在调用方视角原本完全静默——`items` 看着正常，只是召回质量悄悄变差，外部集成方无从感知自己长期跑在降级档上。
+
+| `tier` | 含义 |
+|--------|------|
+| `full` | 语义档：查询嵌入成功，且与库里的向量维度可比 |
+| `degraded` | 规则档：语义路本次不可用（原因见日志） |
+| `unknown` | 语义路未启用（`q` 为空）——那不是降级，但也不宣称 `full` |
+
+**两套消费者的分工：** `tier` 是**响应读数**，给调用方——三态、fail-closed（判不出来报 `unknown`，不报 `full`），用于在集成侧告警或切换策略。降级的**具体原因**是**日志读数**，给运维——走 daemon 的 stderr（`dsh-mneme: /context degraded to the rule tier (<reason>)`），不进响应体。原因枚举五值，互不吞并：`embed-unavailable`（无可用嵌入接口）/ `embed-empty`（返回了空或非数组向量）/ `embed-timeout`（接口挂起，被超时护栏按缺失处理）/ `embed-error`（接口抛错）/ `embed-dimension`（接口成功了，但维度与库里已有向量不一致）。
+
+`embed-dimension` 值得单说：它是「拿到了向量却不可比」——`searchVector` 对维度不符的行直接跳过，不抛错、只是命中为零，于是召回静默退回关键词/规则档，而嵌入侧一切正常。修法是重建索引，不是查端点，所以它必须和前四个分开。
+
+**预算：** 判档不是免费的。`q` 非空且装配了 embedder 时，一次 `/context` 真的会起一次查询嵌入（一次网络往返 + `embedTimeoutMs` 的超时窗口）——档位要回答的正是「这次嵌入成不成」。这里没有复用 `/health` 的数据源：standalone 的 `/health` 只回 `{ok:true}`，而 `embeddingDimensionBreakdown` 是宿主面的一次全表扫（每行 JSON.parse 一个向量），按请求跑会把语义路成本翻倍。维度探针因此走 `store.storedEmbeddingDimension()`——只读一行，O(1)。
 
 ### curl 示例
 

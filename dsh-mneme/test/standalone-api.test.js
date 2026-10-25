@@ -810,3 +810,39 @@ test("GET /context tier=degraded when the embedder returns an unusable vector", 
     close();
   }
 });
+
+test("GET /context tier=degraded when the query vector's dimension differs from the stored one", async () => {
+  // #383 点名的那一种「悄悄退化」，也是 #508 评审里问「维度不符去哪了」的那一档：
+  // 嵌入接口一切正常（真的返回了向量），但库里躺着旧维度的向量——searchVector 对
+  // `v.length !== vector.length` 的行直接跳过，不抛错、只是命中为零，于是召回静默
+  // 退回 BM25/规则档。没有这个读数时，调用方看到的是 tier=full 加一份看着正常的
+  // items，而语义召回其实整条是死的。
+  const { base, auth, close, store, service } = await setup({ embedder: okEmbedder });
+  try {
+    await saveMemory(base, auth, { type: "decision", title: "核心决策", content: "选定 SQLite 单文件库", importance: 5 });
+    // 手工塞一个 4 维向量：模拟「换了嵌入模型，旧向量还没重建索引」。okEmbedder 出
+    // 来的是 3 维，所以这一行的维度与查询向量不可比。
+    const memory = service.all().find((m) => m.title === "核心决策");
+    store.setEmbedding(memory.id, [1, 0, 0, 0]);
+    assert.equal(store.storedEmbeddingDimension(), 4, "夹具前置：库里是 4 维");
+
+    const body = await (await fetch(`${base}/context?q=${encodeURIComponent("数据库选型")}`, { headers: auth })).json();
+    assert.equal(body.tier, "degraded", "维度不符 → 语义召回实际不可用，报降级而不是 full");
+  } finally {
+    close();
+  }
+});
+
+test("GET /context：库里还没有向量时不算维度不符（两种空的读数必须分开）", async () => {
+  // 「没有东西可比」与「维度对不上」是两件事：前者是全新库（或还没建索引），
+  // 语义路只是还没有内容，不是坏了。storedEmbeddingDimension() 回 null 时必须
+  // 继续报 full，否则每个新装用户的第一次 /context 都是 degraded。
+  const { base, auth, close, store } = await setup({ embedder: okEmbedder });
+  try {
+    assert.equal(store.storedEmbeddingDimension(), null, "夹具前置：库里没有任何向量");
+    const body = await (await fetch(`${base}/context?q=${encodeURIComponent("数据库选型")}`, { headers: auth })).json();
+    assert.equal(body.tier, "full", "没有已存向量 → 不是维度不符");
+  } finally {
+    close();
+  }
+});

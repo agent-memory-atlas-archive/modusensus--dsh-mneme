@@ -2670,6 +2670,10 @@ export function createService({ store, mirror, config, onWrite, logger, document
     // passthrough 形状与 embeddedCount 同款，api 层不直接摸 store。
     embeddingModelBreakdown: () => store.embeddingModelBreakdown(),
     embeddingDimensionBreakdown: () => store.embeddingDimensionBreakdown(),
+    // #383：O(1) 的维度探针（读一行，不扫表），供 /context 判「维度不符」。
+    // 与上面那个全表扫的 breakdown 是两件事：一个是状态页的完整分布，一个是
+    // 每请求用得起的布尔信号。透传而非让 api 层摸 store，与同组其他条目一致。
+    storedEmbeddingDimension: () => store.storedEmbeddingDimension(),
     list: (o) => store.list(o),
     all: () => store.all(),
     count: (type, opts) => store.count(type, opts),

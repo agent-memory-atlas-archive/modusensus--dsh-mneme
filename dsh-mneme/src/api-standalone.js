@@ -227,8 +227,15 @@ async function handlePutBody(res, service, logger, id, text) {
  * （embedSingle 优先，兼容 embed-only 的 OpenAI 兼容客户端，issue #10）。
  * 调用方负责 catch——嵌入失败降级规则档，绝不因此 500。
  *
- * `diag`（optional，issue #383）：拿不到向量时把原因写进去（`embed-unavailable`
- * 无可用接口 / `embed-empty` 空或非数组向量），供 daemon 侧日志枚举降级原因。
+ * `diag`（optional，issue #383）：拿不到向量时把原因写进去，供 daemon 侧日志枚举
+ * 降级原因。五值，互不吞并：
+ *   embed-unavailable  无可用接口（embedder 上没有 embedSingle / embed）
+ *   embed-empty        接口返回了，但向量是空数组 / 非数组
+ *   embed-timeout      接口挂起，被 embedTimeoutMs 护栏按缺失处理
+ *   embed-error        接口抛错（HTTP 4xx/5xx、网络、解析失败……）
+ *   embed-dimension    接口成功了，但维度与库里已有向量不一致
+ * 前四个是「没拿到向量」，第五个是「拿到了却不可比」——分开是因为修法不同：
+ * 前者查嵌入配置与端点，后者查「是不是换了模型、旧向量该重建索引了」。
  * 不传则行为与既往逐字节一致。
  */
 async function embedQueryVector(embedder, q, diag) {
@@ -256,7 +263,7 @@ async function embedQueryVector(embedder, q, diag) {
  * 无害；挂起的主要成本是一个泄漏的挂起任务，可接受。嵌入先完成时清掉定时器
  * （CodeRabbit 同轮 Minor：别让每个请求都留一枚要等满超时的计时器）。
  *
- * `diag`（optional，issue #383）：超时写 `embed-timeout`，与上面两个原因同一套枚举。
+ * `diag`（optional，issue #383）：超时写 `embed-timeout`，与上面几个原因同一套枚举。
  */
 function withEmbedTimeout(promise, timeoutMs, diag) {
   let timer;
@@ -688,8 +695,8 @@ export function createStandaloneApi({ service, store, config = {}, logger, setti
         const threshold = Number.isFinite(thresholdRaw) ? thresholdRaw : 3;
         const scope = scopeFromSearchParams(url);
         // #383：降级原因记账用。embedQueryVector / withEmbedTimeout 只负责「拿不到
-        // 向量时返回 undefined」，原因（无可用接口 / 空向量 / 超时）在这里回收，
-        // 供 daemon 侧日志枚举——响应体只多 tier 一个键，不加第二个字段。
+        // 向量时返回 undefined」，原因（无可用接口 / 空向量 / 超时 / 抛错 / 维度不符）
+        // 在这里回收，供 daemon 侧日志枚举——响应体只多 tier 一个键，不加第二个字段。
         const diag = {};
         void Promise.resolve(q && embedder ? withEmbedTimeout(embedQueryVector(embedder, q, diag), embedTimeoutMs, diag) : undefined)
           .catch((err) => { diag.reason = "embed-error"; return undefined; })   // 查询嵌入失败降级规则档（与 searchMemories 同口径）
@@ -699,15 +706,39 @@ export function createStandaloneApi({ service, store, config = {}, logger, setti
             // #383 档位信号：嵌入降级在调用方视角原本完全静默（items 看着正常，只是
             // 召回质量悄悄变差），外部集成方无从感知自己长期跑在降级档上。
             // 三态 fail-closed——判不出来报 unknown，不报 full：
-            //   full     语义档，查询嵌入真的成功了
-            //   degraded 规则档，且是因为 embedder 缺 / 嵌入超时 / 不可用向量
+            //   full     语义档，查询嵌入真的成功了且与库里的向量可比
+            //   degraded 规则档：embedder 缺 / 嵌入超时 / 不可用向量 / 抛错 /
+            //             维度不符（拿到了向量但语义召回整个不可用）
             //   unknown  语义路未启用（空 q）——那不是降级，但也不能宣称 full
             // 比 /search 的 mode 更精确：/search 把「空查询」和「向量失败」都报
             // keyword，这里能分开（空 q 直接可观测）。
+            //
+            // 预算：判档不是免费的——q 非空且配了 embedder 时，它真的会起一次查询
+            // 嵌入（一次网络往返 + embedTimeoutMs 的超时窗口），因为档位要回答的
+            // 正是「这次嵌入成不成」。这里**没有**复用宿主 /health 那份现成数据源：
+            // standalone 的 /health 只回 {ok:true}，而 embeddingDimensionBreakdown
+            // 是 src/api.js 里的一次全表扫（每行 JSON.parse 一个向量），按请求跑会
+            // 把语义路成本翻倍，且它根本不在 standalone 的装配里。所以维度探针用
+            // store.storedEmbeddingDimension()——只读一行，O(1)。
             let tier = "unknown";
-            if (q && queryVector) tier = "full";
-            else if (q) {
+            if (q && queryVector) {
+              const storedDim = typeof service.storedEmbeddingDimension === "function"
+                ? service.storedEmbeddingDimension()
+                : null;
+              if (typeof storedDim === "number" && storedDim !== queryVector.length) {
+                // 维度不符：searchVector 对不等长的行直接跳过（见 store.js 的
+                // distill-tx-embed-gap 注释），不抛错、只是命中为零——于是召回静默
+                // 退回 BM25/规则档，而嵌入侧一切正常。这是 issue #383 点名的那一种
+                // 「悄悄退化」，必须有自己的名字：修法是重建索引，不是查端点。
+                diag.reason = "embed-dimension";
+                tier = "degraded";
+              } else {
+                tier = "full";
+              }
+            } else if (q) {
               tier = "degraded";
+            }
+            if (tier === "degraded") {
               logger?.warn?.(`dsh-mneme: /context degraded to the rule tier (${diag.reason ?? (embedder ? "embed-failed" : "no-embedder")})`);
             }
             sendJson(res, 200, {

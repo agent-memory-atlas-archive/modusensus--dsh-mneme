@@ -15,6 +15,8 @@ daemon 是**数据面**,不是第二个宿主:
 
 路由面 = `src/api-standalone.js` 全表(health/status/profile/rules/memories 读写/search/context/maintenance/bootstrap),鉴权同源(Bearer + timingSafeEqual,`GET /health` 免鉴权)。daemon 自身零新路由;#370 的 `/context` 落在 api-standalone 工厂里,宿主外部访问与 daemon 自动同享(参数、scope 语义与 recall_runs 注入分账见包 README 路由表)。daemon 侧唯一自有选项是 `strictPort`(见 §4)。
 
+`/context` 的档位信号(#383):响应多一个 `tier`(`full` 语义档 / `degraded` 规则档 / `unknown` 语义路未启用,fail-closed),**具体降级原因只在 stderr**——`dsh-mneme: /context degraded to the rule tier (<reason>)`,不进响应体。原因是给运维的读数(`embed-unavailable` 无接口 / `embed-empty` 空向量 / `embed-timeout` 挂起 / `embed-error` 抛错 / `embed-dimension` 维度不符),`tier` 是给调用方的读数,两套消费者分开。这里最值得盯的是 `embed-dimension`:嵌入接口一切正常,但库里是旧维度向量,`searchVector` 直接跳过、不抛错,召回静默退回关键词档——修法是重建索引,不是查端点。判档有成本:`q` 非空且装了 embedder 时一次 `/context` 会真起一次查询嵌入(一次往返 + `embedTimeoutMs` 窗口),维度探针本身是 O(1)(只读一行),不复用 `/health`(它只回 `{ok:true}`)也不做全表扫。
+
 CLI:
 
 ```bash

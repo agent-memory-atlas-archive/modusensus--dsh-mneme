@@ -1801,6 +1801,36 @@ export function createStore(path) {
     }, new Map());
   }
 
+  /**
+   * 库里已有向量的维度——**只读一行**，不是 embeddingDimensionBreakdown 的全表扫。
+   *
+   * #383 要的是「查询嵌入成功了，但语义召回其实死了」这个读数。它的成因是维度
+   * 不符：searchVector 对 `v.length !== vector.length` 的行直接跳过（见下方
+   * distill-tx-embed-gap 注释），换了嵌入模型之后旧维度向量整个不可比，而这条路
+   * **不抛错**——嵌入侧、检索侧都一切正常，只是命中数为零。调用方从响应上看不出
+   * 任何异常，这正是 issue #383 点名的那一种「悄悄退化」。
+   *
+   * 为什么不用 embeddingDimensionBreakdown：那是给 /semantic 状态页用的全表扫
+   * （每行 JSON.parse 一个向量），按请求跑一遍会把语义路的成本翻一倍。这里只要
+   * 一个「不一致」的布尔信号，一行足够；混合维度的完整分布仍归状态页。
+   *
+   * @returns {number|null} 首个可解析向量的维度；库里没有可用向量时 null
+   *   （那不是维度不符，是没有东西可比——两种空的读数必须分开）。
+   */
+  function storedEmbeddingDimension() {
+    const row = db.prepare(
+      `SELECT embedding FROM memories
+       WHERE embedding IS NOT NULL AND embedding != ''
+         AND forgotten = 0 AND archived = 0
+       LIMIT 1`
+    ).get();
+    if (!row) return null;
+    try {
+      const parsed = JSON.parse(row.embedding);
+      return Array.isArray(parsed) && parsed.length ? parsed.length : null;
+    } catch { return null; }
+  }
+
   function search(query, { limit = 20, includeArchived = false } = {}) {
     const q = String(query).trim();
     if (!q) return [];
@@ -3367,6 +3397,7 @@ export function createStore(path) {
     hasStaleEmbedding,
     embeddingModelBreakdown,
     embeddingDimensionBreakdown,
+    storedEmbeddingDimension,
     searchVector,
     saveDreamRun,
     lastDreamRunAt,
