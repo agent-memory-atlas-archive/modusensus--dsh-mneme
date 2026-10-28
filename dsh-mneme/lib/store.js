@@ -1801,6 +1801,71 @@ export function createStore(path) {
     }, new Map());
   }
 
+  /**
+   * 维度探针（#383）：**存在性判据**——库里有没有一条活跃向量的维度等于查询维度。
+   *
+   * #508 评审把判据从「读一行的维度」换成了存在性，因为 LIMIT 1 拿任意一条代表全库，
+   * 在混合维度库里两个方向都错：抽到与查询不符的那条 → 明明有可比的 3 维向量却报
+   * degraded；抽到的那条恰好解析失败 → 其余有效向量都不匹配时又漏报成 full。一行
+   * 读数回答不了「这个维度在这库里能不能比」这个问题。
+   *
+   * 行集与 searchVector **必须同源**：下面这段 WHERE 的谓词与 searchVector（本文件
+   * vector search 段）逐条相同（只是书写顺序不同，语义等价），改一处必须同步改另一处
+   * ——否则 tier 的核心断言「searchVector 会不会找到可比向量」会悄悄失真。活跃 = 未
+   * 遗忘未归档、embedding 非空；/context 只经 searchVector 触达检索，从不传
+   * includeArchived。
+   *
+   * 状态语义（后两个是 fail-closed 兜底态，不是正常读数）：
+   *   match      有维度相符的活跃向量 → 语义路通。注意「通」≠「有命中」：type /
+   *              importance / codingGate / scope 四道门（service.js 的 inject 段）
+   *              仍可能让语义档贡献为 0，这是旧探针就有的边界。
+   *   mismatch   有向量，但没有一条维度相符 → 语义召回实际不可用 → degraded
+   *   none       行集本身为空（空库 / 从未建索引）→ 没有东西可比，**不是**维度
+   *              不符 → full
+   *   unreadable 有行，但一条都读不出来（embedding 列损坏）→ 与 none 是**两种空**：
+   *              前者是还没有内容，后者是内容在那儿却读不出来。判不出来 → unknown，
+   *              绝不因为「读不到」就宣称 full。
+   *   invalid    查询维度本身不是正整数 → 同样判不出来 → unknown。当前 /context
+   *              不可达（embedQueryVector 保证返回非空数组），防御性留着：别让
+   *              「判不了」落到 full 上。
+   *
+   * 成本模型（取代原来「只读一行，O(1)」的说法——那句话对现在的实现是假的）：
+   *   · SQL 是一次**无 ORDER BY 无 LIMIT 的全 id 扫描**，每次调用都有，不免费
+   *     （只拖 id 列，约 40 KB/千行，比 SELECT * 的全表 TEXT 便宜得多）。
+   *   · 按匹配短路：全库同维度（常态）时 JS 循环第一行就 return，只解析 1 个向量。
+   *   · 一条都不匹配时才走完整个循环，而那正是要报 degraded 的情形，值得。此时每个
+   *     缓存未命中的行都要点查一次 embedding TEXT（冷缓存下 = N+1 条语句）；
+   *     getParsedEmbedding 不缓存否定结果，所以读不出来的行每次请求都会重解析一次。
+   *   · 缓存热不热是有条件的：/context 里让 embeddingCache 变热的只有 injectCandidates
+   *     内部两个 vectorIndex 分支（service.js:1696 / :1768），需要 hybridInject 与
+   *     selectiveInject 都没被关掉、行数在 4000 条 FIFO 上限内；standalone 装配不设
+   *     vectorIndex 时缓存是冷的。判档跑在 injectCandidates 之后，装配齐时缓存已热。
+   *
+   * @param {number} dimension 查询向量维度
+   * @returns {{state: "match"|"mismatch"|"none"|"unreadable"|"invalid"}}
+   */
+  function vectorDimensionState(dimension) {
+    if (!Number.isInteger(dimension) || dimension <= 0) return { state: "invalid" };
+    // 与 searchVector 的 WHERE 谓词逐条相同（顺序不同、语义等价）——同源行集，同步改。
+    const rows = db.prepare(
+      `SELECT id FROM memories
+       WHERE embedding IS NOT NULL AND embedding != ''
+         AND forgotten = 0 AND archived = 0`
+    ).all();
+    if (!rows.length) return { state: "none" };
+    let sawVector = false;
+    for (const row of rows) {
+      // 走 getParsedEmbedding 的解析缓存，不自己 JSON.parse——与 searchVector /
+      // getEmbedding(s) 同一条读路径，缓存热时零解析。
+      const v = getParsedEmbedding(row.id);
+      if (!v || !v.length) continue;
+      sawVector = true;
+      if (v.length === dimension) return { state: "match" };
+    }
+    // 有行却零条可解析：不是「没有向量」，是「有向量读不出来」。
+    return { state: sawVector ? "mismatch" : "unreadable" };
+  }
+
   function search(query, { limit = 20, includeArchived = false } = {}) {
     const q = String(query).trim();
     if (!q) return [];
@@ -3367,6 +3432,7 @@ export function createStore(path) {
     hasStaleEmbedding,
     embeddingModelBreakdown,
     embeddingDimensionBreakdown,
+    vectorDimensionState,
     searchVector,
     saveDreamRun,
     lastDreamRunAt,
