@@ -147,3 +147,64 @@ test("坏输入不抛", () => {
   assert.doesNotThrow(() => suggestRetirements(p, { runs: [{}] }));
   assert.doesNotThrow(() => suggestRetirements(p, { runs: [{ at: null, steps: null }] }));
 });
+
+// #461：violationSeen 跨整本账本共享，而键里的 `run.at ?? ""` 在 at 缺失时塌缩成
+// 空串——于是**所有**无时间戳的 run，其同 (step, need) 违规会被并成一条。去重本意是
+// 「同一轮里同一条只报一次」，不是「所有轮共享一条」。内容不同的两条 run 该产出两条。
+test("#461：两条内容不同、都无 run.at 的 run，同类违规不被并成一条", () => {
+  const p = makePipeline([
+    step("A", { tool: "npm test" }),
+    step("B", { tool: "git push", needs: ["A"] })
+  ]);
+  // 都只做了 B、都没带 at，但走的不是同一条路：by 不同 → 内容指纹不同 → 各报一条
+  const runs = [
+    { at: null, by: "human", triggeredBy: "demo", steps: [{ id: "B", at: "x" }] },
+    { at: undefined, by: "agent", triggeredBy: "nightly", steps: [{ id: "B", at: "x" }] }
+  ];
+  const v = suggestRetirements(p, { runs }).filter((s) => s.kind === "violation-precedence");
+  assert.equal(v.length, 2, "两条独立的 run 各报一条，不被键塌缩吞掉");
+  assert.equal(v[0].stepId, "B");
+  assert.equal(v[1].stepId, "B");
+});
+
+// #507 评审：同一个 run 在账本里出现两次，同一条违规仍只报一次。
+// 位置索引做不到这件事——它只在「本次遍历的数组顺序」里唯一，同一条 run 出现在
+// 下标 0 和 1 时会拿到两个键。所以 at 缺失时兜底用内容指纹，不用索引。
+test("#507：同一条 run 出现两次，同类违规仍只报一次", () => {
+  const p = makePipeline([
+    step("A", { tool: "npm test" }),
+    step("B", { tool: "git push", needs: ["A"] })
+  ]);
+  const same = { at: null, by: "human", triggeredBy: "demo", steps: [{ id: "B", at: "x" }] };
+  const v = suggestRetirements(p, { runs: [same, same] }).filter((s) => s.kind === "violation-precedence");
+  assert.equal(v.length, 1, "同一条 run 的两份记录是同一个观测，不是两次违规");
+});
+
+// #507 评审（CodeRabbit）：两类键必须不相撞。第 0 条缺 at，而另一条的 at 字面量
+// 正好是 "#0"——用位置索引兜底时两者生成同一个键，后一条违规被静默吞掉。
+test("#507：at 字面量与兜底键不相撞（第 0 条缺 at vs 另一条 at 是 \"#0\"）", () => {
+  const p = makePipeline([
+    step("A", { tool: "npm test" }),
+    step("B", { tool: "git push", needs: ["A"] })
+  ]);
+  const runs = [
+    { at: null, by: "human", triggeredBy: "demo", steps: [{ id: "B", at: "x" }] },
+    { at: "#0", by: "human", triggeredBy: "demo", steps: [{ id: "B", at: "x" }] }
+  ];
+  const v = suggestRetirements(p, { runs }).filter((s) => s.kind === "violation-precedence");
+  assert.equal(v.length, 2, "字面量 #0 与兜底键不是同一个东西，两条都要报");
+});
+
+// at 存在时行为不变：同 at 的重复违规仍然只报一条（原有去重语义不能被修坏）。
+test("#461：at 存在时同轮重复违规仍只报一条（回归保护）", () => {
+  const p = makePipeline([
+    step("A", { tool: "npm test" }),
+    step("B", { tool: "git push", needs: ["A"] })
+  ]);
+  const runs = [
+    RUN("2026-10-17T00:00:00Z", [{ id: "B", at: "x" }]),
+    RUN("2026-10-17T00:00:00Z", [{ id: "B", at: "x" }])
+  ];
+  const v = suggestRetirements(p, { runs }).filter((s) => s.kind === "violation-precedence");
+  assert.equal(v.length, 1, "同一 at 的同一违规仍然只报一次");
+});
