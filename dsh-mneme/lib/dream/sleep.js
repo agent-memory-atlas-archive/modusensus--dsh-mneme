@@ -502,9 +502,19 @@ async function phasePatterns(ctx, service, config, logger, runId, signal = null)
   // 先生效的话，指针行一多就会把普通记忆挤出扫描窗，池子饿到门槛以下。
   // 政策轴同理必须排在 `.slice(0, limit)` **之前**，否则被按下的行照样占掉
   // sleepPatternMinMemories 的名额，而它们既不会被扫、也不该挤掉别人（#471）。
+  //
+  // archived 这一轴不在下面出现，不是漏了：list() 默认就带 `archived = 0`
+  // （store.js list 的 includeArchived 默认 false、onlyArchived 默认 false），
+  // 旧写法那句 `!m.archived` 一直是重复过滤——查询层已经把它挡在外面。
   const memories = withoutPaused(service, service
-    .list({ limit: 200, includeForgotten: false, excludeTypes: ["document"] })
-    .filter((m) => !isImportedRow(m) && !m.archived && m.type !== "summary" && m.type !== "pattern"))
+    .list({
+      limit: 200, includeForgotten: false,
+      // 三条政策轴全部下推到查询层：留在 LIMIT 之后过滤，等于让被丢掉的行为窗口占名额
+      // （模式扫描池会因此饿到 sleepPatternMinMemories 以下而静默跳过）。同一取舍见
+      // #230 的 document 轴与本文件 #471 的暂停轴，src/service.js:2247 那条注释记着前例。
+      excludeTypes: ["document", "summary", "pattern"],
+      excludeImported: true
+    }))
     .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1))
     .slice(0, limit);
   if (memories.length === 0) return { status: "skipped", reason: "no memories to scan" };

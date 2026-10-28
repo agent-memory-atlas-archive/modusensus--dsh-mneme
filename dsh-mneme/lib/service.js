@@ -2703,6 +2703,12 @@ export function createService({ store, mirror, config, onWrite, logger, document
     // 用得起的判据。透传而非让 api 层摸 store，与同组其他条目一致；api 侧负责把探针
     // 异常隔离成 unknown，不在这里吞。
     vectorDimensionState: (dimension) => store.vectorDimensionState(dimension),
+    // 整包透传：store.list 的每个口径（excludeTypes / excludeImported / includeArchived…）
+    // 都从这里过去，service 侧不再枚举一遍——枚举就是第二份口径表，加一个键就要改两处，
+    // 漏改的那处静默失效。政策轴一律走这里的查询参数，不许退回调用方的 .filter：
+    // LIMIT 先生效的话，被丢掉的行照样吃掉窗口名额。前例是同文件 syncMirror 的那条注释
+    // （src/service.js:2247，document 轴改由 excludeTypes 在 LIMIT 之前排除），
+    // 同一取舍的另两次是 #230 与 #471。
     list: (o) => store.list(o),
     all: () => store.all(),
     count: (type, opts) => store.count(type, opts),

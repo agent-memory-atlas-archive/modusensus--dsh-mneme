@@ -11,6 +11,11 @@ import {
   normalizeScopeStateState,
   normalizeScopeStateValue
 } from "./scope-state.js";
+// 外来行的**唯一**定义住在 memory-source.js，这里只取那个常量：store 的查询口径与
+// service/sleep 的 isImportedRow 必须是同一个字符串，自己再拼一份字面量就是第二个口径，
+// 而「本库不巩固别人导入的原文」这条契约正靠它只有一个人说得出口。
+// 依赖方向 store → memory-source 单向（该模块不 import 任何东西），不构成环。
+import { IMPORTED_SOURCE } from "./memory-source.js";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS memories (
@@ -1635,7 +1640,7 @@ export function createStore(path) {
     return rows.map(toRow);
   }
 
-  function list({ type, excludeTypes = null, limit = 50, offset = 0, order = "importance", includeForgotten = false, includeArchived = false, onlyArchived = false, depositedOnly = false, minImportance = null, source = null, updatedFrom = null, updatedTo = null, occurredFrom = null, occurredTo = null, visibility = null } = {}) {
+  function list({ type, excludeTypes = null, excludeImported = false, limit = 50, offset = 0, order = "importance", includeForgotten = false, includeArchived = false, onlyArchived = false, depositedOnly = false, minImportance = null, source = null, updatedFrom = null, updatedTo = null, occurredFrom = null, occurredTo = null, visibility = null } = {}) {
     const clauses = [];
     const params = [];
     if (type) {
@@ -1658,6 +1663,17 @@ export function createStore(path) {
     if (source) {
       clauses.push("source = ?");
       params.push(source);
+    }
+    // excludeImported：「本库不巩固别人导入的原文」这条政策轴的查询层口径。
+    // 它必须站在 LIMIT 之前而不是跟着 .filter 走在后面——与上面 excludeTypes 那条同理由
+    // （#230）：先截断后丢弃的话，被丢掉的外来行照样吃掉窗口名额，导入过包的库里
+    // 模式扫描池会因此饿到 sleepPatternMinMemories 以下而静默跳过。
+    // `source IS NULL OR` 那一支不是防御性冗余，是必填：本方行的 source 恒为 NULL，
+    // 而 SQL 里三值逻辑让 `NULL <> IMPORTED_SOURCE` 求值为 NULL（不是 true），只写后者的
+    // 话本方行整批消失。opt-in 默认关，其余调用方的读数逐字节不变。
+    if (excludeImported) {
+      clauses.push("(source IS NULL OR source <> ?)");
+      params.push(IMPORTED_SOURCE);
     }
     // Optional updated_at closed range (date-only "to" is normalized to the
     // end of that day). Same helper as count() so total matches the rows.

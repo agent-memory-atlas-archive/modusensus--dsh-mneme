@@ -106,12 +106,20 @@ test("the saveWithDedupe choke point keeps both guard sites", () => {
 
 // 池子清单（B2）。巩固、sleep 降级、模式扫描、关系补全、整理并入读的是各自的**行池**，
 // 不经过汇流口，而且池子里就有 setArchived / demoteToSummary 这种不经 saveWithDedupe
-// 的直接改行动作——堵了汇流口不等于堵了它们，所以每处都要单独挂谓词、也要单独锁住。
+// 的直接改行动作——堵了汇流口不等于堵了它们，所以每处都要单独挂守卫、也要单独锁住。
 // 为什么用字面量清单而不是给九个池子各写一条行为用例：多数池子挂在 LLM 路由后面
 // （dream/sleep 主流程要全套打桩才跑得起来），而行为用例永远测不到「将来新增的第十处」——
 // 清单是死的，加池子必须在这里加一行，漏挂当场红。代价是它也会为行为等价的改写转红
 // （谓词挪进 helper、变量改名），那是「实现漂了，锁跟着走」，不是误报（AGENTS.md 自查 8）。
 // service.js 不在清单里：汇流口那两处由上面的 SERVICE_SITES 锁，同一文件不该有两份清单。
+//
+// 清单里两条 needle 的形状不同，是刻意的：八处池子挂的是谓词调用 `!isImportedRow(m)`，
+// 模式扫描那一处（sleep.js 的 phasePatterns）挂的是查询旗标 `excludeImported: true`——
+// 它的外来行判据下推进了 store.list 的 WHERE，留在 LIMIT 之后过滤的话，被丢掉的外来行
+// 照样吃掉窗口名额（池子会饿到 sleepPatternMinMemories 以下而静默跳过，见 #230/#471 的
+// 同一取舍）。旗标背后是同一个 IMPORTED_SOURCE（store.js 从 memory-source.js import，
+// 不自己写字面量），所以守卫没有变松：谓词只有一份定义，只是这一处的**位置**换了。
+// 位置对不对这件事字面量锁证明不了，由文件末尾那条窗口用例（行为锁）证明。
 const POOL_SITES = [
   ["src/dream.js", "const memories = withoutPaused(service, service.all().filter((m) => !isImportedRow(m) && !m.archived && m.type !== \"summary\" && m.type !== \"document\"));"],
   ["src/dream.js", "const inputs = withoutPaused(service, service.all().filter((m) => !isImportedRow(m) && !m.archived && !m.forgotten && m.type !== \"summary\" && m.type !== \"document\"));"],
@@ -119,7 +127,7 @@ const POOL_SITES = [
   ["src/dream.js", "const summaryAll = withoutPaused(service, service.all().filter((m) => !isImportedRow(m) && !m.archived && m.type !== \"summary\" && m.type !== \"document\"));"],
   ["src/dream/sleep.js", "const memories = withoutPaused(service, service.all().filter((m) => !isImportedRow(m) && !m.archived && !m.forgotten && m.type !== \"summary\" && m.type !== \"document\"));"],
   ["src/dream/sleep.js", "for (const m of withoutPaused(service, service.all().filter((m) => !isImportedRow(m)))) {"],
-  ["src/dream/sleep.js", "!isImportedRow(m) && !m.archived && m.type !== \"summary\" && m.type !== \"pattern\""],
+  ["src/dream/sleep.js", "excludeImported: true"],
   ["src/dream/sleep.js", "const memories = withoutPaused(service, service.all().filter((m) => !isImportedRow(m) && !m.archived && !m.forgotten));"],
   ["src/organize.js", "store.list({ type: candidate.type, limit: null }).filter((m) => !isImportedRow(m) && !m.archived && scopeMatches(m, candidate))"]
 ];
@@ -127,7 +135,7 @@ const POOL_SITES = [
 test("every row pool that can rewrite or archive is guarded", () => {
   for (const [file, needle] of POOL_SITES) {
     assert.ok(readFileSync(resolve(here, "..", file), "utf8").includes(needle),
-      `${file} must guard its row pool with isImportedRow: ${needle.slice(0, 60)}`);
+      `${file} must guard its row pool against imported rows (predicate or query flag): ${needle.slice(0, 60)}`);
   }
 });
 
@@ -233,6 +241,69 @@ test("registerDocument's evidence absorb never archives a foreign row", async ()
     assert.equal(out.evidence_kept, 2, "the citation itself stays honest: the foreign id remains cited by the document");
     assert.equal(out.evidence_skipped, 1, "the skipped count must be visible, not silently dropped");
     assert.equal(out.evidence_archived, 1, "exactly the one own row got absorbed");
+  } finally {
+    try { store.close(); } catch { /* closed */ }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// 模式扫描池的行为锁（本文件唯一一条「窗口」用例，与 POOL_SITES 那条是两件事）。
+// 清单锁得住「谓词挂在这一处」，锁不住「谓词站在 LIMIT 的哪一侧」：旧写法
+// `service.list({ limit: 200 }).filter((m) => !isImportedRow(m) …)` 先截断后丢弃，
+// 被丢掉的外来行照样吃掉窗口名额。外来行比本方行新时，整扇窗口能被它们占满——
+// 池子饿到 sleepPatternMinMemories 以下，模式扫描**静默跳过**（不报错、不留痕），
+// 而这恰好是导入过包的那些库的常态。下推到查询层之后名额才真正留给会被扫的行
+// （同一取舍：#230 的 document 轴、#471 的暂停轴、src/service.js:2247 的镜像闸）。
+// 摘掉 store 的 excludeImported 那一条 clause，或把过滤退回 .slice 之后，本条当场红。
+test("the pattern-scan pool drops foreign rows before the LIMIT, not after", () => {
+  const dir = mkdtempSync(join(tmpdir(), "dsh-mneme-imported-window-"));
+  const store = createStore(join(dir, "memory.db"));
+  try {
+    const service = createService({ store, mirror: null, config: {} });
+    // 落行顺序就是时间顺序：store.js 的 nowIso() 单调递增（同毫秒也 +1ms），所以后落的
+    // 那批必然更新。list 的默认序是 importance DESC → updated_at DESC，两边同权 3，
+    // 于是外来行整体顶在窗口最前面。这就是「窗口被占满」那台机器，不用人为调时钟。
+    const mine = [
+      store.save({ type: "decision", title: "我们自己的决定甲", content: "本方正文甲", tags: [] }),
+      store.save({ type: "decision", title: "我们自己的决定乙", content: "本方正文乙", tags: [] }),
+      store.save({ type: "preference", title: "我们自己的偏好", content: "本方正文丙", tags: [] })
+    ];
+    const ownIds = new Set(mine.map((m) => m.id));
+    const FOREIGN = 8;
+    const foreignIds = new Set();
+    for (let i = 0; i < FOREIGN; i++) {
+      const f = store.save({
+        type: "decision", title: `对面的决定 ${i}`, content: "对面的原文", tags: [],
+        source: IMPORTED_SOURCE, share_pack_id: "pack-window", share_external_id: `window-ext-${i}`
+      });
+      foreignIds.add(f.id);
+    }
+
+    // 修复前的形状先在这里饿死：窗口 3 格全被外来行占掉，过滤后是空池。
+    // 这条断言不是在测新代码，是把「静默跳过」那一幕钉成看得见的失败——没有它，
+    // 下面那条绿只证明「旗标能用」，不证明「不加旗标真的会饿」。
+    const starved = service.list({ limit: 3, includeForgotten: false })
+      .filter((m) => !isImportedRow(m) && !m.archived && m.type !== "summary" && m.type !== "pattern");
+    assert.equal(starved.length, 0, "precondition: after-LIMIT filtering leaves the pattern pool empty");
+
+    // 查询层口径（sleep phasePatterns 现在用的形状）：名额一个都不给外来行。
+    const pool = service.list({ limit: 3, includeForgotten: false, excludeImported: true });
+    assert.equal(pool.length, 3, "the window is full of our own rows: no foreign row consumed a slot");
+    assert.ok(pool.every((m) => ownIds.has(m.id)), "every slot in the window is ours");
+    // 本方行 source 恒为 NULL（store.save 不写该格），所以 clause 必须是
+    // `(source IS NULL OR source <> ?)`：漏掉 IS NULL 那一支，SQLite 里 NULL <> 'imported'
+    // 求值为 NULL → 本方行整批消失，池子中门全空。上面两条断言一起把这一支钉住。
+    assert.ok(pool.every((m) => m.source === null || m.source === undefined),
+      "the kept rows are the NULL-source ones: the clause must not rely on source <> alone");
+
+    // 旗标是 opt-in：不给的时候默认口径逐字节不变（其余调用方照旧看得见外来行）。
+    const unflagged = service.list({ limit: 3, includeForgotten: false });
+    assert.ok(unflagged.some((m) => foreignIds.has(m.id)),
+      "without the flag foreign rows stay visible — the option must not leak into the default path");
+    assert.equal(service.list({ limit: null }).length, mine.length + FOREIGN,
+      "default full scan still returns every row, imported included");
+    assert.equal(service.list({ limit: null, excludeImported: true }).length, mine.length,
+      "with the flag only our own rows remain");
   } finally {
     try { store.close(); } catch { /* closed */ }
     rmSync(dir, { recursive: true, force: true });
