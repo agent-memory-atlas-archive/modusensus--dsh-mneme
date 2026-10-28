@@ -214,6 +214,42 @@ test("CLI 的跳过清单：含凭据那行不给标题，终端要写得像「�
   });
 });
 
+// 那句「跳过清单已截断」的判据。旧写法拿**清单长度**当证据（`skip_list.length >= 50`），
+// 而清单长度是被服务端截过的读数：恰好 50 条被跳时清单是全量的，那句话在此刻撒谎，
+// 而 50 这个数在 CLI 里是抄来的第二份口径（水位一改就错）。真证据一直在场：
+// skipped 的六个计数走全量。判据因此是「账比清单长」，与面板 ShareReport 同一条
+// （lib/client.js 的 totalSkipped > list.length）。
+// 两格各咬一个方向，缺一不可：
+//   ① 恰好 50（清单=账=水位）→ 不许报截断。旧判据在这一格红，本条就是它的行为锁；
+//   ② 55 条被跳（账 55 > 清单 50）→ 必须报。这一格旧判据也报，防的是「把提示干脆删掉」
+//      冒充修复——删掉提示的人只会看见这一条红。
+test("CLI 那句「已截断」由六个计数之和判定，恰好等于水位时不报", { timeout: 60000 }, async () => {
+  await withPlane(async (ctx) => {
+    // 水位住在服务端（src/share.js 的 SHARE_SKIP_LIST_MAX），这里只从它自己的答复里读，
+    // 不在测试里再抄一个 50：抄了就又是两份口径，测试会跟着水位一起漂。
+    const shareText = readFileSync(resolve(dirname(CLI), "..", "src", "share.js"), "utf8");
+    const cap = Number(shareText.match(/SHARE_SKIP_LIST_MAX = (\d+)/)?.[1]);
+    assert.ok(Number.isInteger(cap) && cap > 0, "src/share.js 的水位要读得出来");
+    const archivedRows = (n, tag) => Array.from({ length: n }, (_, i) =>
+      row({ id: `${tag}${i}`, type: "decision", title: `归档行 ${tag}${i}`, content: `正文 ${tag}${i}`, archived: 1 }));
+
+    // ①：恰好到水位——清单全量，没有东西被截掉。
+    ctx.plane.use(archivedRows(cap, "a"));
+    const atCap = await runCli(ctx, ["share", "--dry-run", ...ctx.auth]);
+    assert.equal(atCap.code, 0, atCap.stderr);
+    assert.match(atCap.stdout, new RegExp(`跳过: 归档 ${cap}`), "计数要走全量");
+    assert.ok(!atCap.stdout.includes("跳过清单已截断"),
+      `清单长度恰好等于水位时不许报截断，got: ${atCap.stdout}`);
+
+    // ②：账比清单长——这一刻清单确实被截了，必须说。
+    ctx.plane.use(archivedRows(cap + 5, "b"));
+    const overCap = await runCli(ctx, ["share", "--dry-run", ...ctx.auth]);
+    assert.equal(overCap.code, 0, overCap.stderr);
+    assert.match(overCap.stdout, new RegExp(`跳过: 归档 ${cap + 5}`), "计数仍是全量");
+    assert.match(overCap.stdout, /跳过清单已截断，计数仍为全量/, "账比清单长时这句提示必须在");
+  });
+});
+
 test("CLI 报得出包内折叠：included 少的那几条要有去处", { timeout: 60000 }, async () => {
   await withPlane(async (ctx) => {
     // 同标题、同正文、同内容锚而 scope 不同的两条在库里是两条合法记忆，在包里共用一把
@@ -363,11 +399,19 @@ test("CLI share --type/--alias/--tag：按数据面认得的形状上线", { tim
 });
 
 // CLI 与 src/share.js 之间没有 import 关系（bin/cli.mjs 是零依赖 HTTP 客户端，那条理由
-// 写在它自己的注释里），所以「六个跳过原因键」和「50 的截断数」在 CLI 侧是抄过去的字面量。
-// 抄的东西不会自己报错：share.js 改一个键名，CLI 就把那一档读成 0（跳过原因在终端上凭空
-// 少一类）；改了上限，那句「跳过清单已截断」就打错格数。这条静态锁是两份文本之间唯一的
-// 接缝——它不重跑逻辑，只比对字面量集合与那个数。
-test("CLI 抄过去的原因键与截断数跟 src/share.js 同源", () => {
+// 写在它自己的注释里），所以「六个跳过原因键」在 CLI 侧是抄过去的字面量。抄的东西不会
+// 自己报错：share.js 改一个键名，CLI 就把那一档读成 0（跳过原因在终端上凭空少一类）。
+// 这条静态锁是两份文本之间唯一的接缝——它不重跑逻辑，只比对字面量集合。
+//
+// 「与 50 的截断数同源」那一半是**换掉**而不是删掉：判据从「清单长度到 50」改成「六个
+// 计数之和 > 清单长度」之后，CLI 侧不再有那个数，水位只住在 src/share.js 一处（面板侧
+// lib/client.js 的 ShareReport 同一条取舍，那里也从不写 50）。没有抄本，就没有可比对的
+// 接缝——所以这里改锁两件方向相反的事：
+//   ① CLI 不许再出现截断阈值：`).length >= 数字` 那个形状本身就是「恰好一水位就误报」的
+//      旧缺陷，数值对不对这件事永远锁不住，只能靠不出现；
+//   ② 那句提示必须由「账比清单长」判定。
+// 判据真不真由上面那条行为用例真跑 CLI 证明（恰好到水位不报、超水位才报），这里只锁形状。
+test("CLI 抄过去的原因键跟 src/share.js 同源，且不硬写截断水位", () => {
   const shareText = readFileSync(resolve(dirname(CLI), "..", "src", "share.js"), "utf8");
   const cliText = readFileSync(CLI, "utf8");
 
@@ -380,10 +424,14 @@ test("CLI 抄过去的原因键与截断数跟 src/share.js 同源", () => {
   assert.equal(cliKeys.length, 6, `cli.mjs 的 named 应有六档，抓到 ${cliKeys.length} 个：${cliKeys}`);
   assert.deepEqual(cliKeys, shareKeys, "CLI 的档位名必须与 report.skipped 的键逐字同序");
 
-  const shareMax = Number(shareText.match(/SHARE_SKIP_LIST_MAX = (\d+)/)?.[1]);
-  // CLI 那一侧的形状是 `if ((r.skip_list ?? []).length >= 50)`：抓 `).length >= N`。
-  const cliCap = Number(cliText.match(/\)\.length >= (\d+)/)?.[1]);
-  assert.ok(Number.isInteger(shareMax) && shareMax > 0, "share.js 的截断常量要读得出来");
-  assert.ok(Number.isInteger(cliCap) && cliCap > 0, "cli.mjs 的截断格数要读得出来");
-  assert.equal(cliCap, shareMax, "CLI 那句「已截断」的格数必须等于 SHARE_SKIP_LIST_MAX");
+  // ①：那六个键在「求和那一行」也得原样出现一次——判据读的是同一本账，不是第七份口径。
+  const censusBlock = cliText.match(/const skippedTotal = \[([\s\S]*?)\]/)?.[1] ?? "";
+  const censusKeys = [...censusBlock.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  assert.deepEqual(censusKeys, shareKeys, "截断判据的六个计数键必须与 report.skipped 同序同源");
+  assert.ok(/\)\.length\s*>=\s*\d+/.test(cliText) === false,
+    "cli.mjs 不许再硬写截断水位：那个数字只住在 src/share.js 的 SHARE_SKIP_LIST_MAX");
+
+  // ②：提示由「账比清单长」判定，与面板同一条判据。
+  assert.ok(cliText.includes("skippedTotal > (r.skip_list ?? []).length)"),
+    "那句「跳过清单已截断」必须由六个计数之和与清单长度之比来判定");
 });

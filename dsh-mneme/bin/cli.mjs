@@ -753,10 +753,12 @@ function printShare(pack, { dryRun }) {
     // 后一种是「有意不给」，不是「数据缺失」。
     console.log(`    - [${item.reason}] ${item.title || '（标题不外发）'}`);
   }
-  // 50 是 src/share.js 的 SHARE_SKIP_LIST_MAX：CLI 是零依赖 HTTP 客户端，不 import
-  // 服务端模块（同 MEMORY_TYPES 那条理由），所以这里写字面量。截的只是清单，skipped
-  // 的六个计数走全量——不写这句她会以为全场只跳了 50 条。
-  if ((r.skip_list ?? []).length >= 50) console.log('    … 跳过清单已截断，计数仍为全量');
+  // 判据用「六个计数之和 > 清单长度」而不是「清单等于 50」：前者是「账比清单长」这个事实本身，
+  // 恰好 50 条被跳时后者会误报截断（面板侧同一条判据）。50 这个数不在这里出现，
+  // 水位改了判据仍然对。
+  const skippedTotal = ['archived', 'forgotten', 'readonly_type', 'excluded_type', 'blank_or_noise', 'sensitive']
+    .reduce((n, k) => n + (r.skipped?.[k] ?? 0), 0);
+  if (skippedTotal > (r.skip_list ?? []).length) console.log('    … 跳过清单已截断，计数仍为全量');
   if (dryRun) console.log(`  没写文件：加 --out <路径> 才会落盘`);
   else console.log(`  发给对方即可，她用自己的 ${CLI_NAME} receive 吃进去`);
 }
