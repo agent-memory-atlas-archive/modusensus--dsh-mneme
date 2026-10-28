@@ -547,13 +547,15 @@ dsh plugin --profile web add "C:/path/to/modusensus-dsh-mneme-0.9.0.tgz"
 |--------|------|
 | `full` | 语义档：查询嵌入成功，且与库里的向量维度可比 |
 | `degraded` | 规则档：语义路本次不可用（原因见日志） |
-| `unknown` | 语义路未启用（`q` 为空）——那不是降级，但也不宣称 `full` |
+| `unknown` | 语义路未启用（`q` 为空），或判不出来（维度探针没跑成 / 一条向量都读不出）——那不是降级，但也不宣称 `full` |
 
-**两套消费者的分工：** `tier` 是**响应读数**，给调用方——三态、fail-closed（判不出来报 `unknown`，不报 `full`），用于在集成侧告警或切换策略。降级的**具体原因**是**日志读数**，给运维——走 daemon 的 stderr（`dsh-mneme: /context degraded to the rule tier (<reason>)`），不进响应体。原因枚举五值，互不吞并：`embed-unavailable`（无可用嵌入接口）/ `embed-empty`（返回了空或非数组向量）/ `embed-timeout`（接口挂起，被超时护栏按缺失处理）/ `embed-error`（接口抛错）/ `embed-dimension`（接口成功了，但维度与库里已有向量不一致）。
+**两套消费者的分工：** `tier` 是**响应读数**，给调用方——三态、fail-closed（判不出来报 `unknown`，不报 `full`），用于在集成侧告警或切换策略。降级的**具体原因**是**日志读数**，给运维——走 daemon 的 stderr（`dsh-mneme: /context degraded to the rule tier (<reason>)`），不进响应体。原因枚举六值，互不吞并（成例是「修法不同就分开」）：`embed-unavailable`（无可用嵌入接口：embedder 对象在，上面没有 `embedSingle` / `embed`）/ `embed-empty`（返回了空或非数组向量）/ `embed-timeout`（接口挂起，被超时护栏按缺失处理）/ `embed-error`（接口抛错）/ `embed-dimension`（接口成功了，但库里没有一条维度相符的活跃向量）/ `no-embedder`（压根没装配 embedder——daemon `--embed off`、lightMode、宿主未装配；**这是预期态，不是故障**）。六值的唯一真源是 `src/api-standalone.js` 导出的 `CONTEXT_DEGRADE_REASONS`，契约测试从它派生断言集合。
 
-`embed-dimension` 值得单说：它是「拿到了向量却不可比」——`searchVector` 对维度不符的行直接跳过，不抛错、只是命中为零，于是召回静默退回关键词/规则档，而嵌入侧一切正常。修法是重建索引，不是查端点，所以它必须和前四个分开。
+`embed-dimension` 值得单说：它是「拿到了向量却不可比」——`searchVector` 对维度不符的行直接跳过，不抛错、只是命中为零，于是召回静默退回关键词/规则档，而嵌入侧一切正常。修法是重建索引，不是查端点，所以它必须和前四个分开。`no-embedder` 与前四个也分开：前者（`embed-unavailable`）是适配器坏了、要修代码，后者是语义路没开、要把嵌装扮上或开起来，主体与动作都不同；并成一个值会让按 `embed-unavailable` 告警的面板对每个轻量模式安装报警。用词则与宿主面 `/api/dsh-mneme/semantic` 的 `reason` 对齐——同一个物理条件在两个面叫同一个名字（那边是另一套枚举、另一个消费者，别顺手统一）。
 
-**预算：** 判档不是免费的。`q` 非空且装配了 embedder 时，一次 `/context` 真的会起一次查询嵌入（一次网络往返 + `embedTimeoutMs` 的超时窗口）——档位要回答的正是「这次嵌入成不成」。这里没有复用 `/health` 的数据源：standalone 的 `/health` 只回 `{ok:true}`，而 `embeddingDimensionBreakdown` 是宿主面的一次全表扫（每行 JSON.parse 一个向量），按请求跑会把语义路成本翻倍。维度探针因此走 `store.storedEmbeddingDimension()`——只读一行，O(1)。
+**`unknown` 之下的判档故障另有一条 warn：** `unknown` 有三个生产者（空 `q` / 维度探针没跑成 / 有行却一条向量都读不出来），响应体只有 `tier` 一个键、分不出它们，而调用方对 `unknown` 的策略常常是「不告警」——所以判不出来的情形会另打一行 `dsh-mneme: /context tier left unknown: <what>`（探针抛错 / 没有可读的向量可比）。**它不是上面那六值的一员**（`tier` 不是 `degraded`，没有降级原因可记），运维程序不要按原因枚举解析它。
+
+**预算：** 判档不是免费的。`q` 非空且装配了 embedder 时，一次 `/context` 真的会起一次查询嵌入（一次网络往返 + `embedTimeoutMs` 的超时窗口）——档位要回答的正是「这次嵌入成不成」。这里没有复用 `/health` 的数据源：standalone 的 `/health` 只回 `{ok:true}`，而 `embeddingDimensionBreakdown` 是宿主面的一次全表扫（每行 JSON.parse 一个向量），按请求跑会把语义路成本翻倍。维度探针因此走 `service.vectorDimensionState()`——**按匹配短路的存在性判据**（有没有一条活跃向量的维度等于查询维度），不是「读一行的维度」：混合维度库里 `LIMIT 1` 会抽错维（明明有可比的向量却报 `degraded`），首条恰好解析失败时又会漏报成 `full`。成本是一次无 `LIMIT` 的全 id 扫描 + 按匹配短路的解析：全库同维度（常态）时循环第一行就返回，只解析 1 个向量；只有一条都不匹配时才走完整个循环，而那正是要报 `degraded` 的情形，值得。解析复用 `getParsedEmbedding` 的缓存，缓存热不热取决于 `injectCandidates` 是否真的走了 vectorIndex 分支。
 
 ### curl 示例
 

@@ -2670,10 +2670,14 @@ export function createService({ store, mirror, config, onWrite, logger, document
     // passthrough 形状与 embeddedCount 同款，api 层不直接摸 store。
     embeddingModelBreakdown: () => store.embeddingModelBreakdown(),
     embeddingDimensionBreakdown: () => store.embeddingDimensionBreakdown(),
-    // #383：O(1) 的维度探针（读一行，不扫表），供 /context 判「维度不符」。
-    // 与上面那个全表扫的 breakdown 是两件事：一个是状态页的完整分布，一个是
-    // 每请求用得起的布尔信号。透传而非让 api 层摸 store，与同组其他条目一致。
-    storedEmbeddingDimension: () => store.storedEmbeddingDimension(),
+    // #383：维度探针，供 /context 判「库里有没有一条活跃向量与查询同维」。注意
+    // 它**不再是**「读一行的维度」（那个判据在混合维度库里两个方向都错，见 store.js
+    // vectorDimensionState 的注释）：换成存在性判据后成本是「一次全 id 扫描 + 按匹配
+    // 短路的解析」，同维度健康库只解析 1 个向量，只有要报 degraded 时才走完全表。
+    // 与上面那个全表扫的 breakdown 仍是两件事：一个是状态页的完整分布，一个是每请求
+    // 用得起的判据。透传而非让 api 层摸 store，与同组其他条目一致；api 侧负责把探针
+    // 异常隔离成 unknown，不在这里吞。
+    vectorDimensionState: (dimension) => store.vectorDimensionState(dimension),
     list: (o) => store.list(o),
     all: () => store.all(),
     count: (type, opts) => store.count(type, opts),
