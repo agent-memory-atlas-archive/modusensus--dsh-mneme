@@ -118,13 +118,32 @@ export function suggestRetirements(pipeline, { runs = [], now = Date.now(), obse
   const violationSeen = new Set();
   for (const run of runs || []) {
     const doneIds = new Set((run.steps || []).filter((s) => s && !s.skipped && !s.detoured).map((s) => s.id));
+    // #461：一条 run 的判别键分两类，两类永不相撞。
+    //
+    // at 存在（合法账本的唯一形态——normalizeRun 在写侧强制必填）走 `at:<值>`。
+    // at 缺失（读侧被独立喂进非法形状，或未来写契约放宽）走 `anon:<内容指纹>`：
+    // by + triggeredBy + 按序的 step id。用**内容**而不是数组索引，是因为
+    // violationSeen 跨整本账本共享，而索引只在「本次遍历的数组顺序」里唯一——
+    // 同一条 run 在账本里出现两次时，索引会让它的同一条违规被记成两条，
+    // 那正是本条要修的那类「键塌缩」的反面形态（#507 评审）。
+    //
+    // 评审里希望中间加一层 run.id，但 normalizeRun（src/pipeline-runs.js:187）
+    // 只产出 { at, by, triggeredBy, steps }，没有 id 字段，而 suggestRetirements
+    // 收到的已经是归一化后的 run；补 id 要改写侧契约，不属这条防御深度问题。
+    // 内容指纹是同一意图下不需要动 schema 的等价物。
+    //
+    // 两类键必须带不同前缀：否则「第 0 条缺 at」与「另一条 at 字面量正好是
+    // #0」会生成同一个键，后一条 violation-precedence 被静默吞掉。
+    const runKey = isNonEmptyString(run.at)
+      ? `at:${run.at}`
+      : `anon:${run.by ?? ""}|${run.triggeredBy ?? ""}|${(run.steps || []).map((s) => s?.id ?? "").join(",")}`;
     for (const step of pipeline.steps) {
       if (!doneIds.has(step.id) || !Array.isArray(step.needs)) continue;
       for (const need of step.needs) {
         if (doneIds.has(need)) continue;
         const had = (run.steps || []).some((s) => s && s.id === need);
         if (had) continue; // 前置做过（哪怕是 skipped）就不算违规
-        const vk = `${run.at ?? ""}|${step.id}|${need}`;
+        const vk = `${runKey}|${step.id}|${need}`;
         if (violationSeen.has(vk)) continue;
         violationSeen.add(vk);
         // 同一步对不同前置各报一条：修图的人需要知道**断在哪条边**上
